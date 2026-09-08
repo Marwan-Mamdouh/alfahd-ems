@@ -1,0 +1,19 @@
+{
+  "name": "alfahd-ems",
+  "private": true,
+  "packageManager": "pnpm@11.26.0",
+  "scripts": {
+    "api:dev": "pnpm --filter @alfahd/api start:dev",
+    "api:build": "pnpm --filter @alfahd/api build",
+    "types:build": "pnpm --filter @alfahd/types build",
+    "types:dev": "pnpm --filter @alfahd/types dev",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "lint:fix": "pnpm -r lint:fix",
+    "test": "pnpm -r test"
+  },
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=9.0.0"
+  }
+}

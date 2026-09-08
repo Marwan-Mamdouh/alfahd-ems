@@ -1,0 +1,12 @@
+# Default: Marwan reviews everything not otherwise specified
+*                        @Marwan-Mamdouh
+
+# Backend and shared types — Marwan is sole owner
+apps/api/                @Marwan-Mamdouh
+packages/types/          @Marwan-Mamdouh
+docker-compose.yml       @Marwan-Mamdouh
+pnpm-workspace.yaml      @Marwan-Mamdouh
+.github/                 @Marwan-Mamdouh
+
+# Frontend — frontend dev owns this (uncomment when web app is added)
+# apps/web/              @FRONTEND_DEV_GITHUB_USERNAME

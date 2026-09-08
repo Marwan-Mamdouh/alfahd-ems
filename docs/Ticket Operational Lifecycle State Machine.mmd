@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Pending: Ticket Created (Customer Service)
+    
+    Pending --> Assigned: Assigned to Technician
+    Assigned --> InProgress: Technician Starts Task (Mobile App)
+    Assigned --> Pending: Reassigned / Unassigned
+    
+    InProgress --> Completed: Task Finished + Serial Verified
+    InProgress --> Cancelled: Customer Cancelled / Invalid Issue
+    
+    Completed --> [*]
+    Cancelled --> [*]

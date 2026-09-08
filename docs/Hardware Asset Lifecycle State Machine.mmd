@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> InWarehouse: Received from Supplier
+    
+    InWarehouse --> WithTechnician: Dispatch / Assign to Tech
+    WithTechnician --> InWarehouse: Returned Unused to Stock
+    
+    WithTechnician --> InstalledAtCustomer: Installation Completed
+    InstalledAtCustomer --> WithTechnician: Customer Uninstallation / Fault Retrieval
+    
+    WithTechnician --> DefectiveStock: Marked Damaged / Broken
+    DefectiveStock --> [*]: RMA / Scrapped

@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    actor WS as Warehouse Staff
+    participant API as Backend API
+    participant DB as Database
+    actor TECH as Technician App
+
+    WS->>API: Initiate Transfer (Router SN, Technician ID)
+    API->>DB: Validate Router Status ("IN_WAREHOUSE")
+    DB-->>API: Validated
+    API->>DB: Create Transfer Record (Status: "PENDING_ACCEPTANCE")
+    API-->>TECH: Send Push Notification (Pending Asset Transfer)
+    
+    TECH->>API: Accept Hardware Transfer (Scan QR / Confirm)
+    API->>DB: Update Router (holder_id = TECH.id, status = "WITH_TECH")
+    API->>DB: Update Transfer Record (Status: "ACCEPTED")
+    API-->>WS: Transfer Complete Confirmation

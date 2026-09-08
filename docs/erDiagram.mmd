@@ -1,0 +1,127 @@
+erDiagram
+    ROLE ||--o{ USER : has
+    USER ||--o{ ATTENDANCE : logs
+    USER ||--o{ TICKET : assigned_to
+    USER ||--o{ TICKET : created_by
+    USER ||--o{ TECHNICIAN_LOCATION : broadcasts
+    USER ||--o{ WAREHOUSE : manages
+    WAREHOUSE ||--o{ INVENTORY_STOCK : stores
+    PRODUCT ||--o{ INVENTORY_STOCK : tracked_in
+    WAREHOUSE ||--o{ INVENTORY_MOVEMENT : logs
+    PRODUCT ||--o{ INVENTORY_MOVEMENT : tracks
+    USER ||--o{ INVENTORY_MOVEMENT : records
+    CUSTOMER ||--o{ TICKET : raises
+    CUSTOMER ||--o{ ROUTER : uses
+    WAREHOUSE ||--o{ ROUTER : holds
+    USER ||--o{ ROUTER : carries
+    ROUTER ||--o{ ROUTER_HISTORY : generates
+
+    ROLE {
+        uuid id PK
+        string name "Admin, CS, Warehouse, Tech"
+        json permissions
+    }
+
+    USER {
+        uuid id PK
+        uuid role_id FK
+        string name
+        string email
+        string phone
+        string password_hash
+        string department
+        string status "Active/Inactive"
+    }
+
+    ATTENDANCE {
+        uuid id PK
+        uuid user_id FK
+        datetime check_in
+        datetime check_out
+        decimal total_hours
+        string status "Present, Late, Absent"
+    }
+
+    TECHNICIAN_LOCATION {
+        uuid id PK
+        uuid user_id FK
+        decimal lat
+        decimal lng
+        boolean is_online
+        datetime last_updated
+    }
+
+    CUSTOMER {
+        uuid id PK
+        string name
+        string phone
+        string address
+        string service_type
+        string ip_address "Unique"
+        datetime created_at
+    }
+
+    PRODUCT {
+        uuid id PK
+        string name
+        string sku
+        string description
+    }
+
+    WAREHOUSE {
+        uuid id PK
+        string name
+        string location
+        uuid manager_id FK
+    }
+
+    INVENTORY_STOCK {
+        uuid id PK
+        uuid warehouse_id FK
+        uuid product_id FK
+        int quantity
+        int min_alert_level
+    }
+
+    INVENTORY_MOVEMENT {
+        uuid id PK
+        uuid product_id FK
+        uuid warehouse_id FK
+        uuid logged_by FK
+        string type "Inbound, Outbound, Return"
+        int quantity
+        datetime created_at
+    }
+
+    ROUTER {
+        uuid id PK
+        string model
+        string serial_number "Unique"
+        string status "In_Warehouse, With_Tech, Installed, Defective"
+        uuid warehouse_id FK "Nullable"
+        uuid technician_id FK "Nullable"
+        uuid customer_id FK "Nullable"
+    }
+
+    ROUTER_HISTORY {
+        uuid id PK
+        uuid router_id FK
+        uuid from_entity_id
+        uuid to_entity_id
+        uuid logged_by FK
+        string action "Assigned_To_Tech, Installed, Returned"
+        datetime created_at
+    }
+
+    TICKET {
+        uuid id PK
+        uuid customer_id FK
+        string type "Installation, Tech Issue, Complaint, Maintenance"
+        text description
+        string priority "Low, Medium, High"
+        uuid assigned_technician_id FK
+        string status "Pending, Assigned, In_Progress, Completed"
+        uuid created_by_id FK
+        datetime created_at
+        datetime completed_at
+    }

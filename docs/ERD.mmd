@@ -1,0 +1,55 @@
+erDiagram
+    USERS ||--o{ TICKETS : "created_by / assigned_to"
+    USERS ||--o{ ATTENDANCE : "logs"
+    USERS ||--o{ ROUTERS : "currently_holds"
+    WAREHOUSES ||--o{ ROUTERS : "stores"
+    CUSTOMERS ||--o{ ROUTERS : "installed_at"
+    CUSTOMERS ||--o{ TICKETS : "issues_for"
+    TICKETS ||--o{ TICKET_LOGS : "tracks"
+    ROUTERS ||--o{ ROUTER_TRANSFERS : "history"
+
+    USERS {
+        uuid id PK
+        string full_name
+        string role "ADMIN | WAREHOUSE | CS | TECHNICIAN"
+        string phone
+        boolean is_active
+    }
+
+    ROUTERS {
+        uuid id PK
+        string serial_number UK
+        string model
+        string status "IN_WAREHOUSE | WITH_TECH | INSTALLED | DEFECTIVE"
+        uuid warehouse_id FK
+        uuid current_holder_id FK
+        uuid customer_id FK
+    }
+
+    CUSTOMERS {
+        uuid id PK
+        string name
+        string phone
+        string address
+        string ip_address
+    }
+
+    TICKETS {
+        uuid id PK
+        string ticket_number UK
+        string type "INSTALLATION | TECHNICAL | COMPLAINT | MAINTENANCE"
+        string priority "LOW | MEDIUM | HIGH | URGENT"
+        string status "PENDING | ASSIGNED | IN_PROGRESS | COMPLETED | CANCELLED"
+        uuid customer_id FK
+        uuid assigned_technician_id FK
+        uuid created_by_id FK
+    }
+
+    ATTENDANCE {
+        uuid id PK
+        uuid user_id FK
+        timestamp check_in
+        timestamp check_out
+        decimal check_in_lat
+        decimal check_in_lng
+    }
