@@ -34,3 +34,4 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
 - ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is off; unused vars warn, ignore args prefixed `_`.
 - Prettier/`.editorconfig`: single quotes, trailing commas, printWidth 100, 2-space indent, LF.
 - Repo has no commits yet (fresh, `master`); CI runs on PRs to `master`, deploy-api on push to `master` (Railway deploy step is a TODO).
+- Use `git switch <branch>` instead of `git checkout` for branch switching (safer, explicit intent).
