@@ -30,3 +30,7 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+
+#Markdown
+Markdown/
+
