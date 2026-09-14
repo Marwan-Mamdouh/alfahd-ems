@@ -16,13 +16,15 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
 - `pnpm api:dev` — watch server (reads `PORT`, default 3000)
 - `pnpm api:build` — SWC build; `pnpm types:build` — build shared types
 - `pnpm typecheck` — runs `tsc --noEmit` via `pnpm -r typecheck` (only api defines it)
-- `pnpm lint` — runs `pnpm -r lint`; only api actually lints (types `lint` is a stub that echo's a message)
+- `pnpm lint` / `pnpm test` — must stay as `pnpm -r` delegation. Do NOT replace with direct `eslint`/`vitest` calls: no ESLint config or vitest binary exists at root (both live in `apps/api` only). This broke PR #18.
 - Focused checks:
   - `pnpm --filter @alfahd/api typecheck` — type-check only the api package
   - `pnpm --filter @alfahd/api test` — unit tests (`**/*.spec.ts` via `vitest.config.ts`)
   - `pnpm --filter @alfahd/api test:e2e` — e2e (`**/*.e2e-spec.ts` via `vitest.config.e2e.ts`)
   - `pnpm --filter @alfahd/api lint`
 - Local services: `docker compose up -d` starts postgres:16 (user `alfahd`, db `alfahd_ems`, port 5432) and redis:7.
+
+- Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test. Do not bypass it; keep it green before pushing.
 
 ## Env & data layer
 
@@ -33,5 +35,7 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
 
 - ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is off; unused vars warn, ignore args prefixed `_`.
 - Prettier/`.editorconfig`: single quotes, trailing commas, printWidth 100, 2-space indent, LF.
-- Repo has no commits yet (fresh, `master`); CI runs on PRs to `master`, deploy-api on push to `master` (Railway deploy step is a TODO).
+- Default branch is `master`. CI runs on PRs to `master`; deploy-api runs on push to `master` (Railway deploy step is a TODO).
+- CI uses `packageManager` from `package.json` (pnpm 11.26, Node 22) with `--frozen-lockfile`; `pnpm audit --audit-level=high` runs but does not fail the build.
 - Use `git switch <branch>` instead of `git checkout` for branch switching (safer, explicit intent).
+- Commit messages must use conventional prefix + useful what/why, e.g. `feat: introduce JWT guard to help protect routes`, `fix: restore root lint delegation to help unbreak CI`. Never vague (`fix stuff`, `update`). Only commit, amend, push, or open PRs when explicitly asked.
