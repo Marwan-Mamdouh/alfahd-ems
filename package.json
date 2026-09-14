@@ -8,9 +8,9 @@
     "types:build": "pnpm --filter @alfahd/types build",
     "types:dev": "pnpm --filter @alfahd/types dev",
     "typecheck": "pnpm -r typecheck",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "lint": "pnpm -r lint",
     "lint:fix": "pnpm -r lint:fix",
-    "test": "vitest run",
+    "test": "pnpm -r test",
     "prepare": "husky"
   },
   "engines": {
