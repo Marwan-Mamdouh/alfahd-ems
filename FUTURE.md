@@ -166,7 +166,7 @@ updates:
 
 These are known needs but not yet detailed:
 
-- [ ] Prisma setup (after scaffold confirmed working)
+- [ ] Drizzle domain schema (tables, relations) — tracked in #5. Baseline connection + empty migration done in #3 against local Docker PostgreSQL; deployment configuration explicitly deferred.
 - [ ] Authentication module (JWT + refresh tokens)
 - [ ] Logging setup (pino/nestjs-pino)
 - [ ] Swagger/OpenAPI documentation
