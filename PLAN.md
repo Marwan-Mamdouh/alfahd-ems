@@ -37,8 +37,7 @@ build/
 .env.local
 .env.*.local
 
-# Prisma
-apps/api/src/generated/
+# Drizzle (migrations in apps/api/drizzle/ are committed intentionally)
 
 # OS
 .DS_Store
