@@ -11,6 +11,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new ResponseInterceptor());
+  app.enableShutdownHooks();
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 3000;

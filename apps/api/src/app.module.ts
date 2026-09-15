@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { envSchema } from './config/env.validation.js';
+import { RedisModule, buildRedisConnectionOptions } from './redis/redis.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { DatabaseModule } from './database/database.module.js';
@@ -12,6 +14,13 @@ import { DatabaseModule } from './database/database.module.js';
       validate: (config) => envSchema.parse(config),
     }),
     DatabaseModule,
+    RedisModule,
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        connection: buildRedisConnectionOptions(configService),
+      }),
+    }),
   ],
   controllers: [AppController],
   providers: [AppService],
