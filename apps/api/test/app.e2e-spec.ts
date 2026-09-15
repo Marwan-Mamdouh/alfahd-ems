@@ -4,14 +4,26 @@ import request from 'supertest';
 import { AppModule } from './../src/app.module.js';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter.js';
 import { ResponseInterceptor } from './../src/common/interceptors/response.interceptor.js';
+import { vi } from 'vitest';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication;
+  let redisClient: { ping: () => Promise<string>; quit: () => Promise<void> };
 
   beforeEach(async () => {
+    redisClient = {
+      ping: vi.fn().mockResolvedValue('PONG'),
+      quit: vi.fn().mockResolvedValue('OK'),
+    };
+
+    // Override the Redis client provided by RedisModule with a stub
+    // that avoids any real network connection during tests.
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider('REDIS_CLIENT')
+      .useValue(redisClient)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -41,6 +53,16 @@ describe('AppController (e2e)', () => {
         expect(res.body).toHaveProperty('timestamp');
         expect(typeof res.body.timestamp).toBe('string');
       });
+  });
+
+  it('Redis ping is called on startup', () => {
+    // The ping was invoked during RedisModule.onModuleInit() when app.init() ran.
+    expect(redisClient.ping).toHaveBeenCalledTimes(1);
+  });
+
+  it('Redis quit is called on shutdown', async () => {
+    await app.close();
+    expect(redisClient.quit).toHaveBeenCalledTimes(1);
   });
 
   afterEach(async () => {
