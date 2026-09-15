@@ -1,0 +1,1 @@
+-- Baseline migration (#3): no domain tables yet. Later issues (e.g. #5) add tables here.

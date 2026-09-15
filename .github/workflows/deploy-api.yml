@@ -40,4 +40,4 @@ jobs:
       - name: Run API tests
         run: pnpm --filter @alfahd/api test
 
-      # TODO: add Railway deploy step here once Railway token is configured
+      # TODO: add deployment step here (deployment configuration explicitly deferred, no Railway yet)
