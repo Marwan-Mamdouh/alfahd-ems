@@ -29,13 +29,13 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
 ## Env & data layer
 
 - Template is `apps/api/.env.example` (copy to `apps/api/.env`; both exist, `.env` is gitignored).
-- Nothing loads `.env` yet — no ConfigModule dependency and no Prisma/ORM code exists (planned in `FUTURE.md`). `src/main.ts` reads `process.env.PORT` directly. Unit/e2e tests do NOT need docker services running.
+- `ConfigModule` (global, Zod-validated) loads `.env`; `src/main.ts` reads `PORT` via `ConfigService`. Drizzle (`drizzle-orm` + `pg`, config `apps/api/drizzle.config.ts`, migrations in `apps/api/drizzle/`, `DatabaseModule` in `src/database/`) targets local Docker PostgreSQL. Unit/e2e tests do NOT need docker services running (the `pg` pool connects lazily).
 
 ## Style
 
 - ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is off; unused vars warn, ignore args prefixed `_`.
 - Prettier/`.editorconfig`: single quotes, trailing commas, printWidth 100, 2-space indent, LF.
-- Default branch is `master`. CI runs on PRs to `master`; deploy-api runs on push to `master` (Railway deploy step is a TODO).
+- Default branch is `master`. CI runs on PRs to `master`; deploy-api runs on push to `master` (deployment step explicitly deferred, no Railway yet).
 - CI uses `packageManager` from `package.json` (pnpm 11.26, Node 22) with `--frozen-lockfile`; `pnpm audit --audit-level=high` runs but does not fail the build.
 - Use `git switch <branch>` instead of `git checkout` for branch switching (safer, explicit intent).
 - Commit messages must use conventional prefix + useful what/why, e.g. `feat: introduce JWT guard to help protect routes`, `fix: restore root lint delegation to help unbreak CI`. Never vague (`fix stuff`, `update`). Only commit, amend, push, or open PRs when explicitly asked.
