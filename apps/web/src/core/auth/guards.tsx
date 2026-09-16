@@ -4,7 +4,6 @@
 import { ShieldX } from "lucide-react";
 import { useAuthStore } from "@/core/auth/auth.store";
 import { hasPermission, type Permission } from "@/core/permissions/permissions";
-import type { Role } from "@/core/api/types";
 
 interface RoleGuardProps {
   permission: Permission;
