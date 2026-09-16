@@ -37,21 +37,29 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               <ul className="space-y-1">
                 {visibleItems.map((item) => {
                   const isActive = pathname.startsWith(item.href);
+                  const linkClassName = cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                    isActive
+                      ? "bg-primary font-medium text-primary-foreground"
+                      : "text-foreground/80 hover:bg-accent hover:text-accent-foreground",
+                    item.comingSoon && "pointer-events-none opacity-60"
+                  );
                   return (
                     <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        onClick={onNavigate}
-                        className={cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                          isActive
-                            ? "bg-primary font-medium text-primary-foreground"
-                            : "text-foreground/80 hover:bg-accent hover:text-accent-foreground"
-                        )}
-                      >
-                        <NavIcon name={item.icon} className="h-4 w-4 shrink-0" />
-                        {item.label}
-                      </Link>
+                      {item.comingSoon ? (
+                        <span className={linkClassName} aria-disabled="true" title="قريباً">
+                          <NavIcon name={item.icon} className="h-4 w-4 shrink-0" />
+                          <span className="flex-1">{item.label}</span>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                            قريباً
+                          </span>
+                        </span>
+                      ) : (
+                        <Link href={item.href} onClick={onNavigate} className={linkClassName}>
+                          <NavIcon name={item.icon} className="h-4 w-4 shrink-0" />
+                          {item.label}
+                        </Link>
+                      )}
                     </li>
                   );
                 })}
