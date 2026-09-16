@@ -3,7 +3,11 @@
   "private": true,
   "packageManager": "pnpm@11.26.0",
   "scripts": {
-    "api:dev": "pnpm --filter @alfahd/api start:dev",
+    "api:dev": "pnpm types:build && pnpm --filter @alfahd/api start:dev",
+    "dev": "pnpm types:build && pnpm -r --parallel --if-present dev",
+    "dev:web": "pnpm --filter fahd-dashboard dev",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
     "api:build": "pnpm --filter @alfahd/api build",
     "types:build": "pnpm --filter @alfahd/types build",
     "build": "pnpm -r build",

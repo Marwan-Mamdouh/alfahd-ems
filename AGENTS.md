@@ -1,6 +1,6 @@
 # AGENTS.md
 
-pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mobile` are empty placeholders with no scripts.
+pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fahd-dashboard`, Next.js), `packages/types`; `apps/mobile` is an empty placeholder with no scripts.
 
 - `apps/api` — NestJS 12 REST API (`@alfahd/api`), SWC build, Vitest tests.
 - `packages/types` — `@alfahd/types`, shared TS enums (`Role`, `TicketStatus`, `RouterStatus`, etc.), tsc build.
@@ -13,7 +13,10 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
 
 ## Commands (from repo root)
 
-- `pnpm api:dev` — watch server (reads `PORT`, default 3000)
+- `pnpm dev` — builds types, then runs all `dev` scripts in parallel (types watch + api + web)
+- `pnpm api:dev` — canonical api watch server (builds types first, then `start:dev`; reads `PORT`, default 3000)
+- `pnpm dev:web` — Next.js dev server (`fahd-dashboard`)
+- `pnpm infra:up` / `pnpm infra:down` — start/stop local services (`docker compose up -d` / `down`)
 - `pnpm api:build` — SWC build; `pnpm types:build` — build shared types
 - `pnpm typecheck` — runs `tsc --noEmit` via `pnpm -r typecheck` (only api defines it)
 - `pnpm lint` / `pnpm test` — must stay as `pnpm -r` delegation. Do NOT replace with direct `eslint`/`vitest` calls: no ESLint config or vitest binary exists at root (both live in `apps/api` only). This broke PR #18.
