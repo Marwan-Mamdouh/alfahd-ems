@@ -41,4 +41,5 @@ pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fah
 - Default branch is `master`. CI runs on PRs to `master`; deploy-api runs on push to `master` (deployment step explicitly deferred, no Railway yet).
 - CI uses `packageManager` from `package.json` (pnpm 11.26, Node 22) with `--frozen-lockfile`; `pnpm audit --audit-level=high` runs but does not fail the build.
 - Use `git switch <branch>` instead of `git checkout` for branch switching (safer, explicit intent).
+- Update feature branches with `git rebase origin/master`, never `git merge origin/master`: merge commits break GitHub's rebase button (`This branch can't be rebased`). On pnpm conflicts, union both sides' `allowBuilds` in `pnpm-workspace.yaml`, then regenerate (never hand-edit markers): `pnpm install --no-frozen-lockfile && git add pnpm-workspace.yaml pnpm-lock.yaml && git rebase --continue`.
 - Commit messages must use conventional prefix + useful what/why, e.g. `feat: introduce JWT guard to help protect routes`, `fix: restore root lint delegation to help unbreak CI`. Never vague (`fix stuff`, `update`). Only commit, amend, push, or open PRs when explicitly asked.
