@@ -6,6 +6,7 @@
     "api:dev": "pnpm --filter @alfahd/api start:dev",
     "api:build": "pnpm --filter @alfahd/api build",
     "types:build": "pnpm --filter @alfahd/types build",
+    "build": "pnpm -r build",
     "types:dev": "pnpm --filter @alfahd/types dev",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
