@@ -84,7 +84,6 @@
 
 "use client";
 
-import { PageHeader } from "@/components/shared/page-header/page-header";
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
 import { Button } from "@/components/ui/button";

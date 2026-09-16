@@ -29,7 +29,7 @@
 // };
 import { NextResponse, type NextRequest } from "next/server";
 
-export function middleware(req: NextRequest) {
+export function middleware(_req: NextRequest) {
   return NextResponse.next();
 }
 
