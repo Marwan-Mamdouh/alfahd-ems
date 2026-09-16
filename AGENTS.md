@@ -24,7 +24,7 @@ pnpm monorepo (ESM, Node >=22.12). Two active packages; `apps/web` and `apps/mob
   - `pnpm --filter @alfahd/api lint`
 - Local services: `docker compose up -d` starts postgres:16 (user `alfahd`, db `alfahd_ems`, port 5432) and redis:7.
 
-- Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test. Do not bypass it; keep it green before pushing.
+- Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test. Full-project gates (`pnpm typecheck`/`lint`/`build`/`test`) run in CI. Do not bypass it; keep it green before pushing.
 
 ## Env & data layer
 
