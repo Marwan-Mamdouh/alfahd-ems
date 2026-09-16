@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 
@@ -13,6 +13,14 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -64,6 +72,9 @@ export default function LoginPage() {
               </CardTitle>
 
               <p className="text-sm text-muted-foreground">تسجيل الدخول إلى نظام الإدارة</p>
+              <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                وضع العرض التجريبي — دخول وهمي للاختبار فقط
+              </p>
             </div>
           </CardHeader>
 
