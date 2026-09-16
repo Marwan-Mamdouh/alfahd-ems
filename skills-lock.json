@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "drizzle-best-practices": {
+      "source": "honra-io/drizzle-best-practices",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "c723c157f3af98486d64dea4a1c1250ca0c57e1d0cdd426a6c301f844dcdbaed"
+    },
+    "migrate-radix-to-base": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "skillPath": "skills/migrate-radix-to-base/SKILL.md",
+      "computedHash": "e1f2030ee5059be3dff0812ca0e4b995ee9fa3132176f049ebe6c90346a6755e"
+    },
+    "redis-connections": {
+      "source": "redis/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/redis-connections/SKILL.md",
+      "computedHash": "75ec09613fdadfc16edd88940a10d135aa6196cbcf5c7a10a3a1bf6e6d044c5f"
+    },
+    "redis-core": {
+      "source": "redis/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/redis-core/SKILL.md",
+      "computedHash": "3b6196044dfba0f77942f20030faab03ca0741c396ba8d759c179710ebd2a7dd"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "f615de216e085a84e31593ad0fa9062232adc40cd87b7c7ab2b8e49abf6500be"
+    }
+  }
+}
