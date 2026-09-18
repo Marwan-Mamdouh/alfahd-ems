@@ -1,13 +1,13 @@
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 import { useAuthStore } from "@/core/auth/auth.store";
 import type { ApiResponse, LoginResponse } from "@/core/api/types";
+import { SESSION_EXPIRED_EVENT } from "@/core/auth/auth-events";
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
   timeout: 30_000,
   headers: { "Content-Type": "application/json" },
 });
-
 
 let refreshPromise: Promise<string> | null = null;
 
@@ -52,10 +52,10 @@ api.interceptors.response.use(
 
       const newToken = await refreshPromise;
       original.headers = { ...original.headers, Authorization: `Bearer ${newToken}` };
-      return api(original); 
+      return api(original);
     } catch {
       if (typeof window !== "undefined") {
-        window.location.href = "/login";
+        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
       }
       return Promise.reject(error);
     }
