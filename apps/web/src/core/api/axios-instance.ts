@@ -1,6 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 import { useAuthStore } from "@/core/auth/auth.store";
 import type { ApiResponse, LoginResponse } from "@/core/api/types";
+import { LOGIN_PATH } from "@/core/auth/routes";
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
@@ -55,7 +56,7 @@ api.interceptors.response.use(
       return api(original); 
     } catch {
       if (typeof window !== "undefined") {
-        window.location.href = "/login";
+       window.location.href = LOGIN_PATH;
       }
       return Promise.reject(error);
     }
