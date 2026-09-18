@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LOGIN_PATH } from "@/core/auth/routes";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function ResetPasswordPage() {
     setError(null);
     // TODO (Phase 2): POST /auth/reset-password مع الـ token من الـ URL
     setDone(true);
-    setTimeout(() => router.push("/login"), 2000);
+    setTimeout(() => router.push(LOGIN_PATH), 2000);
   };
 
   return (

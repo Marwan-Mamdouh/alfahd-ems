@@ -4,6 +4,7 @@ import { useAuthStore } from "@/core/auth/auth.store";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { LOGIN_PATH } from "@/core/auth/routes";
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "مدير النظام",
@@ -19,7 +20,7 @@ export function Header() {
 
   const handleLogout = () => {
     clearSession();
-    router.push("/login");
+    router.push(LOGIN_PATH);
   };
 
   return (
