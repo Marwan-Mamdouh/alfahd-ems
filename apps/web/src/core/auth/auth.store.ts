@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { AuthUser } from "@/core/api/types";
+import { SESSION_COOKIE_NAME } from "@/core/auth/routes";
 
 interface AuthState {
   user: AuthUser | null;
@@ -29,7 +30,7 @@ export const useAuthStore = create<AuthState>()(
         });
 
         // Cookie used as a simple session flag for middleware
-        document.cookie = "fahd-session=1; path=/; max-age=604800; samesite=strict";
+        document.cookie = `${SESSION_COOKIE_NAME}=1; path=/; max-age=604800; samesite=strict`;
       },
 
       // Set authenticated user
@@ -48,7 +49,7 @@ export const useAuthStore = create<AuthState>()(
         });
 
         // Remove session cookie
-        document.cookie = "fahd-session=; path=/; max-age=0; samesite=strict";
+        document.cookie = `${SESSION_COOKIE_NAME}=; path=/; max-age=0; samesite=strict`;
       },
     }),
     {
