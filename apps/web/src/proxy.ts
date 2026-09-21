@@ -1,13 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { LOGIN_PATH, DASHBOARD_PATH, SESSION_COOKIE_NAME } from "@/core/auth/routes";
 
-const LOGIN_PATH = "/auth/login";
-const DASHBOARD_PATH = "/dashboard";
-
-const PUBLIC_ROUTES = [LOGIN_PATH];
+const PUBLIC_ROUTES = [LOGIN_PATH, "/forgot-password", "/reset-password"];
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const hasSession = req.cookies.has("fahd-session");
+  const hasSession = req.cookies.has(SESSION_COOKIE_NAME);
 
   const isPublicRoute = PUBLIC_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
