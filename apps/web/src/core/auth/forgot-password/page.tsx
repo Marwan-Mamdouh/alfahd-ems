@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { ArrowRight } from "lucide-react";
-
+import { LOGIN_PATH } from "@/core/auth/routes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
               </div>
 
               <Link
-                href="/auth/login"
+                href={LOGIN_PATH}
                 className="inline-flex h-10 w-full items-center justify-center rounded-md border bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 <ArrowRight className="ml-2 h-4 w-4" />
