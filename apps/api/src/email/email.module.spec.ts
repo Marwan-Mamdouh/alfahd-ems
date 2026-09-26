@@ -1,22 +1,21 @@
+import { Logger } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { Logger } from '@nestjs/common';
-import sgMail from '@sendgrid/mail';
+import type { Transporter } from 'nodemailer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SENDGRID_TIMEOUT_MS, SendGridAdapter } from './adapters/sendgrid.adapter.js';
+import { NodemailerAdapter } from './adapters/nodemailer.adapter.js';
 import { EMAIL_PROVIDER, type EmailProvider } from './email-provider.interface.js';
 import { EmailModule, buildEmailProvider } from './email.module.js';
 import { EmailService } from './email.service.js';
 
-vi.mock('@sendgrid/mail', () => ({
-  default: {
-    setApiKey: vi.fn(),
-    setTimeout: vi.fn(),
-    send: vi.fn(),
-  },
-}));
-
-const mockedSgMail = vi.mocked(sgMail);
+const smtpValues = {
+  EMAIL_PROVIDER: 'smtp',
+  EMAIL_FROM: 'noreply@alfahd.local',
+  SMTP_HOST: 'localhost',
+  SMTP_PORT: 1025,
+  SMTP_USER: 'test',
+  SMTP_PASS: 'test',
+};
 
 function configService(values: Record<string, unknown>): ConfigService {
   return {
@@ -31,87 +30,109 @@ function configService(values: Record<string, unknown>): ConfigService {
   } as unknown as ConfigService;
 }
 
+function mockTransporter(): Transporter & { sendMail: ReturnType<typeof vi.fn> } {
+  return { sendMail: vi.fn().mockResolvedValue({}) } as unknown as Transporter & {
+    sendMail: ReturnType<typeof vi.fn>;
+  };
+}
+
 describe('EmailModule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('selects SendGridAdapter when EMAIL_PROVIDER=sendgrid', () => {
-    const provider = buildEmailProvider(
-      configService({
-        EMAIL_PROVIDER: 'sendgrid',
-        SENDGRID_API_KEY: 'SG.test-key',
-        EMAIL_FROM: 'noreply@alfahd.local',
-      }),
-    );
-    expect(provider).toBeInstanceOf(SendGridAdapter);
+  it('selects NodemailerAdapter when EMAIL_PROVIDER=smtp', () => {
+    const provider = buildEmailProvider(configService({ ...smtpValues }));
+    expect(provider).toBeInstanceOf(NodemailerAdapter);
   });
 
-  it('throws for unknown provider values', () => {
+  it('prefers SMTP_FROM over EMAIL_FROM when both are set', () => {
+    const transporter = mockTransporter();
+    const adapter = new NodemailerAdapter(
+      {
+        host: 'localhost',
+        port: 1025,
+        user: 'test',
+        pass: 'test',
+        from: 'override@alfahd.local',
+      },
+      transporter,
+    );
+    expect(adapter).toBeInstanceOf(NodemailerAdapter);
+  });
+
+  it('throws for unsupported provider values', () => {
     expect(() => buildEmailProvider(configService({ EMAIL_PROVIDER: 'resend' }))).toThrow(
       'Unsupported EMAIL_PROVIDER: resend',
     );
   });
 
-  it.each(['smtp', 'mailgun', 'postmark', 'ses'])(
-    'throws "not yet implemented" at boot when EMAIL_PROVIDER=%s',
+  it.each(['sendgrid', 'mailgun', 'postmark', 'ses'])(
+    'throws "unsupported" at boot when EMAIL_PROVIDER=%s',
     (provider) => {
-      expect(() => buildEmailProvider(configService({ EMAIL_PROVIDER: provider }))).toThrow(
-        `Email provider "${provider}" is not yet implemented`,
-      );
+      expect(() =>
+        buildEmailProvider(configService({ ...smtpValues, EMAIL_PROVIDER: provider })),
+      ).toThrow(`Unsupported EMAIL_PROVIDER: ${provider}`);
     },
   );
 
-  it('fails Nest DI compilation when EMAIL_PROVIDER is unimplemented', async () => {
+  it('fails Nest DI compilation when EMAIL_PROVIDER is unsupported', async () => {
     await expect(
       Test.createTestingModule({
         imports: [
           ConfigModule.forRoot({
             isGlobal: true,
-            load: [() => ({ EMAIL_PROVIDER: 'smtp' })],
+            load: [() => ({ EMAIL_PROVIDER: 'sendgrid' })],
           }),
           EmailModule,
         ],
       }).compile(),
-    ).rejects.toThrow('Email provider "smtp" is not yet implemented');
+    ).rejects.toThrow('Unsupported EMAIL_PROVIDER: sendgrid');
   });
 
-  it('SendGridAdapter sets API key and 10s timeout in constructor', () => {
-    new SendGridAdapter('SG.test-key', 'noreply@alfahd.local');
-    expect(mockedSgMail.setApiKey).toHaveBeenCalledWith('SG.test-key');
-    expect(mockedSgMail.setTimeout).toHaveBeenCalledWith(SENDGRID_TIMEOUT_MS);
-    expect(SENDGRID_TIMEOUT_MS).toBe(10_000);
-  });
-
-  it('SendGridAdapter.send delegates to sgMail.send with correct payload', async () => {
-    mockedSgMail.send.mockResolvedValue([{}, {}] as never);
-    const adapter = new SendGridAdapter('SG.test-key', 'noreply@alfahd.local');
+  it('NodemailerAdapter.send delegates to transporter.sendMail with correct payload', async () => {
+    const transporter = mockTransporter();
+    const adapter = new NodemailerAdapter(
+      {
+        host: 'localhost',
+        port: 1025,
+        user: 'test',
+        pass: 'test',
+        from: 'noreply@alfahd.local',
+      },
+      transporter,
+    );
     await adapter.send({
       to: 'user@example.com',
       subject: 'Password Reset',
       text: 'reset body',
       html: '<p>reset body</p>',
     });
-    expect(mockedSgMail.send).toHaveBeenCalledWith({
-      to: 'user@example.com',
+    expect(transporter.sendMail).toHaveBeenCalledWith({
       from: 'noreply@alfahd.local',
+      to: 'user@example.com',
       subject: 'Password Reset',
       text: 'reset body',
       html: '<p>reset body</p>',
     });
   });
 
-  it('SendGridAdapter.send supports multiple recipients and omits html when absent', async () => {
-    mockedSgMail.send.mockResolvedValue([{}, {}] as never);
-    const adapter = new SendGridAdapter('SG.test-key', 'noreply@alfahd.local');
-    await adapter.send({
-      to: ['a@example.com', 'b@example.com'],
-      subject: 'Hello',
-      text: 'hi',
-    });
-    expect(mockedSgMail.send).toHaveBeenCalledWith({
-      to: ['a@example.com', 'b@example.com'],
+  it('NodemailerAdapter.send supports multiple recipients and omits html when absent', async () => {
+    const transporter = mockTransporter();
+    const adapter = new NodemailerAdapter(
+      {
+        host: 'localhost',
+        port: 1025,
+        user: 'test',
+        pass: 'test',
+        from: 'noreply@alfahd.local',
+      },
+      transporter,
+    );
+    await adapter.send({ to: ['a@example.com', 'b@example.com'], subject: 'Hello', text: 'hi' });
+    expect(transporter.sendMail).toHaveBeenCalledWith({
       from: 'noreply@alfahd.local',
+      to: ['a@example.com', 'b@example.com'],
       subject: 'Hello',
       text: 'hi',
     });
@@ -119,7 +140,7 @@ describe('EmailModule', () => {
 
   it('EmailService.send delegates to the injected provider', async () => {
     const provider: EmailProvider = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'sendgrid' }));
+    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'smtp' }));
     await service.send({ to: 'user@example.com', subject: 'Hi', text: 'body' });
     expect(provider.send).toHaveBeenCalledWith({
       to: 'user@example.com',
@@ -131,7 +152,7 @@ describe('EmailModule', () => {
   it('EmailService logs info on success and never logs the body', async () => {
     const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     const provider: EmailProvider = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'sendgrid' }));
+    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'smtp' }));
     await service.send({
       to: 'user@example.com',
       subject: 'Password Reset',
@@ -147,12 +168,12 @@ describe('EmailModule', () => {
 
   it('EmailService logs warn and rethrows on failure', async () => {
     const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
-    const failure = new Error('SendGrid unavailable');
+    const failure = new Error('SMTP unavailable');
     const provider: EmailProvider = { send: vi.fn().mockRejectedValue(failure) };
-    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'sendgrid' }));
+    const service = new EmailService(provider, configService({ EMAIL_PROVIDER: 'smtp' }));
     await expect(
       service.send({ to: 'user@example.com', subject: 'Hi', text: 'body' }),
-    ).rejects.toThrow('SendGrid unavailable');
+    ).rejects.toThrow('SMTP unavailable');
     expect(warnSpy).toHaveBeenCalledTimes(1);
     warnSpy.mockRestore();
   });
@@ -162,18 +183,12 @@ describe('EmailModule', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [
-            () => ({
-              EMAIL_PROVIDER: 'sendgrid',
-              SENDGRID_API_KEY: 'SG.test-key',
-              EMAIL_FROM: 'noreply@alfahd.local',
-            }),
-          ],
+          load: [() => ({ ...smtpValues })],
         }),
         EmailModule,
       ],
     }).compile();
-    expect(moduleRef.get<EmailProvider>(EMAIL_PROVIDER)).toBeInstanceOf(SendGridAdapter);
+    expect(moduleRef.get<EmailProvider>(EMAIL_PROVIDER)).toBeInstanceOf(NodemailerAdapter);
     expect(moduleRef.get(EmailService)).toBeDefined();
     await moduleRef.close();
   });
