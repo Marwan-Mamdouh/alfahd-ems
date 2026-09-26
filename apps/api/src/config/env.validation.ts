@@ -14,22 +14,27 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     EMAIL_PROVIDER: z.enum(['smtp', 'sendgrid', 'mailgun', 'postmark', 'ses']),
     EMAIL_FROM: z.string().email(),
-    SENDGRID_API_KEY: z.string().optional(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional(),
     SMTP_USER: z.string().optional(),
     SMTP_PASS: z.string().optional(),
+    SMTP_FROM: z.string().email().optional(),
+    FRONTEND_URL: z.string().url().default('http://localhost:3000'),
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',
   })
   .superRefine((data, ctx) => {
-    if (data.EMAIL_PROVIDER === 'sendgrid' && !data.SENDGRID_API_KEY) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['SENDGRID_API_KEY'],
-        message: 'SENDGRID_API_KEY is required when EMAIL_PROVIDER is sendgrid',
-      });
+    if (data.EMAIL_PROVIDER === 'smtp') {
+      for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'] as const) {
+        if (!data[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required when EMAIL_PROVIDER is smtp`,
+          });
+        }
+      }
     }
   });
 

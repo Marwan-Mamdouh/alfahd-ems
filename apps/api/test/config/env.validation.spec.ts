@@ -9,6 +9,10 @@ const validEnv = {
   JWT_REFRESH_SECRET: 'b'.repeat(32),
   EMAIL_PROVIDER: 'smtp',
   EMAIL_FROM: 'test@example.com',
+  SMTP_HOST: 'localhost',
+  SMTP_PORT: '1025',
+  SMTP_USER: 'test',
+  SMTP_PASS: 'test',
 };
 
 describe('envSchema validation', () => {
@@ -86,5 +90,34 @@ describe('envSchema validation', () => {
     const result = envSchema.parse(validEnv);
     expect(result.JWT_ACCESS_EXPIRES_IN).toBe('15m');
     expect(result.JWT_REFRESH_EXPIRES_IN).toBe('7d');
+  });
+
+  it('defaults FRONTEND_URL', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.FRONTEND_URL).toBe('http://localhost:3000');
+  });
+
+  it('throws when EMAIL_PROVIDER=smtp but SMTP vars are missing', () => {
+    expect(() =>
+      envSchema.parse({
+        ...validEnv,
+        SMTP_HOST: undefined,
+        SMTP_PORT: undefined,
+        SMTP_USER: undefined,
+        SMTP_PASS: undefined,
+      }),
+    ).toThrow('SMTP_HOST is required when EMAIL_PROVIDER is smtp');
+  });
+
+  it('does not require SMTP vars when EMAIL_PROVIDER is not smtp', () => {
+    const result = envSchema.parse({
+      ...validEnv,
+      EMAIL_PROVIDER: 'sendgrid',
+      SMTP_HOST: undefined,
+      SMTP_PORT: undefined,
+      SMTP_USER: undefined,
+      SMTP_PASS: undefined,
+    });
+    expect(result.EMAIL_PROVIDER).toBe('sendgrid');
   });
 });

@@ -1,26 +1,24 @@
 import { Global, Logger, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SendGridAdapter } from './adapters/sendgrid.adapter.js';
+import { NodemailerAdapter } from './adapters/nodemailer.adapter.js';
 import { EMAIL_PROVIDER, type EmailProvider } from './email-provider.interface.js';
 import { EmailService } from './email.service.js';
 
 export function buildEmailProvider(config: ConfigService): EmailProvider {
   const provider = config.getOrThrow<string>('EMAIL_PROVIDER');
   switch (provider) {
-    case 'sendgrid':
-      return new SendGridAdapter(
-        config.getOrThrow<string>('SENDGRID_API_KEY'),
-        config.getOrThrow<string>('EMAIL_FROM'),
-      );
     case 'smtp':
-    case 'mailgun':
-    case 'postmark':
-    case 'ses':
-      throw new Error(
-        `Email provider "${provider}" is not yet implemented. Set EMAIL_PROVIDER=sendgrid.`,
-      );
+      return new NodemailerAdapter({
+        host: config.getOrThrow<string>('SMTP_HOST'),
+        port: config.getOrThrow<number>('SMTP_PORT'),
+        user: config.getOrThrow<string>('SMTP_USER'),
+        pass: config.getOrThrow<string>('SMTP_PASS'),
+        from: config.get<string>('SMTP_FROM') ?? config.getOrThrow<string>('EMAIL_FROM'),
+      });
     default:
-      throw new Error(`Unsupported EMAIL_PROVIDER: ${provider}`);
+      throw new Error(
+        `Unsupported EMAIL_PROVIDER: ${provider}. Only "smtp" (Nodemailer) is supported.`,
+      );
   }
 }
 
