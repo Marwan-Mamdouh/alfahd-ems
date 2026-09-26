@@ -125,15 +125,19 @@ The service acts as the business orchestrator and injects **only** `RepositorySe
 
 ## 5. Controller Layer & API Reference (`products.controller.ts`)
 
-Base Route: `/api/v1/products`
+All routes dynamically consume the centralized route constants manifest (`src/common/constants/routes.constants.ts`):
+* Controller: `@Controller(routes.products.root)`
+* Param routes: `@Get(routes.products.id)`, `@Patch(routes.products.id)`, `@Delete(routes.products.id)`
+
+Base Route: `/products` (prefixed per global NestJS API prefix)
 
 | HTTP Method | Route | Description | Request Body / Query | Success Response | Errors |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `POST` | `/` | Create a new catalog product | `CreateProductDto` | `201 Created` (`Product`) | `400`, `409` |
 | `GET` | `/` | List products with live stock | `QueryProductsDto` (`?search=&category=&isLowStock=&limit=20&offset=0`) | `200 OK` (`{ items: ProductWithStock[], total }`) | `400` |
-| `GET` | `/:id` | Get single product with stock | None (UUID param) | `200 OK` (`ProductWithStock`) | `400`, `404` |
-| `PATCH` | `/:id` | Update product details | `UpdateProductDto` | `200 OK` (`Product`) | `400`, `404`, `409` |
-| `DELETE` | `/:id` | Safe delete product | None (UUID param) | `204 No Content` | `400`, `404`, `409` |
+| `GET` | `/:id` (`routes.products.id`) | Get single product with stock | None (UUID param) | `200 OK` (`ProductWithStock`) | `400`, `404` |
+| `PATCH` | `/:id` (`routes.products.id`) | Update product details | `UpdateProductDto` | `200 OK` (`Product`) | `400`, `404`, `409` |
+| `DELETE` | `/:id` (`routes.products.id`) | Safe delete product | None (UUID param) | `204 No Content` | `400`, `404`, `409` |
 
 ### Input DTO Validations (`class-validator` / `class-transformer`)
 * **`CreateProductDto`**:

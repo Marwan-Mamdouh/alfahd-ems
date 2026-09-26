@@ -13,8 +13,9 @@ import {
 } from '@nestjs/common';
 import { ProductsService } from './products.service.js';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto/index.js';
+import { routes } from '../../common/constants/routes.constants.js';
 
-@Controller('products')
+@Controller(routes.products.root)
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
@@ -29,17 +30,17 @@ export class ProductsController {
     return this.productsService.findAll(query);
   }
 
-  @Get(':id')
+  @Get(routes.products.id)
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.productsService.findById(id);
   }
 
-  @Patch(':id')
+  @Patch(routes.products.id)
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() updateProductDto: UpdateProductDto) {
     return this.productsService.update(id, updateProductDto);
   }
 
-  @Delete(':id')
+  @Delete(routes.products.id)
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.productsService.remove(id);
