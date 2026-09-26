@@ -6,6 +6,62 @@ export enum Role {
   TECHNICIAN = 'TECHNICIAN',
 }
 
+// ─── Auth DTOs ──────────────────────────────────────────────────────────────
+export interface LoginRequestDto {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponseDto {
+  accessToken: string;
+  // Refresh token is handled via HTTP-only cookie for web, or explicitly returned for mobile
+  refreshToken?: string;
+  user: UserDto;
+}
+
+export interface RefreshTokenRequestDto {
+  refreshToken: string; // Used by mobile apps, web uses cookies
+}
+
+export interface RefreshTokenResponseDto {
+  accessToken: string;
+}
+
+export interface ForgotPasswordRequestDto {
+  email: string;
+}
+
+export interface ResetPasswordRequestDto {
+  token: string;
+  newPassword: string;
+}
+
+export interface ChangePasswordRequestDto {
+  oldPassword: string;
+  newPassword: string;
+}
+
+// ─── User DTOs ──────────────────────────────────────────────────────────────
+export interface UserDto {
+  id: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateUserDto {
+  email: string;
+  password: string; // Initially set by admin
+  role: Role;
+}
+
+export interface UpdateUserDto {
+  email?: string;
+  role?: Role;
+  isActive?: boolean; // Used for soft-deactivation
+}
+
 // ─── Ticket ───────────────────────────────────────────────────────────────────
 export enum TicketStatus {
   PENDING = 'PENDING',
