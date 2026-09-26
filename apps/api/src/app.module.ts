@@ -6,6 +6,8 @@ import { RedisModule, buildRedisConnectionOptions } from './redis/redis.module.j
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { DatabaseModule } from './database/database.module.js';
+import { RepositoryModule } from './modules/repository/repository.module.js';
+import { ProductsModule } from './modules/products/products.module.js';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { DatabaseModule } from './database/database.module.js';
       validate: (config) => envSchema.parse(config),
     }),
     DatabaseModule,
+    RepositoryModule,
+    ProductsModule,
     RedisModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
