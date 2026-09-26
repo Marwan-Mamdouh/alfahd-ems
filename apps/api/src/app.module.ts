@@ -13,6 +13,8 @@ import { StorageModule } from './storage/storage.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { EmployeesModule } from './employees/employees.module.js';
 import { AttendanceModule } from './attendance/attendance.module.js';
+import { RepositoryModule } from './modules/repository/repository.module.js';
+import { ProductsModule } from './modules/products/products.module.js';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { AttendanceModule } from './attendance/attendance.module.js';
         }),
     }),
     DatabaseModule,
+    RepositoryModule,
+    ProductsModule,
     EmailModule,
     RedisModule,
     StorageModule,
