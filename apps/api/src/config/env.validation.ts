@@ -14,6 +14,7 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     EMAIL_PROVIDER: z.enum(['smtp', 'sendgrid', 'mailgun', 'postmark', 'ses']),
     EMAIL_FROM: z.string().email(),
+    SENDGRID_API_KEY: z.string().optional(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional(),
     SMTP_USER: z.string().optional(),
@@ -21,6 +22,15 @@ export const envSchema = z
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',
+  })
+  .superRefine((data, ctx) => {
+    if (data.EMAIL_PROVIDER === 'sendgrid' && !data.SENDGRID_API_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SENDGRID_API_KEY'],
+        message: 'SENDGRID_API_KEY is required when EMAIL_PROVIDER is sendgrid',
+      });
+    }
   });
 
 export type EnvConfig = z.infer<typeof envSchema>;
