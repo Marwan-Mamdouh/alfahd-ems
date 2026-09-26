@@ -6,10 +6,14 @@ import { AuthModule } from './auth.module.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RateLimitGuard } from './guards/rate-limit.guard.js';
+import { RolesGuard } from './guards/roles.guard.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 import { DatabaseModule } from '../database/database.module.js';
 import { EmailModule } from '../email/email.module.js';
 import { RedisModule } from '../redis/redis.module.js';
+import { UsersController } from '../users/users.controller.js';
+import { UsersModule } from '../users/users.module.js';
+import { UsersService } from '../users/users.service.js';
 
 vi.mock('ioredis', () => {
   const MockRedis = vi.fn(function MockRedis() {
@@ -36,7 +40,7 @@ const testEnv = {
 };
 
 describe('M1 module wiring', () => {
-  it('compiles AuthModule with guards, strategy, and controller', async () => {
+  it('compiles AuthModule with all guards, strategy, and controller', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [() => ({ ...testEnv })] }),
@@ -50,7 +54,24 @@ describe('M1 module wiring', () => {
     expect(moduleRef.get(AuthController)).toBeDefined();
     expect(moduleRef.get(JwtStrategy)).toBeDefined();
     expect(moduleRef.get(JwtAuthGuard)).toBeDefined();
+    expect(moduleRef.get(RolesGuard)).toBeDefined();
     expect(moduleRef.get(RateLimitGuard)).toBeDefined();
+    await moduleRef.close();
+  });
+
+  it('compiles UsersModule with Admin-guarded controller', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true, load: [() => ({ ...testEnv })] }),
+        DatabaseModule,
+        EmailModule,
+        RedisModule,
+        AuthModule,
+        UsersModule,
+      ],
+    }).compile();
+    expect(moduleRef.get(UsersService)).toBeDefined();
+    expect(moduleRef.get(UsersController)).toBeDefined();
     await moduleRef.close();
   });
 });
