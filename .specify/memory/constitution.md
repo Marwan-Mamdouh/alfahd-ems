@@ -1,3 +1,13 @@
+<!-- SYNC IMPACT REPORT
+Version change: 2.1.0 → 2.2.0 (MINOR — new principle added + stack change)
+Modified sections:
+  - Technology Stack Constraints → Auth: bcrypt cost 12 → argon2id (OWASP default params)
+Added sections:
+  - Core Principles → VI. Avoid TypeScript Enums
+Removed sections: (none)
+Follow-up TODOs: (none)
+-->
+
 # Alfahd-EMS Constitution
 
 ## Core Principles
@@ -32,6 +42,19 @@ API, PostgreSQL, Redis, and background workers deploy to **Railway**. The web da
 independent deployment pipelines. An API contract freeze (M4 #54) gates the frontend dev's work —
 breaking the contract without a version bump is a release blocker.
 
+### VI. Avoid TypeScript Enums
+Do not use the `enum` keyword in TypeScript. Enums compile to opaque runtime objects that
+hinder tree-shaking, produce surprising structural-typing mismatches, and are not needed in
+modern TypeScript. Instead use one of:
+- **`as const` objects** — `const Role = { ADMIN: 'ADMIN', ... } as const;` with a derived
+  union type (`type Role = (typeof Role)[keyof typeof Role];`).
+- **String literal unions** — `type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'CLOSED';`
+  when no runtime object is needed.
+
+Existing enums in `@alfahd/types` (`Role`, `TicketStatus`, `RouterStatus`, etc.) are
+grandfathered; they MUST be migrated to `as const` objects when their file is next touched
+for any other reason, but a dedicated migration PR is not required.
+
 ## Technology Stack Constraints
 
 **Backend**
@@ -39,7 +62,7 @@ breaking the contract without a version bump is a release blocker.
 - Framework: NestJS 12, SWC compiler (`nest build -b swc`, `nest start --watch -b swc`)
 - ORM: Drizzle ORM + `pg` driver, PostgreSQL 16
 - Validation: `class-validator` + `class-transformer`; env validation via Zod + `@nestjs/config`
-- Auth: `@nestjs/passport` + `@nestjs/jwt`; bcrypt cost 12; refresh tokens in Redis; custom RBAC guards
+- Auth: `@nestjs/passport` + `@nestjs/jwt`; argon2id (OWASP default params); refresh tokens in Redis; custom RBAC guards
 - Queue: BullMQ + ioredis (Redis 7)
 - Real-time: Socket.io + Redis adapter (multi-instance WebSocket)
 - Testing: Vitest (unit: `*.spec.ts`, e2e: `*.e2e-spec.ts`)
@@ -108,4 +131,4 @@ milestone-closing PR without client sign-off on that milestone's acceptance crit
 **No over-engineering rule:** When a decision is not covered by the SoW, SRS, `PLAN.md`, or this
 constitution, ask before assuming. Default to the simplest approach that satisfies the spec.
 
-**Version**: 2.1.0 | **Ratified**: 2026-09-26 | **Last Amended**: 2026-09-26
+**Version**: 2.2.0 | **Ratified**: 2026-09-26 | **Last Amended**: 2026-09-28
