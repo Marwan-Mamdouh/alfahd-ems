@@ -1,7 +1,7 @@
 {
   "name": "alfahd-ems",
   "private": true,
-  "packageManager": "pnpm@11.26.0",
+  "packageManager": "pnpm@12.6.0",
   "scripts": {
     "api:dev": "pnpm types:build && pnpm --filter @alfahd/api start:dev",
     "dev": "pnpm types:build && pnpm -r --parallel --if-present dev",
