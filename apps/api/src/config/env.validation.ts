@@ -12,7 +12,7 @@ export const envSchema = z
     JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
     PORT: z.coerce.number().int().positive().default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    EMAIL_PROVIDER: z.enum(['smtp', 'sendgrid', 'mailgun', 'postmark', 'ses']),
+    EMAIL_PROVIDER: z.enum(['smtp']),
     EMAIL_FROM: z.string().email(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional(),
