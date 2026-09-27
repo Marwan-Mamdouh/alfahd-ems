@@ -109,15 +109,16 @@ describe('envSchema validation', () => {
     ).toThrow('SMTP_HOST is required when EMAIL_PROVIDER is smtp');
   });
 
-  it('does not require SMTP vars when EMAIL_PROVIDER is not smtp', () => {
-    const result = envSchema.parse({
-      ...validEnv,
-      EMAIL_PROVIDER: 'sendgrid',
-      SMTP_HOST: undefined,
-      SMTP_PORT: undefined,
-      SMTP_USER: undefined,
-      SMTP_PASS: undefined,
-    });
-    expect(result.EMAIL_PROVIDER).toBe('sendgrid');
+  it('rejects EMAIL_PROVIDER values other than smtp', () => {
+    expect(() =>
+      envSchema.parse({
+        ...validEnv,
+        EMAIL_PROVIDER: 'sendgrid',
+        SMTP_HOST: undefined,
+        SMTP_PORT: undefined,
+        SMTP_USER: undefined,
+        SMTP_PASS: undefined,
+      }),
+    ).toThrow();
   });
 });

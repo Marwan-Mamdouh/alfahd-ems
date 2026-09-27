@@ -4,6 +4,8 @@ import { REDIS_CLIENT } from './redis.constants.js';
 
 export const REFRESH_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 export const REVOKED_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+export const PASSWORD_RESET_TTL_SECONDS = 3600; // 1 hour
+export const PASSWORD_RESET_KEY_PREFIX = 'pwd_reset:';
 
 export function sessionKey(userId: string, tokenId: string): string {
   return `rt:${userId}:${tokenId}`;
@@ -19,10 +21,6 @@ export class SessionService {
 
   async createSession(userId: string, tokenId: string): Promise<void> {
     await this.redis.set(sessionKey(userId, tokenId), '1', 'EX', REFRESH_SESSION_TTL_SECONDS);
-  }
-
-  async validateSession(userId: string, tokenId: string): Promise<boolean> {
-    return (await this.redis.exists(sessionKey(userId, tokenId))) === 1;
   }
 
   /** Resolve the owning userId for a refresh tokenId. Refresh tokens are UUIDs, not JWTs. */
@@ -73,5 +71,20 @@ export class SessionService {
   /** True when the tokenId was explicitly revoked (denylist), as opposed to merely expired. */
   async isRevoked(tokenId: string): Promise<boolean> {
     return (await this.redis.exists(revokedKey(tokenId))) === 1;
+  }
+
+  /** Store a password-reset token (single-use, 1-hour TTL). */
+  async createPasswordResetToken(token: string, userId: string): Promise<void> {
+    await this.redis.set(
+      `${PASSWORD_RESET_KEY_PREFIX}${token}`,
+      userId,
+      'EX',
+      PASSWORD_RESET_TTL_SECONDS,
+    );
+  }
+
+  /** Atomically consume a password-reset token. Returns userId or null if missing/expired. */
+  async consumePasswordResetToken(token: string): Promise<string | null> {
+    return this.redis.getdel(`${PASSWORD_RESET_KEY_PREFIX}${token}`);
   }
 }

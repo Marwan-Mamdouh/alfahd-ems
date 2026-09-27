@@ -1,4 +1,4 @@
-import { Role, type LoginResponseDto, type UserDto } from '@alfahd/types';
+import { Role, type LoginResponseDto } from '@alfahd/types';
 import {
   BadRequestException,
   Inject,
@@ -12,32 +12,17 @@ import type { JwtSignOptions } from '@nestjs/jwt';
 import { compare, hash } from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import type { Redis } from 'ioredis';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, type User } from '../database/schema/index.js';
+import { BCRYPT_COST, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
-import { REDIS_CLIENT } from '../redis/redis.constants.js';
 import { SessionService } from '../redis/session.service.js';
-
-export const BCRYPT_COST = 12;
-export const PASSWORD_RESET_TTL_SECONDS = 3600; // 1 hour
-export const PASSWORD_RESET_KEY_PREFIX = 'pwd_reset:';
 
 export interface AccessTokenPayload {
   sub: string;
   email: string;
   role: Role;
   jti: string;
-}
-
-export function toUserDto(user: User): UserDto {
-  return {
-    id: user.id,
-    email: user.email,
-    role: user.role as Role,
-    isActive: user.isActive,
-    createdAt: user.createdAt.toISOString(),
-  };
 }
 
 @Injectable()
@@ -47,7 +32,6 @@ export class AuthService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly sessionService: SessionService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
@@ -93,9 +77,13 @@ export class AuthService {
     const session = await this.sessionService.findSessionByTokenId(refreshToken);
     if (!session) {
       if (await this.sessionService.isRevoked(refreshToken)) {
-        this.logger.warn(
-          `Revoked refresh token reuse detected tokenId=${refreshToken} ip=${ip ?? 'unknown'} timestamp=${new Date().toISOString()} reason=revoked_token_reuse`,
-        );
+        this.logger.warn('Revoked refresh token reuse detected', {
+          tokenId: refreshToken,
+          userId: null, // Session already deleted; userId not resolvable
+          ip: ip ?? 'unknown',
+          timestamp: new Date().toISOString(),
+          reason: 'revoked_token_reuse',
+        });
       }
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -117,12 +105,7 @@ export class AuthService {
       return;
     }
     const token = randomUUID();
-    await this.redis.set(
-      `${PASSWORD_RESET_KEY_PREFIX}${token}`,
-      user.id,
-      'EX',
-      PASSWORD_RESET_TTL_SECONDS,
-    );
+    await this.sessionService.createPasswordResetToken(token, user.id);
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
     const resetLink = `${frontendUrl}/reset-password?token=${token}`;
     await this.emailService.send({
@@ -134,7 +117,8 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const userId = await this.redis.get(`${PASSWORD_RESET_KEY_PREFIX}${token}`);
+    // Atomically consume the token first — single-use is enforced even on crash
+    const userId = await this.sessionService.consumePasswordResetToken(token);
     if (!userId) {
       throw new BadRequestException('Invalid or expired reset token');
     }
@@ -143,6 +127,5 @@ export class AuthService {
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, userId));
-    await this.redis.del(`${PASSWORD_RESET_KEY_PREFIX}${token}`);
   }
 }

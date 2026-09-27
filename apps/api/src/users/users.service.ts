@@ -15,7 +15,7 @@ import { compare, hash } from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, type User } from '../database/schema/index.js';
-import { BCRYPT_COST, toUserDto } from '../auth/auth.service.js';
+import { BCRYPT_COST, toUserDto } from '../database/schema/mappers.js';
 
 @Injectable()
 export class UsersService {

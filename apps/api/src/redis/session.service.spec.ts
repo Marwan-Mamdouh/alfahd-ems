@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  PASSWORD_RESET_TTL_SECONDS,
   REFRESH_SESSION_TTL_SECONDS,
   REVOKED_TOKEN_TTL_SECONDS,
   SessionService,
@@ -19,6 +20,11 @@ function createFakeRedis() {
     }),
     exists: vi.fn(async (key: string) => (store.has(key) ? 1 : 0)),
     del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
+    }),
     scan: vi.fn(async (cursor: string, ...args: unknown[]) => {
       const matchIndex = args.indexOf('MATCH');
       const pattern = matchIndex >= 0 ? String(args[matchIndex + 1]) : '*';
@@ -72,11 +78,11 @@ describe('SessionService', () => {
     expect(REFRESH_SESSION_TTL_SECONDS).toBe(604800);
   });
 
-  it('validates existing sessions and rejects missing ones', async () => {
+  it('stores created sessions under rt:{userId}:{tokenId}', async () => {
     await service.createSession('user-1', 'token-1');
-    await expect(service.validateSession('user-1', 'token-1')).resolves.toBe(true);
-    await expect(service.validateSession('user-1', 'other')).resolves.toBe(false);
-    await expect(service.validateSession('user-2', 'token-1')).resolves.toBe(false);
+    expect(fake.store.get('rt:user-1:token-1')).toBe('1');
+    expect(fake.store.has('rt:user-1:other')).toBe(false);
+    expect(fake.store.has('rt:user-2:token-1')).toBe(false);
   });
 
   it('resolves userId from a bare tokenId via SCAN', async () => {
@@ -89,7 +95,7 @@ describe('SessionService', () => {
   it('revokes a single session and marks the token as revoked', async () => {
     await service.createSession('user-1', 'token-1');
     await service.revokeSession('user-1', 'token-1');
-    await expect(service.validateSession('user-1', 'token-1')).resolves.toBe(false);
+    expect(fake.store.has('rt:user-1:token-1')).toBe(false);
     await expect(service.isRevoked('token-1')).resolves.toBe(true);
     expect(REVOKED_TOKEN_TTL_SECONDS).toBe(604800);
   });
@@ -100,9 +106,9 @@ describe('SessionService', () => {
     await service.createSession('user-2', 'token-3');
     const revoked = await service.revokeAllSessions('user-1');
     expect(revoked).toBe(2);
-    await expect(service.validateSession('user-1', 'token-1')).resolves.toBe(false);
-    await expect(service.validateSession('user-1', 'token-2')).resolves.toBe(false);
-    await expect(service.validateSession('user-2', 'token-3')).resolves.toBe(true);
+    expect(fake.store.has('rt:user-1:token-1')).toBe(false);
+    expect(fake.store.has('rt:user-1:token-2')).toBe(false);
+    expect(fake.store.get('rt:user-2:token-3')).toBe('1');
     await expect(service.isRevoked('token-1')).resolves.toBe(true);
     await expect(service.isRevoked('token-3')).resolves.toBe(false);
   });
@@ -116,5 +122,24 @@ describe('SessionService', () => {
     await service.revokeAllSessions('user-1');
     expect('keys' in fake.redis).toBe(false);
     expect(fake.redis.scan).toHaveBeenCalled();
+  });
+
+  it('stores password-reset tokens with a 1-hour TTL', async () => {
+    await service.createPasswordResetToken('reset-1', 'user-1');
+    expect(fake.store.get('pwd_reset:reset-1')).toBe('user-1');
+    expect(fake.redis.set).toHaveBeenCalledWith(
+      'pwd_reset:reset-1',
+      'user-1',
+      'EX',
+      PASSWORD_RESET_TTL_SECONDS,
+    );
+    expect(PASSWORD_RESET_TTL_SECONDS).toBe(3600);
+  });
+
+  it('atomically consumes password-reset tokens exactly once', async () => {
+    await service.createPasswordResetToken('reset-1', 'user-1');
+    await expect(service.consumePasswordResetToken('reset-1')).resolves.toBe('user-1');
+    await expect(service.consumePasswordResetToken('reset-1')).resolves.toBeNull();
+    await expect(service.consumePasswordResetToken('missing')).resolves.toBeNull();
   });
 });
