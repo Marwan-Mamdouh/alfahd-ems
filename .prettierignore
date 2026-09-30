@@ -1,0 +1,6 @@
+# Prettier ignore patterns for alfahd-ems monorepo
+node_modules/
+dist/
+build
+coverage
+*.log

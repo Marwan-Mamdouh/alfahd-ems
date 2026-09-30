@@ -39,3 +39,6 @@ coverage/
 #Markdown
 Markdown/
 
+# Spec Kit extension catalog cache (per-machine tool state, regenerated on demand)
+.specify/extensions/.cache/
+

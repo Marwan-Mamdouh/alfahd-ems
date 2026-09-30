@@ -9,12 +9,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
-import { compare, hash } from 'bcryptjs';
+import { hash, verify } from 'argon2';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, type User } from '../database/schema/index.js';
-import { BCRYPT_COST, toUserDto } from '../database/schema/mappers.js';
+import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
 import { SessionService } from '../redis/session.service.js';
 
@@ -61,7 +61,7 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
     const user = await this.findActiveUserByEmail(email);
-    if (!user || !(await compare(password, user.passwordHash))) {
+    if (!user || !(await verify(user.passwordHash, password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
     const tokenId = randomUUID();
@@ -122,7 +122,7 @@ export class AuthService {
     if (!userId) {
       throw new BadRequestException('Invalid or expired reset token');
     }
-    const passwordHash = await hash(newPassword, BCRYPT_COST);
+    const passwordHash = await hash(newPassword, ARGON2_OPTIONS);
     await this.db
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
