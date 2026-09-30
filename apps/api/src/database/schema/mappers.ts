@@ -2,7 +2,11 @@ import type { UserDto } from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import type { User } from './index.js';
 
-export const BCRYPT_COST = 12;
+export const ARGON2_OPTIONS = {
+  memoryCost: 65_536,
+  timeCost: 3,
+  parallelism: 1,
+} as const;
 
 export function toUserDto(user: User): UserDto {
   return {

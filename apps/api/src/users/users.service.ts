@@ -11,11 +11,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { compare, hash } from 'bcryptjs';
+import { hash, verify } from 'argon2';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, type User } from '../database/schema/index.js';
-import { BCRYPT_COST, toUserDto } from '../database/schema/mappers.js';
+import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 
 @Injectable()
 export class UsersService {
@@ -39,7 +39,7 @@ export class UsersService {
     if (existing.length > 0) {
       throw new ConflictException('Email already in use');
     }
-    const passwordHash = await hash(dto.password, BCRYPT_COST);
+    const passwordHash = await hash(dto.password, ARGON2_OPTIONS);
     const rows = await this.db
       .insert(users)
       .values({ email: dto.email, passwordHash, role: dto.role })
@@ -98,10 +98,10 @@ export class UsersService {
 
   async changePassword(userId: string, dto: ChangePasswordRequestDto): Promise<void> {
     const user = await this.findRowOrThrow(userId);
-    if (!(await compare(dto.oldPassword, user.passwordHash))) {
+    if (!(await verify(user.passwordHash, dto.oldPassword))) {
       throw new BadRequestException('Old password is incorrect');
     }
-    const passwordHash = await hash(dto.newPassword, BCRYPT_COST);
+    const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
     await this.db
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
