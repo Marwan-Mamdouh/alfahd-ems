@@ -22,7 +22,10 @@ export interface LoginResponseDto {
 }
 
 export interface RefreshTokenRequestDto {
-  refreshToken: string; // Used by mobile apps, web uses cookies
+  // Used by mobile apps; web clients send no token and rely on the HTTP-only
+  // refresh cookie, so this is optional. At least one of cookie/body must be
+  // present or the request is rejected with 401.
+  refreshToken?: string;
 }
 
 export interface RefreshTokenResponseDto {

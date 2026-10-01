@@ -1,6 +1,16 @@
 import type { LoginResponseDto, RefreshTokenResponseDto } from '@alfahd/types';
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
-import type { Request } from 'express';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import {
   ForgotPasswordRequestDto,
@@ -11,33 +21,75 @@ import {
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RateLimitGuard } from './guards/rate-limit.guard.js';
 import type { JwtUser } from './strategies/jwt.strategy.js';
+import {
+  REFRESH_COOKIE_NAME,
+  REFRESH_COOKIE_PATH,
+  refreshCookieOptions,
+} from '../config/refresh-cookie.js';
+
+// `cookies` is populated by cookie-parser and already typed by @types/cookie-parser.
+type CookieRequest = Request;
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post('login')
   @UseGuards(RateLimitGuard)
   @HttpCode(200)
-  login(@Body() dto: LoginRequestDto): Promise<LoginResponseDto> {
-    return this.authService.login(dto.email, dto.password);
+  async login(
+    @Body() dto: LoginRequestDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponseDto> {
+    const result = await this.authService.login(dto.email, dto.password);
+
+    // Deliver the refresh token as an HTTP-only cookie so it is unreachable from
+    // JavaScript. The body copy stays for mobile clients, which have no cookie
+    // jar and keep the token in secure storage.
+    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, this.cookieOptions());
+
+    return result;
   }
 
   @Post('refresh')
   @HttpCode(200)
   refresh(
     @Body() dto: RefreshTokenRequestDto,
-    @Req() req: Request,
+    @Req() req: CookieRequest,
   ): Promise<RefreshTokenResponseDto> {
-    return this.authService.refresh(dto.refreshToken, req.ip);
+    // Cookie first (web), body second (mobile). Neither present is a 401 rather
+    // than a validation error, so an expired-cookie reload fails cleanly.
+    const token = req.cookies?.[REFRESH_COOKIE_NAME] ?? dto.refreshToken;
+    if (!token) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    return this.authService.refresh(token, req.ip);
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
-  async logout(@Req() req: Request & { user: JwtUser }): Promise<{ ok: true }> {
+  async logout(
+    @Req() req: Request & { user: JwtUser },
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ ok: true }> {
     await this.authService.logout(req.user.userId, req.user.tokenId);
+    // Path must match the path used when setting the cookie, or the browser
+    // retains it and the session appears to survive logout.
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
     return { ok: true };
+  }
+
+  private cookieOptions() {
+    return refreshCookieOptions({
+      NODE_ENV: this.configService.get<string>('NODE_ENV'),
+      REFRESH_COOKIE_SAME_SITE: this.configService.get<'lax' | 'none'>('REFRESH_COOKIE_SAME_SITE'),
+      REFRESH_COOKIE_SECURE: this.configService.get<boolean>('REFRESH_COOKIE_SECURE'),
+      JWT_REFRESH_EXPIRES_IN: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
+    });
   }
 
   @Post('forgot-password')

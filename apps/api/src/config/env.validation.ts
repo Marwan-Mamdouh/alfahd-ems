@@ -20,10 +20,25 @@ export const envSchema = z
     SMTP_PASS: z.string().optional(),
     SMTP_FROM: z.string().email().optional(),
     FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+    // Comma-separated allowlist for credentialed CORS. Never use '*': browsers
+    // reject a wildcard origin on credentialed requests, which silently breaks
+    // the refresh cookie.
+    CORS_ORIGINS: z.string().optional(),
+    // Refresh-cookie attributes. Both default from NODE_ENV so local HTTP dev
+    // and production cross-origin deploys each get a valid policy.
+    REFRESH_COOKIE_SAME_SITE: z.enum(['lax', 'none']).optional(),
+    REFRESH_COOKIE_SECURE: z.coerce.boolean().optional(),
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',
   })
+  .refine(
+    (data) => data.REFRESH_COOKIE_SAME_SITE !== 'none' || data.REFRESH_COOKIE_SECURE !== false,
+    {
+      message:
+        'REFRESH_COOKIE_SAME_SITE=none requires REFRESH_COOKIE_SECURE=true — browsers reject SameSite=None without Secure',
+    },
+  )
   .superRefine((data, ctx) => {
     if (data.EMAIL_PROVIDER === 'smtp') {
       for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'] as const) {
