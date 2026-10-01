@@ -4,7 +4,7 @@ import type {
   RefreshTokenRequestDto as RefreshTokenRequest,
   ResetPasswordRequestDto as ResetPasswordRequest,
 } from '@alfahd/types';
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class LoginRequestDto implements LoginRequest {
   @IsEmail()
@@ -16,9 +16,13 @@ export class LoginRequestDto implements LoginRequest {
 }
 
 export class RefreshTokenRequestDto implements RefreshTokenRequest {
+  // Optional: web clients authenticate with the HTTP-only refresh cookie and send
+  // no body. Mobile clients still send the token. The controller requires at
+  // least one of the two, so an empty body is a 401 rather than a validation error.
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class ForgotPasswordRequestDto implements ForgotPasswordRequest {
