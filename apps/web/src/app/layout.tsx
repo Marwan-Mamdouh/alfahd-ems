@@ -5,6 +5,7 @@ import { Cairo } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "../providers/query-provider";
 import { SessionExpiryRedirect } from "@/components/auth/session-expiry-redirect";
+import { SessionRestore } from "@/components/auth/session-restore";
 
 const cairo = Cairo({
   subsets: ["arabic", "latin"],
@@ -45,7 +46,9 @@ export default function RootLayout({
   `}
       >
         <SessionExpiryRedirect />
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          <SessionRestore>{children}</SessionRestore>
+        </QueryProvider>
       </body>
     </html>
   );
