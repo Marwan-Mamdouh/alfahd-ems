@@ -106,14 +106,32 @@ export class AuthService {
     }
     const token = randomUUID();
     await this.sessionService.createPasswordResetToken(token, user.id);
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
-    const resetLink = `${frontendUrl}/reset-password?token=${token}`;
-    await this.emailService.send({
-      to: user.email,
-      subject: 'Password reset',
-      text: `You requested a password reset. Use this link within 1 hour: ${resetLink}`,
-      html: `<p>You requested a password reset. Use this link within 1 hour:</p><p><a href="${resetLink}">Reset password</a></p>`,
-    });
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+    // Must match the dashboard route exactly. The page lives at
+    // `src/app/auth/reset-password/page.tsx`, so the App Router serves it at
+    // `/auth/reset-password` — a link to `/reset-password` 404s, and the user who
+    // clicked it can never complete recovery.
+    const resetLink = `${frontendUrl}/auth/reset-password?token=${token}`;
+
+    try {
+      await this.emailService.send({
+        to: user.email,
+        subject: 'Password reset',
+        text: `You requested a password reset. Use this link within 1 hour: ${resetLink}`,
+        html: `<p>You requested a password reset. Use this link within 1 hour:</p><p><a href="${resetLink}">Reset password</a></p>`,
+      });
+    } catch (error) {
+      // Swallow delivery failures so the HTTP response never depends on whether
+      // the address is registered. Letting this throw produced 500 for a known
+      // address and 200 for an unknown one — a perfect account-enumeration
+      // oracle, reachable whenever SMTP is unavailable (i.e. any local machine
+      // without MailHog, and any production mail outage). EmailService already
+      // logs the cause; the caller still gets the neutral "if registered" reply.
+      this.logger.warn('Password-reset email delivery failed', {
+        reason: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {

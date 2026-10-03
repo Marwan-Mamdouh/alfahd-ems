@@ -211,7 +211,7 @@ describe('Auth (e2e) — refresh cookie transport', () => {
   }
 
   describe('POST /auth/login', () => {
-    it('sets an HTTP-only refresh cookie scoped to /auth', async () => {
+    it('sets an HTTP-only refresh cookie scoped to the whole origin', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: admin.email, password: PASSWORD })
@@ -223,8 +223,12 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       expect(cookie).toBeDefined();
       // HTTP-only is the entire point: JS must not be able to read the token.
       expect(cookie).toMatch(/HttpOnly/i);
-      // Scoping to /auth keeps a long-lived credential off GET /users etc.
-      expect(cookie).toMatch(/Path=\/auth/i);
+      // Path=/ is required for the web client: per RFC 6265 a cookie is sent only
+      // on request paths it prefixes, and the browser reaches the refresh route at
+      // `/api/auth/refresh` (Next.js rewrite) while the proxy guard reads the
+      // cookie on `/dashboard`. `/auth` reaches neither.
+      expect(cookie).toMatch(/Path=\/(;|$)/i);
+      expect(cookie).not.toMatch(/Path=\/auth/i);
       // Never SameSite=Strict — incompatible with the cross-origin deploy.
       expect(cookie).not.toMatch(/SameSite=Strict/i);
     });
@@ -387,7 +391,7 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       const cleared = cookies?.find((c) => c.startsWith('refresh_token='));
 
       expect(cleared).toBeDefined();
-      expect(cleared).toMatch(/Path=\/auth/i);
+      expect(cleared).toMatch(/Path=\/(;|$)/i);
       // Express expresses clearCookie as an empty value plus a past Expires date,
       // so accept either that or an explicit Max-Age=0.
       expect(cleared).toMatch(/refresh_token=;/);

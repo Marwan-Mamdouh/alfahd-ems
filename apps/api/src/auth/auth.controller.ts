@@ -56,9 +56,10 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
-  refresh(
+  async refresh(
     @Body() dto: RefreshTokenRequestDto,
     @Req() req: CookieRequest,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<RefreshTokenResponseDto> {
     // Cookie first (web), body second (mobile). Neither present is a 401 rather
     // than a validation error, so an expired-cookie reload fails cleanly.
@@ -66,7 +67,21 @@ export class AuthController {
     if (!token) {
       throw new UnauthorizedException('Invalid refresh token');
     }
-    return this.authService.refresh(token, req.ip);
+
+    try {
+      return await this.authService.refresh(token, req.ip);
+    } catch (error) {
+      // Clear a REJECTED cookie. `httpOnly` means JavaScript cannot delete it,
+      // and `POST /auth/logout` — the only other thing that clears it — needs a
+      // valid access token, which the caller does not have here. Leaving a dead
+      // cookie in the browser traps the web client: the middleware guard sees the
+      // cookie and bounces every navigation to /dashboard, while every API call
+      // 401s, so the user can never reach the login form.
+      if (error instanceof UnauthorizedException) {
+        res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+      }
+      throw error;
+    }
   }
 
   @Post('logout')
