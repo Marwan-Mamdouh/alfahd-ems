@@ -1,206 +1,281 @@
+---
+
+description: "Task list for Web API Integration (004)"
+---
+
 # Tasks: Web API Integration
 
-**Input**: `specs/004-web-api-integration/spec.md` + `plan.md`
-**Scope**: Frontend integration plus a **bounded backend change** (refresh cookie + credentialed CORS) and new backend e2e coverage. No new endpoints. No schema migration.
-**Base URL**: `process.env.NEXT_PUBLIC_API_URL` (e.g. `http://localhost:3000`). No versioning prefix.
+**Input**: Design documents from `/specs/004-web-api-integration/`
 
-> **This file was regenerated.** The previous version assumed a frontend-only scope with body-based refresh. Spec Revision (2) moved the refresh token into an `httpOnly` cookie, which invalidated old T005 ("Do NOT switch to cookie transport"), T007 (keep the refresh token in memory), T009 (`storage`-event cross-tab sync), and the note forbidding changes to `apps/api/`.
+**Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md), [data-model.md](./data-model.md), [contracts/api-contracts.md](./contracts/api-contracts.md), [quickstart.md](./quickstart.md)
 
-## Key Decisions (read once, then build)
+**Tests**: **No test tasks are generated.** The spec does not request TDD, and `apps/web` has **no test runner** — only `typecheck` and `lint`. Web behaviour is verified by the manual scenarios in `quickstart.md`. The one backend task (T004) updates an existing spec, which is not a new test task. Adding Vitest to `apps/web` is out of scope.
 
-- **Access token** → Zustand memory only. No `persist` middleware. Never `localStorage`, never a JS-visible cookie.
-- **Refresh token** → `httpOnly` cookie set by the backend. The frontend never reads, stores, or writes it. It is sent automatically by the browser when requests are credentialed.
-- **Refresh transport is dual**: `POST /auth/refresh` prefers the cookie, falls back to the request body (mobile keeps `expo-secure-store`/bearer).
-- **No rotation in this feature.** Refresh returns a new access token only; the refresh token stays valid until logout or revocation.
-- **Cookie attributes are env-driven** (R3): `SameSite=None; Secure; Path=/auth` in production; `SameSite=Lax`, no `Secure`, on local HTTP. `Path=/auth` keeps it off `/users`.
-- **CORS uses an explicit allowlist with `credentials: true`.** Never `*`.
-- **Frontend sends `withCredentials: true`** — without it the browser drops the cookie and refresh 401s.
-- Backend role value is **`CS`**, not `CUSTOMER_SERVICE`. Display strings never go to the backend.
-- `GET /users` returns the **full array**. Sort/filter client-side. No server pagination.
-- Dashboard shows **3 real KPIs** (total users, active users, active technicians) + **1 placeholder** (tickets, no retry control).
-- The page at `/dashboard/employees` is labelled **"Users"** — `UserDto` has no employee fields until M2.
+**Organization**: Tasks are grouped by user story to enable independent implementation and testing.
 
-## Files You Will Touch
+## ⚠️ Before starting: blocking gate
 
-**Backend**
-- `apps/api/src/main.ts`
-- `apps/api/src/config/env.validation.ts`
-- `apps/api/src/config/refresh-cookie.ts` *(new)*
-- `apps/api/src/auth/auth.controller.ts`
-- `apps/api/src/auth/dto.ts`
-- `apps/api/.env.example`
+`checklists/delegation.md` (42 items) is the requirements-quality gate. **It is now fully checked** (42/42), so implementation is unblocked.
 
-**Frontend**
-- `apps/web/src/core/api/types.ts`
-- `apps/web/src/core/api/axios-instance.ts`
-- `apps/web/src/core/api/endpoints.ts`
-- `apps/web/src/core/auth/auth.store.ts`
-- `apps/web/src/components/auth/session-restore.tsx` *(new)*
-- `apps/web/src/components/auth/session-expiry-redirect.tsx`
-- `apps/web/src/app/auth/login/page.tsx`
-- `apps/web/src/app/(dashboard)/dashboard/page.tsx`
-- `apps/web/src/app/(dashboard)/employees/page.tsx`
-- `apps/web/src/proxy.ts`
+**Every task below has a documented wrong answer that still typechecks and lints.** These are listed in `plan.md` per task. T008 (cookie name) and T017 (user object on reload) are the two where a wrong answer silently breaks authentication with no error anywhere. Read the task's "Wrong answer" block before implementing it.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: Can run in parallel (different files, no dependencies on incomplete tasks)
+- **[Story]**: Which user story this task belongs to (US1–US6)
+- Exact file paths in every description
+
+## Path Conventions
+
+- **Backend**: `apps/api/src/...`, `apps/api/test/...`
+- **Web app**: `apps/web/src/...`
+- **Ports**: API on `3000`, dashboard on `3001` (they collide by default — see T002)
 
 ---
 
-## Phase 1: Setup
+## Phase 1: Setup (Shared Infrastructure)
 
-**Purpose**: Env and types build so the app runs.
+**Purpose**: Environment and dependencies. No story logic.
 
-- [X] T001 Create `apps/web/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3000`
-- [X] T002 Run `pnpm --filter @alfahd/types build` and confirm `packages/types/dist/` exists
+- [X] T001 Add `"@alfahd/types": "workspace:*"` to `dependencies` in `apps/web/package.json`, then run `pnpm install && pnpm --filter @alfahd/types build`
+- [X] T002 Set `API_URL=http://localhost:3000` and `PORT=3001` in `apps/web/.env.local`; add the same keys to `apps/web/.env.example`; **delete** `NEXT_PUBLIC_API_URL` from both (a `NEXT_PUBLIC_` value is inlined into the client bundle and leaks the internal host)
+- [X] T003 Add a `rewrites()` entry to `apps/web/next.config.ts` mapping `{ source: "/api/:path*", destination: \`\${process.env.API_URL}/:path*\` }` — the browser must reach the API same-origin so the refresh cookie is readable by middleware
 
-**Checkpoint**: `packages/types/dist/` exists; `apps/web/.env.local` present.
-
----
-
-## Phase 2: Backend — refresh cookie + CORS *(blocks all frontend session work)*
-
-**Goal**: The backend can deliver a refresh token to the browser that JavaScript cannot read, and can accept it back cross-origin.
-**Independent Test**: `POST /auth/login` returns a `Set-Cookie` with the documented attributes; `POST /auth/refresh` succeeds with only that cookie and no body; `POST /auth/logout` clears it.
-
-- [X] T003 [P] Add `cookie-parser` to `apps/api` (`pnpm --filter @alfahd/api add cookie-parser` and `@types/cookie-parser` as a dev dep)
-- [X] T004 [P] Extend `apps/api/src/config/env.validation.ts` with `CORS_ORIGINS` (optional string, defaults to `FRONTEND_URL`) and `REFRESH_COOKIE_SAME_SITE` (optional enum `lax|none`, default derived from `NODE_ENV`) and `REFRESH_COOKIE_SECURE` (optional coerced boolean, default derived from `NODE_ENV`). Reuse the existing `NODE_ENV` and `FRONTEND_URL` keys — do not duplicate them.
-- [X] T005 Create `apps/api/src/config/refresh-cookie.ts` exporting `REFRESH_COOKIE_NAME` (`refresh_token`) and a pure `refreshCookieOptions(env)` returning `{ httpOnly: true, secure, sameSite, path: '/auth', maxAge }`. Requirements: **production → `secure: true, sameSite: 'none'`** (cross-origin); **non-production → `secure: false, sameSite: 'lax'`**; `httpOnly` always true; `path` always `/auth`. Keep it pure so it is unit-testable without booting Nest. Use a string-literal union, not a TS `enum` (Constitution VI).
-- [X] T006 Wire `apps/api/src/main.ts`: register `cookieParser()`, then `app.enableCors({ origin: <parsed CORS_ORIGINS array>, credentials: true, allowedHeaders: ['Content-Type', 'Authorization'], methods: ['GET','POST','PATCH','DELETE','OPTIONS'] })`. **Must not use `*`** — browsers reject a wildcard with credentials. Read values from `ConfigService`, not `process.env` directly, so validation applies.
-- [X] T007 Update `apps/api/src/auth/dto.ts` so `RefreshTokenRequestDto.refreshToken` is **optional** (the cookie may supply it). Keep validation on the type of a present value. Also relax the shared `RefreshTokenRequestDto.refreshToken` in `packages/types` to `refreshToken?: string` — it is the contract both sides compile against.
-- [X] T008 Update `apps/api/src/auth/auth.controller.ts`:
-  - `login` → add `@Res({ passthrough: true })` and `res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions(env))`. Return the payload unchanged so the `ResponseInterceptor` still wraps it.
-  - `refresh` → accept an **optional** body and read `req.cookies?.[REFRESH_COOKIE_NAME] ?? dto.refreshToken`. Resolve cookie first, body second. If neither is present, throw `UnauthorizedException`. **Do not change `AuthService`** — no rotation.
-  - `logout` → add `@Res({ passthrough: true })` and `res.clearCookie(REFRESH_COOKIE_NAME, { path: '/auth' })`. The `path` must match the set path or the browser keeps the cookie.
-- [X] T009 Add `CORS_ORIGINS` / `REFRESH_COOKIE_*` documentation to `apps/api/.env.example` with the production-vs-local values spelled out.
-
-**Checkpoint**: `pnpm --filter @alfahd/api typecheck` passes. A manual `curl -i -X POST /auth/login` shows `Set-Cookie`; a `curl` to `/auth/refresh` with that cookie and an empty body `{}` returns 200.
+**Checkpoint**: `curl -i http://localhost:3001/api/auth/login -X POST -H 'Content-Type: application/json' -d '{"email":"a@b.com","password":"x"}'` returns a **backend** response (401), not a Next.js 404.
 
 ---
 
-## Phase 3: Backend e2e coverage *(spec R11 — backs the "tested" assumption)*
+## Phase 2: Foundational (Blocking Prerequisites)
 
-**Goal**: Replace an unevidenced assumption with real coverage of the endpoints this feature depends on.
-**Independent Test**: `pnpm --filter @alfahd/api test:e2e` passes with auth, users CRUD, and guard behaviour asserted.
+**Purpose**: Auth plumbing and type correctness. **No user story work may begin until this phase is complete.**
 
-- [X] T012 Add `apps/api/src/config/refresh-cookie.spec.ts` (unit, not e2e — the cookie policy is pure and testable without booting Nest): assert `refreshCookieOptions` returns `sameSite: 'none'` + `secure: true` in production and `sameSite: 'lax'` + `secure: false` otherwise, that `httpOnly` is always true, that `path` is always `/auth`, that `maxAge` tracks `JWT_REFRESH_EXPIRES_IN`, that `SameSite=none` without `Secure` throws, and that `corsOrigins` never returns `*`.
-- [X] T010 [P] Add `apps/api/test/auth.e2e-spec.ts`, following the existing `test/app.e2e-spec.ts` pattern (override `REDIS_CLIENT` with a stub so no live docker is required). Also register `cookieParser()` in the test app — `main.ts` does this at bootstrap, which the test harness bypasses. Assert: login success (200 + `Set-Cookie` present + `HttpOnly` set), login bad password (401, **no** cookie set), login rate limit (429), refresh **cookie-only** (200 + new `accessToken`, and assert the response body has **no** `refreshToken` field), refresh body-only fallback (200), refresh with neither (401), logout clears the cookie (`Max-Age=0`), deactivated user refresh (401).
-- [X] T011 [P] Add `apps/api/test/users.e2e-spec.ts`: `GET /users` as ADMIN (200, array wrapped in `data`, `role` is `CS` for a CS user), as non-admin (403), without a token (401), `POST /users` duplicate email (409), `PATCH /users/:id` self-deactivation (400), `POST /users/change-password` wrong old password (400).
+**⚠️ The backend is already built.** Commit `ee32f3b` shipped the refresh cookie, CORS, `cookie-parser`, and both e2e suites. Do **not** re-implement them. Exactly one backend change remains: T004.
 
-- [X] T013 Add CORS assertions to the auth e2e spec: a request carrying an `Origin` **not** in the allowlist gets no `Access-Control-Allow-Origin` header, and a preflight from an allowed origin returns `Access-Control-Allow-Credentials: true`. This is the guard against a future `*` regression, which would break cookie auth in production while every functional test still passed. Requires calling `app.enableCors(...)` in the test harness too, since `main.ts` is not exercised there.
+- [X] T004 Change `REFRESH_COOKIE_PATH` from `'/auth'` to `'/'` in `apps/api/src/config/refresh-cookie.ts` and update the assertion at `apps/api/src/config/refresh-cookie.spec.ts:39`. **Wrong answer:** `'/api/auth'` — RFC 6265 sends a cookie only on request paths it prefixes, so that value is never sent on `/dashboard` and the middleware guard redirects every user to login on every load. Verify: `pnpm --filter @alfahd/api test`
 
-**Checkpoint**: `pnpm --filter @alfahd/api test:e2e` green. Tests must not require live docker services beyond what the existing suite already assumes.
+> **Baseline note — RESOLVED, no longer applies.** This run recorded on 2026-10-03 that `pnpm --filter @alfahd/api test` passed 58/58 across 6 of 8 files and that 2 files failed to load with `Error: An Application Control policy has blocked this file.`, and that `test:e2e` could not run at all. **Neither reproduced**: unit tests pass **65/65 across 8 of 8 files**, and e2e passes **42/42 across 3 of 3 files**. T004's cookie-`Path` change was therefore verified end-to-end, including the `Set-Cookie` assertions in `auth.e2e-spec.ts`. The WDAC/AppLocker restriction was specific to that earlier session.
+>
+> If those load errors ever return, they are a host policy issue unrelated to this code: (a) do not weaken or delete a test to make the suite green; (b) a CI run on an unrestricted host remains the authority for R11's e2e coverage.
+- [X] T005 Replace the contents of `apps/web/src/core/api/types.ts`: delete `AuthUser`, `Role`, `Department`, `EmployeeStatus`, the `success` field from `ApiResponse<T>`, and `PaginatedResponse<T>`; re-export `Role` and `UserDto` from `@alfahd/types`; keep `ApiResponse<T>` as `{ data: T }`. `UserDto` is `{ id, email, role, isActive, createdAt }` — there is **no** `name`, `department`, `status`, or `warehouseId`
+- [X] T006 Replace every `"CUSTOMER_SERVICE"` with `"CS"` in `apps/web/src/core/permissions/permissions.ts` (5 occurrences: `ips.view`, `customers.view`, `customers.manage`, `tickets.view`, `tickets.manage`) and import `Role` from `@alfahd/types`. **Wrong answer:** leaving the value — `hasPermission()` then never matches a real response and every non-admin is denied. The matrix must continue to cover all four roles (`ADMIN`, `WAREHOUSE_STAFF`, `CS`, `TECHNICIAN`) per FR-027
+- [X] T007 [P] Add a `ROLE_LABELS` record and `roleLabel()` helper mapping `ADMIN`→"مدير النظام", `WAREHOUSE_STAFF`→"موظف مخزن", `CS`→"خدمة العملاء", `TECHNICIAN`→"فني" in a new file `apps/web/src/core/auth/role-labels.ts`. **The raw wire value must never be rendered**
+- [X] T008 [US2] Replace `SESSION_COOKIE_NAME` with `export const REFRESH_COOKIE_NAME = "refresh_token" as const;` in `apps/web/src/core/auth/routes.ts`, keeping `LOGIN_PATH` and `DASHBOARD_PATH`. **Wrong answer:** any other name (`refreshToken`, `session`, `jwt`) — it compiles, the guard silently never matches, and every user is bounced to login with no error. Source of truth is `REFRESH_COOKIE_NAME` in `apps/api/src/config/refresh-cookie.ts`
+- [X] T009 [US2] Rewrite `apps/web/src/core/auth/auth.store.ts`: delete the `persist` middleware and the `createJSONStorage` import, delete the `refreshToken` state field, change `setSession` to `(accessToken, user)`, delete both `document.cookie` writes, add an `isRestoring: boolean` field initialised to `true`. Keep `clearSession`, `selectIsAuthenticated`, `selectRole`. **Wrong answer:** keeping the parameter but ignoring it — the value stays in memory and remains XSS-readable, defeating FR-002
+- [X] T010 [US2] Rewrite `apps/web/src/core/api/axios-instance.ts`: set `baseURL: "/api"`, keep `withCredentials: true`; **add** a request interceptor attaching `Authorization: Bearer <token>` from `useAuthStore.getState()` except on `/auth/login`, `/auth/forgot-password`, `/auth/reset-password`; **rewrite** `refreshAccessToken()` to `POST /api/auth/refresh` with an **empty body** and store only the returned `accessToken` — **wrong answer:** reading `data.data.refreshToken`, which the response does not contain, so it writes `undefined` and forces a logout on the second 401; keep the existing `refreshPromise` single-flight and `_retry` guard; **add** GET-only auto-retry (max 2 attempts, ~300ms then ~900ms) per FR-021, never for `POST`/`PATCH`/`DELETE`; export a `logout()` helper calling `/auth/logout`
 
----
-
-## Phase 4: Frontend foundation — API layer *(blocks all pages)*
-
-**Goal**: Types and transport match the real backend.
-**Independent Test**: `tsc --noEmit` passes in `apps/web`; a logged-in request carries `Authorization` and sends credentials.
-
-- [ ] T014 [P] Update `apps/web/src/core/api/types.ts` to match the backend exactly, deleting invented fields:
-  - `ApiResponse<T> = { data: T }` — **remove `success`** (it is not sent; the current type declares it required, so it is always `undefined` at runtime while typed as `boolean`)
-  - `AuthUser = { id: string; email: string; role: 'ADMIN' | 'WAREHOUSE_STAFF' | 'CS' | 'TECHNICIAN'; isActive: boolean; createdAt: string }` — **remove `name`, `status`, `department`, `warehouseId`**
-  - Add `toFrontendRole(role)` producing the display label for `CS` → `"Customer Service"`, and `toBackendRole()` for the inverse. Display strings must never be sent to the backend.
-  - `LoginResponse = { accessToken: string; refreshToken: string; user: AuthUser }` (login only)
-  - Add `RefreshResponse = { accessToken: string }` — **no `refreshToken`**, matching the backend
-  - Remove or clearly mark unused `PaginatedResponse` / `ListQueryParams`, or reduce them to what the users list actually uses
-  - **Knock-on effect:** `PERMISSIONS` in `permissions.ts` is declared `as const satisfies Record<string, readonly Role[]>`, and six of its entries list `CUSTOMER_SERVICE`. Narrowing `Role` to `CS` makes the file **fail to compile** until those are replaced with `CS`. Do this in the same commit (see T028) — expect the typecheck error rather than being surprised by it.
-- [ ] T015 [P] Update `apps/web/src/core/api/endpoints.ts`: users section uses `/users` paths; change-password points to `/users/change-password` (not `/auth/change-password`); no version prefix.
-- [ ] T016 Rewrite `apps/web/src/core/api/axios-instance.ts`:
-  - add `withCredentials: true` to `axios.create`
-  - add the **missing request interceptor** attaching `Authorization: Bearer <accessToken>`, skipped for `/auth/login` and `/auth/refresh`. Without it no authenticated request carries a token and SC-002 cannot hold.
-  - fix the refresh call to `POST /auth/refresh` with **credentials and no body token**, and store **only** `data.data.accessToken`. The current code reads `data.data.refreshToken` from a response that has no such field, writing `undefined` into the store and forcing a logout on the second 401 of any session.
-  - keep single-flight dedup and the `_retry` once-guard; clear the in-flight promise in `finally`
-  - on refresh failure: `clearSession()`, dispatch `SESSION_EXPIRED_EVENT`, reject
-
-**Checkpoint**: `pnpm --filter fahd-dashboard typecheck` passes. No authenticated request is issued without a bearer header.
+**Checkpoint**: `pnpm --filter fahd-dashboard typecheck` passes. Failures limited to `setSession` callers, fixed in the story phases below.
 
 ---
 
-## Phase 5: Frontend auth — login + session (US1 + US2) — MVP
+## Phase 3: User Story 1 — Real Authentication Integration (Priority: P1) — MVP
 
-**Goal**: Real login replaces the mock. The refresh token never reaches JavaScript.
-**Independent Test**: Log in with real credentials → lands on `/dashboard`. `localStorage` and `document.cookie` contain no token. Reload the page → still authenticated, no re-login.
+**Goal**: The login page authenticates against the real backend instead of a `setTimeout` mock.
 
-- [ ] T017 [US2] Rewrite `apps/web/src/core/auth/auth.store.ts`: **remove the `persist` middleware entirely.** Hold `user` and `accessToken` in memory only. Remove the `fahd-session` JS-writable flag cookie (the proxy guard now reads the `httpOnly` cookie). `clearSession` resets state and broadcasts to other tabs.
-- [ ] T018 [US2] Add `BroadcastChannel`-based cross-tab sync in `apps/web/src/core/auth/auth.store.ts`: on `clearSession()` publish a logout message; on receipt, other tabs clear their in-memory state and redirect to login. **Do not use the `storage` event** — with nothing written to `localStorage` it never fires. Guard for environments without `BroadcastChannel`.
-- [ ] T019 [US2] Create `apps/web/src/components/auth/session-restore.tsx`: on mount, if no access token is in memory, call `POST /auth/refresh` **with credentials** once; on success populate the store; on 401 clear state and stay on login. **Must not retry in a loop** when no cookie is present. Render nothing while restoring to avoid a login-page flash.
-- [ ] T020 [US1] Rewrite `apps/web/src/app/auth/login/page.tsx`: call `POST /auth/login` with email/password, unwrap `{ data: { accessToken, user } }`, store `user` + `accessToken` in memory, **discard the body's `refreshToken`** (never persist it — the cookie already holds it), redirect to `?redirect=` or `/dashboard`. Show "Invalid credentials" on 401, a rate-limit message on 429, and a generic message on 500/network.
-- [ ] T021 [US1] Remove the fake-login leftovers: demo banner text, the `setTimeout` mock, and the Arabic "demo mode" badge.
-- [ ] T022 [US1] Update `apps/web/src/components/auth/session-expiry-redirect.tsx` to listen for `SESSION_EXPIRED_EVENT`, call `clearSession()`, and redirect to `/auth/login?redirect=<current-path>`.
+**Independent Test**: Submit valid credentials → `POST /api/auth/login` returns 200, the `refresh_token` cookie is set with `httpOnly: true` and `path: /`, the user lands on `/dashboard`, and `document.cookie` does **not** contain `refresh_token` while `localStorage.getItem('fahd-auth')` is `null`.
 
-**Checkpoint**: Login works end-to-end. Reload preserves the session via cookie. No token in any JS-readable store. Logout clears everything and other tabs follow.
+- [X] T011 [US1] Update `apps/web/src/components/layout/header.tsx`: delete its local `ROLE_LABELS` (lines 9–14) and import it from `apps/web/src/core/auth/role-labels.ts` instead, which already maps `CS` correctly; replace the two `user?.name` reads (lines 32 and 38) with `user?.email`, since `UserDto` has no `name` field. Not marked `[P]`: it depends on T007 having created the shared helper
+- [X] T012 [US1] Replace the `setTimeout` mock `handleSubmit` in `apps/web/src/app/auth/login/page.tsx` with a real `POST /api/auth/login`; call `setSession(accessToken, user)` with **two** arguments; do **not** store `refreshToken` even though the response body contains it; add controlled `email` and `password` state; remove the "وضع العرض التجريبي" demo-mode badge (lines 75–77)
+- [X] T013 [US1] In `apps/web/src/app/auth/login/page.tsx`, add error handling: on 401 show one generic message identical for unknown email and wrong password — **wrong answer:** branching on status code or showing "account not found", which enumerates staff accounts. The login endpoint can return only 401, 429, or 5xx, so no other branch may reveal whether an account exists; on 429 show the rate-limit message (5 attempts per 10 min per IP) and honour `Retry-After`
+- [X] T014 [US1] In `apps/web/src/app/auth/login/page.tsx`, add a `safeRedirect(raw)` helper returning `/dashboard` unless `raw` starts with `/` and does not start with `//` or `/\`, then call `router.push(safeRedirect(searchParams.get("redirect")))`. **Wrong answer:** `router.push(searchParams.get("redirect") ?? "/dashboard")` — a crafted link such as `/auth/login?redirect=https://evil.example` redirects an authenticated user off-origin (FR-028)
+- [X] T015 [US1] Add a link to `/auth/forgot-password` in `apps/web/src/app/auth/login/page.tsx`. Include it even though T030 has not run yet — a 404 target is expected at this point, and omitting the link leaves no path to password recovery
 
----
-
-## Phase 6: Dashboard data (US3)
-
-**Goal**: 3 real KPIs from `GET /users`, 1 placeholder.
-**Independent Test**: Log in as ADMIN → dashboard shows real numbers for total/active/active-technicians, placeholder for tickets, skeletons while loading.
-
-- [ ] T023 [US3] Rewrite `apps/web/src/app/(dashboard)/dashboard/page.tsx` as a client component: fetch `GET /users` via `api` (unwrap the `data` array), derive **total users** (length), **active users** (`isActive === true`), **active technicians** (`role === 'TECHNICIAN' && isActive === true`). Show skeletons while loading; on failure show an error state with a retry action and log it. Render the tickets KPI as a static placeholder with **no retry control** — a KPI with no endpoint must not offer a retry that cannot succeed.
-- [ ] T024 [US3] Guard the dashboard page with the existing `RoleGuard` permission `dashboard.view`.
-
-**Checkpoint**: Three real KPI values, one placeholder, distinct error vs placeholder states.
+**Checkpoint**: Login works end to end. `grep -rn "fake-access-token" apps/web/src` returns nothing.
 
 ---
 
-## Phase 7: Users list (US4)
+## Phase 4: User Story 2 — Secure Token Storage & Session Management (Priority: P1)
 
-**Goal**: The page at `/dashboard/employees` shows real users, labelled "Users".
-**Independent Test**: Log in as ADMIN → table lists real users. Non-admin → access-denied.
+**Goal**: The access token lives in memory only; the refresh token lives only in the `httpOnly` cookie; sessions survive reloads and propagate across tabs.
 
-- [ ] T025 [US4] Rewrite `apps/web/src/app/(dashboard)/employees/page.tsx`: fetch `GET /users` (unwrap the `data` array, no pagination), render email, role label via `toFrontendRole()`, active flag, and created date in the existing `DataTable`; delete the `MOCK_EMPLOYEES` array; show skeleton + error/retry states; show the count badge from real data. Update visible copy from "Employees" to "Users" (route path stays for bookmark stability).
-- [ ] T026 [US4] Guard the page with `RoleGuard`, using the permission key that actually exists in `permissions.ts` — verify the name before wiring it rather than assuming `employees.manage` is present.
+**Independent Test**: Log in, press F5, and the dashboard is still reachable with exactly one `/api/auth/refresh` call. Delete the cookie, reload, and you land on login with **no** retry loop.
 
-**Checkpoint**: No mock data anywhere. Table shows backend users.
+- [X] T016 [US2] Create `apps/web/src/components/auth/session-restore.tsx`: call `POST /api/auth/refresh` exactly **once** on mount (empty body) guarded by a `useRef`; on 200 call `setSession(accessToken, userFromToken(accessToken))`; on 401 call `clearSession()`; while `isRestoring` render a full-page loader, not children. **Wrong answer:** reading `data.user` — the refresh response carries `accessToken` only, so this stores `undefined`
+- [X] T017 [US2] In `apps/web/src/components/auth/session-restore.tsx`, add the local `userFromToken()` helper that base64-decodes the JWT payload segment and returns `{ id: sub, email, role, isActive: true, createdAt: "" }`. This is a **display source, not a security check** — the server already verified the token. **Wrong answers:** adding a `user` field to `RefreshTokenResponseDto` (breaks the frozen M4 #54 contract and the mobile client), or calling `GET /auth/me` (**wrong answer** — `endpoints.ts` declares it but the backend implements no such route, so it 404s)
+- [X] T018 [US2] In `apps/web/src/components/auth/session-restore.tsx`, guard the logout race: if `clearSession()` ran while the restore was in flight, the late 200 must **not** call `setSession` — capture `sessionEpoch` before the await and skip `setSession` if it changed (or if a token was already set by a concurrent login)
+- [X] T019 [US2] Mount `<SessionRestore />` in `apps/web/src/app/layout.tsx` next to the existing `<SessionExpiryRedirect />`
+- [X] T020 [US2] Add a `BroadcastChannel('fahd-auth')` to `apps/web/src/components/auth/session-expiry-redirect.tsx`: broadcast on `clearSession()` and on logout; on receipt clear state and redirect to login within ~5s (SC-007); keep the existing `SESSION_EXPIRED_EVENT` listener for same-tab expiry; close the channel on unmount. **Wrong answer:** a `storage` event listener — with no `localStorage` write no storage event is ever emitted, so it is inert and silently never fires
+
+**Checkpoint**: Reload restores the session; cross-tab logout propagates; no token is reachable from JavaScript.
 
 ---
 
-## Phase 8: RBAC + polish (US5)
+## Phase 5: User Story 5 — Route Protection & RBAC Enforcement (Priority: P1)
 
-**Goal**: Routes protected, error handling consistent, gates green.
-**Independent Test**: Logged-out user hitting `/dashboard` → redirected to login. Tampered token → 401 → login.
+**Goal**: Protected routes redirect unauthenticated users to login with a `redirect` parameter; role checks gate the pages.
 
-- [ ] T027 [US5] Update `apps/web/src/proxy.ts` to read the **`httpOnly` refresh cookie** for the auth check, keeping the `redirect` query parameter. The middleware cannot read an in-memory token, so this is the only place a server-side auth signal can come from.
-- [ ] T028 [US5] Replace every `CUSTOMER_SERVICE` with `CS` across `apps/web/src`. `permissions.ts` has six such entries (`ips.view`, `customers.view`, `customers.manage`, `tickets.view`, `tickets.manage`, and the `Role` union it imports). Verify the mapping is display-only: the wire value is `CS`, and only `toFrontendRole()` produces human text.
-- [ ] T029 [US5] Run the scenarios in `quickstart.md` and fix failures. Confirm SC-009 (no token in `localStorage`/`sessionStorage`/`document.cookie`) and SC-010 (reload restores; cleared cookie lands on login with no refresh loop). Note `quickstart.md` was written for the superseded body-based design — update its cookie/session steps to match Revision (2) before running it, or its assertions will test behaviour that no longer exists.
-- [ ] T030 Run the full gate: `pnpm --filter @alfahd/types build`, then `pnpm --filter @alfahd/api typecheck`, `lint`, `test`, `test:e2e`, then `pnpm --filter fahd-dashboard typecheck`. All green before commit.
+**Independent Test**: With no cookie, visiting `/dashboard` redirects to `/auth/login?redirect=/dashboard`. A non-admin visiting `/employees` (`(dashboard)` is a route group and adds no URL segment) sees access-denied.
+
+- [X] T021 [US5] In `apps/web/src/proxy.ts`, replace the `SESSION_COOKIE_NAME` lookup with `REFRESH_COOKIE_NAME` imported from `apps/web/src/core/auth/routes.ts`. Leave the `export const config = { matcher: [...] }` block unchanged — it correctly excludes `api`
+- [X] T022 [US5] In `apps/web/src/proxy.ts`, keep the guard as a **presence check only** — do **not** attempt to validate the token. The refresh token is an opaque Redis UUID, so middleware cannot verify it without a network call per navigation. **Wrong answer:** adding a validation fetch inside middleware — it adds latency to every navigation and still cannot be authoritative. A stale cookie passes the guard and fails on the first API call with 401, which is the intended design
+- [X] T023 [US5] Wrap the page content in `apps/web/src/app/(dashboard)/dashboard/page.tsx` with `<RoleGuard permission="dashboard.view">` from `apps/web/src/core/auth/guards.tsx`, per FR-027. Gate by the named permission — **wrong answer:** comparing `role === "ADMIN"` inline, which breaks silently whenever a role's permission set changes. Not marked `[P]`: the US3 phase edits the same file, so this completes first
+
+**Checkpoint**: Unauthenticated navigation redirects; non-admins see access-denied on guarded pages.
+
+---
+
+## Phase 6: User Story 3 — Dashboard Data Integration (Priority: P1)
+
+**Goal**: Three KPI cards show real numbers derived from `GET /users`; KPI cards with no data source show a static placeholder.
+
+**Independent Test**: Log in as admin → three cards show real numbers, the tickets card shows `—` with no retry button. Stop the API → the three real cards show an error state **with** retry, visibly different from the placeholder.
+
+- [X] T024 [US3] Add `"use client"` to `apps/web/src/app/(dashboard)/dashboard/page.tsx` (it is currently a server component) and fetch `GET /users` once via the axios instance
+- [X] T025 [US3] Derive exactly three metrics in `apps/web/src/app/(dashboard)/dashboard/page.tsx`: total users (`data.length`), active users (`isActive === true`), active technicians (`role === "TECHNICIAN" && isActive === true`)
+- [X] T026 [US3] Keep the tickets and inventory cards as static `—` placeholders with **no retry button** in `apps/web/src/app/(dashboard)/dashboard/page.tsx` — they have no data source (R7/R8). On fetch failure show `<ErrorState onRetry={...}>` on the three real cards only and `console.error` the failure. **Wrong answer:** giving the placeholder cards a retry control, which makes "no data source" indistinguishable from "fetch failed"
+- [X] T027 [US3] Handle the empty-array case in `apps/web/src/app/(dashboard)/dashboard/page.tsx`: when the fetched array is `[]`, all three real cards show `—` (FR-023). Use `LoadingState` from `apps/web/src/components/shared/states` while loading
+
+**Checkpoint**: Three real KPIs, one retry-free placeholder, error state distinct from placeholder.
+
+---
+
+## Phase 7: User Story 4 — Users List Integration (Priority: P2)
+
+**Goal**: The users page lists real data from `GET /users` with client-side sort and filter.
+
+**Independent Test**: Log in as admin, open `/employees` (`(dashboard)` is a route group and adds no URL segment) → rows show email, role label, active flag, created date. No `name` column, because `UserDto` has no name. Sorting reorders rows with no network call.
+
+- [X] T028 [US4] Delete lines 1–82 of `apps/web/src/app/(dashboard)/employees/page.tsx` (a commented-out duplicate of the whole page) and remove `MOCK_EMPLOYES` plus the local `Employee` interface
+- [X] T029 [US4] Fetch `GET /users` in `apps/web/src/app/(dashboard)/employees/page.tsx` and build columns for email, role label (via `roleLabel()` — **wrong answer:** rendering the raw wire value `CS`), active flag, and created date. Remove every `name` column: `UserDto` has no `name`, so such a column renders blank
+- [X] T030 [US4] In `apps/web/src/app/(dashboard)/employees/page.tsx`: relabel the page "المستخدمون" (route stays `/employees` (`(dashboard)` is a route group and adds no URL segment) so bookmarks survive, per R9); wire the count badge to `data.length`; pass `isLoading`/`error`/`onRetry`/`emptyTitle` to the existing `DataTable` for FR-023; implement client-side sort and filter only and remove any `TablePagination` usage; wrap in `<RoleGuard permission="employees.manage">`
+
+**Checkpoint**: Real rows, client-side sort, no mock data, no blank columns.
+
+---
+
+## Phase 8: User Story 6 — Password Recovery Integration (Priority: P2)
+
+**Goal**: The forgot-password and reset-password pages call the real endpoints instead of showing a fake confirmation.
+
+**Independent Test**: Both URLs return 200 (they 404 today). Submitting a registered and an unregistered email produce byte-identical confirmation text. A used or expired reset token shows an explicit expired-link message.
+
+- [X] T031 [US6] Move `apps/web/src/core/auth/forgot-password/page.tsx` → `apps/web/src/app/auth/forgot-password/page.tsx` and `apps/web/src/core/auth/reset-password/page.tsx` → `apps/web/src/app/auth/reset-password/page.tsx`, then delete the emptied source directories. Keep the files byte-identical. **The route URL derives from the directory path** — `app/auth/forgot-password` yields `/auth/forgot-password`, matching `proxy.ts`. **Wrong answer:** editing the files where they sit — `src/core/` is not an App Router directory, so both URLs keep returning 404
+- [X] T032 [US6] Replace the local-state mock `handleSubmit` in `apps/web/src/app/auth/forgot-password/page.tsx` with `POST /api/auth/forgot-password`, show the same confirmation for registered and unregistered addresses (the endpoint always returns 200), and remove the `TODO: Phase 2` comment
+- [X] T033 [US6] In `apps/web/src/app/auth/reset-password/page.tsx`: read `token` via `useSearchParams()` from `next/navigation`; `POST /api/auth/reset-password` with `{ token, newPassword }`; on 400 show an explicit "this link is invalid or expired" message plus a link back to `forgot-password` — **wrong answer:** a generic error, which strands anyone who followed an old email; remove the `TODO (Phase 2)` comment; keep the existing 8-character minimum (it matches the backend) and add **no** client-side rule the server does not enforce (FR-025)
+
+**Checkpoint**: Both routes 200, real endpoints called, expired token handled explicitly.
+
+---
+
+## Phase 9: Polish & Cross-Cutting Concerns
+
+- [X] T034 [P] Update `specs/004-web-api-integration/contracts/api-contracts.md`: cookie table `Path` → `/` and `SameSite` → `Lax`, the `/api/*` rewrite and its consequences, the GET-only retry budget, `POST /users/change-password` → 201, and the 5-per-10-min login rate limit. Required by Constitution §V — a separate frontend developer codes against this file and M4 #54 will freeze it
+- [X] T035 [P] Update `specs/004-web-api-integration/quickstart.md`: dashboard on 3001, `/api/...` paths, cookie `path: /`, the new troubleshooting rows, and a scenario for password recovery
+- [X] T036 Confirm no secret leakage in `apps/web`. Check **behaviour, not prose** — several files mention these names in explanatory comments, so a naive `grep` over the whole tree gives false positives. The assertions that must hold:
+  - `grep -rn "document\.cookie\s*=\|localStorage\.\|sessionStorage\.\|zustand/middleware\|\.refreshToken" apps/web/src` → **no matches** (the token is never written to or read from any JS-reachable store)
+  - `grep -rn "NEXT_PUBLIC_API_URL\|fahd-session\|SESSION_COOKIE_NAME" apps/web/src` → matches only in comments explaining what was removed
+- [X] T037 Run the full gate: `pnpm --filter @alfahd/types build && pnpm --filter @alfahd/api typecheck && pnpm --filter @alfahd/api lint && pnpm --filter @alfahd/api test && pnpm --filter @alfahd/api test:e2e && pnpm --filter fahd-dashboard typecheck && pnpm --filter fahd-dashboard lint`
+- [X] T038 Walk all 10 validation scenarios in `specs/004-web-api-integration/quickstart.md` and confirm SC-001 through SC-014
+- [X] T039 Review follow-ups: session epoch guard, public-route-safe restore, SameSite=Lax default, env boolean parsing, FRONTEND_URL=3001, per-card KPI states.
+  > **Verified — 27/27 automated checks pass** against the real stack (Docker Postgres + Redis, API on 3000, dashboard on 3001), plus 5 browser-transport checks. Re-run with `pnpm infra:up`, `pnpm api:dev`, and `pnpm --filter fahd-dashboard dev -- --port 3001`.
+  >
+  > Confirmed live: **SC-001** login 200 through the rewrite in ~450ms; cookie `refresh_token` with **`Path=/`, `HttpOnly`, `SameSite=Lax`** (the T004 fix, observed on the wire); **SC-002/005** `{ data }` envelope, canonical `UserDto` (`id,email,role,isActive,createdAt` — no `name`/`department`/`status`), `GET /users` a bare unpaginated array, role `ADMIN` not `CUSTOMER_SERVICE`; **SC-006** unauthenticated `GET /users` → 401; **SC-010** exactly **one** `/api/auth/refresh` call on reload, no retry loop, response carries `accessToken` only; logout clears the cookie (`Path=/`, epoch `Expires`) and subsequent access **and** refresh both 401; **SC-013** registered and unregistered `forgot-password` return **byte-identical** 200s; **SC-014** a bogus reset token returns 400 naming the token, so the UI shows the expired-link panel; **FR-022** wrong-password and unknown-email 401s are byte-identical; login rate limit confirmed at 5 attempts → 429.
+  >
+  > **Two defects this pass found and fixed.** (1) `forgotPassword` let an email-delivery failure escape, so a registered address returned **500 while an unknown one returned 200** — an account-enumeration oracle, reachable whenever SMTP is down. Delivery errors are now swallowed and logged; pinned by 4 new tests in `apps/api/src/auth/auth.service.spec.ts`. (2) The e2e cookie assertions were updated for `Path=/`.
+  >
+  > **Not machine-verifiable here** (need a real browser, which this environment has no attachment for): SC-007 cross-tab `BroadcastChannel` redirect, and the `document.cookie` / `localStorage` half of SC-009. Their code-level preconditions *are* verified — `HttpOnly` is present on the wire so the token is unreadable from JS, and `grep` finds no `localStorage`/`sessionStorage`/`document.cookie` write anywhere in `apps/web/src`. Worth one manual pass in a browser before release.
 
 ---
 
 ## Dependencies & Execution Order
 
-- Phase 1 → Phase 2 → Phase 3, 4 → Phase 5 → Phases 6, 7 → Phase 8
-- **Phase 2 strictly precedes Phase 5**: the frontend cannot use a cookie the backend never sets.
-- T003, T004 parallel. T010, T011, T012 parallel (separate files).
-- T014, T015 parallel. T016 after T014 (needs the new types).
-- T017 before T018, T019, T022 (store shape first).
-- T019 before T020 verification (restore must not fight the login page).
-- T023/T024 independent of T025/T026; both need T016.
-- T030 last.
+### Phase Dependencies
 
-## Parallel Example
+- **Setup (Phase 1)**: no dependencies
+- **Foundational (Phase 2)**: depends on Phase 1 — **blocks every user story**
+- **User Stories (Phases 3–8)**: all depend on Phase 2. They may then run in parallel
+- **Polish (Phase 9)**: depends on all desired stories
+
+### Story Dependencies
+
+- **US1 (P1, login)**: no story dependencies
+- **US2 (P1, token storage)**: no story dependencies, but T016/T017 depend on T009's `setSession` signature
+- **US5 (P1, route protection)**: T021 depends on T008's `REFRESH_COOKIE_NAME`
+- **US3 (P1, dashboard)**: T024–T027 edit `dashboard/page.tsx`, which T023 also edits — T023 completes first (same phase order)
+- **US4 (P2, users list)**: independent; shares `roleLabel()` with US3
+- **US6 (P2, password recovery)**: T032/T033 depend on T031; otherwise independent
+
+### Within Each Story
+
+- Types and constants before the code that imports them
+- Auth store before the axios interceptors and pages that read it
+- T031 (route move) before T032/T033 — editing a file outside `app/` changes dead code
+- Commit after each task or logical group
+
+### Parallel Opportunities
+
+- T007 and T008 run in parallel (new file vs `routes.ts`)
+- T012–T015 all edit `login/page.tsx`, so they are **one sequential group** on one worker; T011 on `header.tsx` runs in parallel with that whole group
+- T034 and T035 run in parallel (different documents)
+- After Phase 2 completes, US1, US2, US5, and US6 can proceed in parallel on different files
+
+---
+
+## Parallel Example: Phase 2 (Foundational)
 
 ```bash
-# After Phase 2:
-# Dev A: T010 + T011 + T012 + T013   (backend e2e)
-# Dev B: T014 + T015 + T016          (API layer)
-# Then:
-# Dev A: T017 → T018 → T019 → T020 → T021 → T022   (auth)
-# Dev B: T023 + T024                                (dashboard)
-# Dev C: T025 + T026                                (users)
+# Different files, no interdependency:
+Task: "Add REFRESH_COOKIE_NAME constant in apps/web/src/core/auth/routes.ts"   # T008
+Task: "Add role-label helper in apps/web/src/core/auth/role-labels.ts"        # T007
 ```
 
-## MVP Scope
+## Parallel Example: User Story 1 (after T007)
 
-Ship Phases 1 + 2 + 3 + 4 + 5: real login, cookie-backed session, and the e2e coverage that justifies trusting it. The dashboard and users pages follow.
+```bash
+# Two workers, disjoint files:
+Worker A: T011  → apps/web/src/components/layout/header.tsx
+Worker B: T012, T013, T014, T015 → apps/web/src/app/auth/login/page.tsx  (one worker, one file)
+```
+
+## Parallel Example: User Stories after Phase 2
+
+```bash
+# One worker per story — disjoint file sets:
+Task: "US1 login page"      → apps/web/src/app/auth/login/page.tsx
+Task: "US2 session restore" → apps/web/src/components/auth/session-restore.tsx
+Task: "US5 proxy guard"     → apps/web/src/proxy.ts
+Task: "US6 route move"      → apps/web/src/core/auth/{forgot,reset}-password/ → apps/web/src/app/auth/
+```
+
+---
+
+## Implementation Strategy
+
+### MVP First (Phase 1 + 2 + US1)
+
+1. Phase 1: Setup (T001–T003)
+2. Phase 2: Foundational (T004–T010) - **blocks everything**
+3. Phase 3: US1 login (T011–T015)
+4. **STOP and VALIDATE**: log in with real credentials, confirm the cookie attributes, confirm no token in JavaScript
+
+US1 alone is not a shippable product without US2 — without session restore a page reload loses the session — but it is the smallest verifiable increment.
+
+### Incremental Delivery
+
+1. Phase 1 + 2 → foundation ready
+2. US1 + US2 → **a working authenticated session** (MVP: login survives reload, logout propagates)
+3. US5 → route protection complete
+4. US3 + US4 → data-driven dashboard and users list
+5. US6 → password recovery
+6. Polish → contract and quickstart aligned
+
+### Parallel Team Strategy
+
+After Phase 2, split by file ownership to avoid conflicts:
+
+- **Worker A**: US1 (`login/page.tsx`) + US5 (`proxy.ts`)
+- **Worker B**: US2 (`session-restore.tsx`, `session-expiry-redirect.tsx`)
+- **Worker C**: US3 (`dashboard/page.tsx`) + US4 (`employees/page.tsx`)
+- **Worker D**: US6 (`app/auth/*`)
+
+T023 (RoleGuard wrap) touches `dashboard/page.tsx`, which Worker C also edits in the US3 phase. T023 is sequenced into the US5 phase precisely so it finishes first — do not parallelise it into Worker C's phase.
+
+---
 
 ## Notes
 
-- Commit after each task; use conventional commits with a useful what/why.
-- **No schema migration** — this feature touches no table, so no Drizzle migration is needed.
-- Do not add new endpoints. Do change `apps/api` auth transport and CORS, per spec Revision (2).
-- Do not add React Query/SWR — keep the existing Axios pattern.
-- `SameSite=Strict` MUST NOT be used for the refresh cookie; it is incompatible with the cross-origin deployment.
-- Never read or write the refresh token in JavaScript; clearing it is the backend's job via `POST /auth/logout`.
-- Rotation is still backend-owned and deferred (FR-004). Do not implement or assume it.
-- Stop at each checkpoint to validate the story independently.
+- `[P]` tasks = different files, no dependencies
+- Every task has a **"Wrong answer"** line where a plausible mistake typechecks and silently breaks auth — read it
+- `apps/web` has **no test runner**: T037 and T038 are the real verification
+- Commit after each task; use conventional prefixes (`feat:`, `fix:`) per `AGENTS.md`
+- Stop at any checkpoint to validate the story independently
+- Avoid same-file conflicts — two workers must not edit one file

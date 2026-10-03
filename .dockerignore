@@ -1,9 +1,13 @@
 # Docker ignore patterns for alfahd-ems monorepo
+.git/
 node_modules/
 dist/
 build
+.next/
+coverage/
 *.log
 .env*
 Dockerfile*
+.dockerignore
 .coverage
 .turbosnap

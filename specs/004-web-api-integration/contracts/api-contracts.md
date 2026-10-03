@@ -11,9 +11,9 @@ These contracts define the interface between the Next.js frontend and the NestJS
 
 > **Correction from the previous revision of this file.** It previously listed, as side effects, that login "sets an `httpOnly` cookie" and that refresh "rotates the refresh token (old one invalidated)" and "sets a new `httpOnly` cookie". Neither was true of the backend at the time of writing: there was no cookie handling anywhere in `apps/api`, and `AuthService.refresh()` returns a new access token while re-signing with the **same** token id. Those statements described intended behaviour that did not exist. Cookie behaviour below is now real and implemented by this feature; **rotation still does not happen** and must not be assumed.
 
-## CORS (added by this feature)
+## CORS (implemented — required for mobile, not for the web dashboard)
 
-`main.ts` previously called no `enableCors()`, so cross-origin credentialed requests were impossible.
+`main.ts` previously called no `enableCors()`. Credentialed CORS is now enabled and remains **required for the mobile app**; the web dashboard reaches the API same-origin through the rewrite below and does not exercise it.
 
 | Setting | Value | Why it cannot be looser |
 |---------|-------|------------------------|
@@ -52,7 +52,9 @@ Authenticates a user and returns tokens.
 ```
 
 **Response (401)**: Invalid credentials (`{ "statusCode": 401, ... }`)
-**Response (429)**: Rate limited — 5 attempts per 10 minutes per IP (Redis sliding window; counts all attempts)
+**Response (429)**: Rate limited — 5 attempts per 10 minutes per IP (Redis sliding window; counts all attempts). Implemented by `RateLimitGuard` on `POST /auth/login` only.
+
+> The guard throws a plain `HttpException`, so **no `Retry-After` header is actually sent** despite the frontend being specified to honour one. The frontend therefore shows the rate-limit message without a countdown. Clients must treat `Retry-After` as optional on a 429.
 
 **Side Effects**:
 - Backend creates a session in Redis
@@ -65,12 +67,33 @@ Authenticates a user and returns tokens.
 |-----------|-----------|-------------|
 | `HttpOnly` | yes | yes |
 | `Secure` | yes | **no** |
-| `SameSite` | `None` | `Lax` |
-| `Path` | `/auth` | `/auth` |
+| `SameSite` | `none` (default in production) | `Lax` |
+| `Path` | `/` | `/` |
 | `Max-Age` | 604800 (7d, matches the Redis session TTL) | same |
 
-> `SameSite=None` **requires** `Secure`, which browsers only honour over HTTPS. A single hard-coded `SameSite=None; Secure` policy therefore silently breaks cookie auth on `http://localhost` — a failure that presents as "refresh always 401s" and looks like a frontend bug. The switch is driven by an environment value.
-> `Path=/auth` scopes the cookie so it is **never attached to `GET /users`** or any other request, limiting exposure.
+> **`SameSite` is environment-driven, and its default depends on `NODE_ENV`.** `refreshCookieOptions()` resolves it as: `REFRESH_COOKIE_SAME_SITE` env override → `none` in production → `Lax` otherwise. Production defaults to `None` for the mobile native client (a genuinely cross-site client); the **web dashboard does not need it** because the rewrite below makes every call same-origin, so `Lax` suffices there and is what local development gets.
+
+> **`Path=/` is mandatory and is the single most breakable value in this contract.** Per RFC 6265 a cookie is sent only on request paths it prefixes. The browser-visible auth path is `/api/auth/*` (after the rewrite below) and middleware reads the cookie on `/dashboard`. `Path=/auth` is never sent on `/api/auth/refresh`, so session restore fails on every reload. `Path=/api/auth` is never sent on `/dashboard`, so the proxy guard redirects every user to login. Only `/` reaches both.
+>
+> The cost of `Path=/` is that the cookie is also attached to page navigations on the dashboard's own origin. Accepted: it is `httpOnly`, same-origin after the rewrite, and read only on `/api/auth/refresh`.
+>
+> `SameSite=None` **requires** `Secure`, which browsers only honour over HTTPS. A single hard-coded `SameSite=None; Secure` policy silently breaks cookie auth on `http://localhost` — presenting as "refresh always 401s" and looking like a frontend bug. The attribute stays environment-driven. `None` is retained only for the mobile native client, which is a genuinely cross-site client.
+
+---
+
+## Same-Origin Transport (web only)
+
+The dashboard adds a Next.js `rewrites` entry mapping `/api/:path*` to the API base URL. The browser therefore requests `/api/auth/login`, never `https://api.railway.app/auth/login`.
+
+| Concern | Effect on the web client |
+|---------|--------------------------|
+| Cookie origin | Same-origin (the dashboard's own domain), so middleware can read it — this is what makes the FR-008 guard possible at all |
+| `SameSite` | `Lax` suffices; `None` is no longer needed for web |
+| CORS | **Not exercised** by the dashboard. It remains enabled on the backend for the mobile app and direct consumers |
+| Base URL | Relative `/api`, not `NEXT_PUBLIC_API_URL`. A `NEXT_PUBLIC_` value is inlined into the browser bundle and would leak the internal host |
+| Env var | `API_URL`, server-only, consumed by `next.config.ts` |
+
+The mobile client is **unaffected** — it calls the API origin directly and keeps using the request body for refresh.
 
 ---
 
@@ -144,6 +167,8 @@ Requests a password reset email.
 ```
 
 **Note**: Always returns 200 to prevent email enumeration.
+
+> **The 200 is unconditional.** `AuthService.forgotPassword` catches and logs email-delivery failures instead of propagating them. Letting the error escape produced **500 for registered addresses and 200 for unknown ones** — an account-enumeration oracle, reachable whenever SMTP is unavailable (any dev machine without MailHog, and any production mail outage). Clients must rely on the response being invariant, not merely on it usually being 200.
 
 ---
 
@@ -285,17 +310,28 @@ Revokes all sessions for a user (ADMIN only).
 
 ```ts
 axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
-  withCredentials: true,   // required: without it the refresh cookie is never sent
+  baseURL: '/api',          // relative — goes through the Next.js rewrite
+  withCredentials: true,
   timeout: 30_000,
 })
 ```
 
 ### Interceptors
 
-1. **Request interceptor** (added by this feature — previously absent): attaches `Authorization: Bearer <accessToken>` to every request except `/auth/login` and `/auth/refresh`.
+1. **Request interceptor** (added by this feature — previously absent): attaches `Authorization: Bearer <accessToken>` to every request except `/auth/login`, `/auth/forgot-password`, and `/auth/reset-password`.
    > The interceptor did not exist before this feature. The only place a bearer header was ever set was inside the 401-retry path, so ordinary authenticated requests were issued unauthenticated and the server rejected them. Spec SC-002 was unsatisfiable until this was added.
 2. **Response interceptor**: On 401 (excluding `/auth/login` and `/auth/refresh` themselves), performs a single-flight refresh and retries the original request **once** (`_retry` guard).
+
+### Auto-Retry Policy (FR-021)
+
+| Rule | Value |
+|------|-------|
+| Which methods | `GET` **only** |
+| Max attempts | 2 (so up to 3 total network calls) |
+| Backoff | ~300ms, then ~900ms |
+| `POST` / `PATCH` / `DELETE` | **Never auto-retried** — replaying a mutation after a network timeout can duplicate writes, and the backend has no idempotency key to make replay safe |
+| Interaction with 401 | Independent. The refresh-and-retry path is governed by the interceptors above |
+| Manual retry | Always available on every error state, whether or not auto-retry was attempted |
 
 ### Single-Flight Refresh
 
@@ -303,11 +339,25 @@ At most one refresh request is in flight. Concurrent 401s await the same promise
 
 ### Session Restore on Mount
 
-On app mount the frontend calls `POST /auth/refresh` with credentials. On success it populates the store; on 401 it clears state and leaves the user on login. **It must not retry in a loop** when no cookie is present.
+On app mount the frontend calls `POST /api/auth/refresh` **with an empty body** — the cookie carries the token. On success it populates the store; on 401 it clears state and leaves the user on login. It **must not retry in a loop**; guard it so it fires exactly once per page load.
+
+> The refresh response contains `accessToken` **only** — no user object, and there is **no profile endpoint** (`endpoints.ts` declares `auth.me`, but the backend implements no `GET /auth/me`; calling it 404s). The frontend therefore decodes the display fields from the access token's JWT payload. This is a **display source, not a security check** — the server already verified the token. The contract is unchanged for this reason: adding a `user` field to `RefreshTokenResponseDto` would break the frozen M4 #54 contract and the mobile client. Note `createdAt` is not in the JWT either, so any created-date column must come from `GET /users`.
 
 ### Cross-Tab Sync
 
 `BroadcastChannel` — **not** the `storage` event. With no token written to `localStorage`, no storage event is ever emitted, so a `storage`-based listener silently never fires.
+
+### Route Guard (`proxy.ts`)
+
+| Aspect | Behaviour |
+|--------|-----------|
+| Cookie read | `refresh_token` (from `REFRESH_COOKIE_NAME` in `apps/web/src/core/auth/routes.ts`) |
+| Check | **Presence only.** The refresh token is an opaque Redis UUID, not a JWT, so middleware cannot validate it without a network call on every navigation |
+| Removed | The old JS-writable `fahd-session` flag cookie is deleted — a flag that script can both read and write is not an authentication control |
+| Failure mode | A stale or revoked cookie passes the guard and fails on the first real API call with 401, which clears the session. The API is the sole enforcement point (FR-009) |
+| Matcher | Excludes `api`, so middleware never runs on rewritten backend calls |
+
+The web app also defines `FORGOT_PASSWORD_PATH` (`/auth/forgot-password`) and `RESET_PASSWORD_PATH` (`/auth/reset-password`) as the public routes. These must match the `app/auth/*` directory names, since the App Router derives the URL from the directory.
 
 ### Role Values
 
@@ -319,6 +369,19 @@ The backend emits `CS`, **not** `CUSTOMER_SERVICE`. The frontend `Role` type mus
 |--------|-------------------|
 | 401 | Attempt refresh → retry once → if refresh fails, clear session and redirect to login |
 | 403 | Show access-denied message |
-| 429 | Show rate-limit message, honouring `Retry-After` |
+| 429 | Show rate-limit message, honouring `Retry-After` **if present** (the backend does not currently send it) |
 | 500 | Show generic error with retry option |
 | Network error | Show "connection lost" message with retry |
+
+### Password Recovery
+
+Both pages are **in scope** and are wired to the real endpoints. Both now live under `src/app/auth/`, so they are reachable routes: `app/auth/forgot-password` serves `/auth/forgot-password` and `app/auth/reset-password` serves `/auth/reset-password`. (They previously sat in `src/core/auth/`, which is not an App Router directory — they were not routes and returned 404, while `proxy.ts` whitelisted both paths and the backend emailed links to a reset URL. That mismatch is resolved.)
+
+> **Reset link path.** The backend builds the emailed link as `${FRONTEND_URL}/auth/reset-password?token=…`. It must match the App Router directory exactly — a link to `/reset-password` 404s and the user can never complete recovery.
+
+| Endpoint | Status | Client behaviour |
+|----------|--------|------------------|
+| `POST /auth/forgot-password` | 200 always, even for an unknown email | Show **identical** confirmation for registered and unregistered addresses |
+| `POST /auth/reset-password` | 200, or 400 for an invalid/expired/used token | On 400 show an explicit "link invalid or expired" message plus a route back to `forgot-password` — not a generic failure |
+
+Client-side password rules must not exceed what the server enforces (min 8 characters). A rule shown to the user but not enforced server-side produces a confusing rejection.
