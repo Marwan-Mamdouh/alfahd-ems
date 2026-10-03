@@ -9,13 +9,22 @@ import type { EnvConfig } from './env.validation.js';
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
 /**
- * Scopes the cookie to the auth routes so it is never attached to `GET /users`
- * or any other request. Minimises exposure of a long-lived credential.
+ * Scopes the cookie to every path on the origin.
+ *
+ * RFC 6265 sends a cookie only on request paths it prefixes, and the web
+ * dashboard reaches the API through a Next.js rewrite, so the browser-visible
+ * refresh path is `/api/auth/refresh` while the route guard reads the cookie on
+ * `/dashboard`. Neither `'/auth'` nor `'/api/auth'` reaches both: `'/auth'` is
+ * never sent on `/api/auth/refresh` (session restore fails on every reload) and
+ * `'/api/auth'` is never sent on `/dashboard` (the proxy guard redirects every
+ * user to login). Only `'/'` satisfies both, so the cookie is also attached to
+ * page navigations on our own origin — accepted, since it is `httpOnly` and read
+ * only on `/auth/refresh`.
  *
  * NOTE: `POST /auth/logout` must clear the cookie with this same path, otherwise
  * the browser keeps it and the session appears to survive logout.
  */
-export const REFRESH_COOKIE_PATH = '/auth';
+export const REFRESH_COOKIE_PATH = '/';
 
 export type CookieSameSite = 'lax' | 'none';
 
@@ -32,19 +41,18 @@ export interface RefreshCookieEnv {
  * Kept pure and separate from the Nest bootstrap so the policy is unit-testable
  * without standing up the app.
  *
- * Why this is environment-driven rather than constant: the API (Railway) and the
- * dashboard (Vercel) are different origins, so production requires
- * `SameSite=None` — but browsers reject `SameSite=None` unless `Secure` is also
- * set, and `Secure` cookies are dropped over plain HTTP. A single hard-coded
- * `None; Secure` policy therefore works in production and fails on
- * `http://localhost`, where the symptom is "refresh always 401s" rather than an
- * obvious config error.
+ * Why this is environment-driven rather than constant: the web dashboard
+ * reaches the API **same-origin** through the Next.js `/api/*` rewrite (R12),
+ * so `Lax` is correct everywhere. `Secure` defaults on in production.
+ * `SameSite=None` is available only as an explicit
+ * `REFRESH_COOKIE_SAME_SITE=none` opt-in, for a native/mobile client. It still
+ * requires `Secure`.
  */
 export function refreshCookieOptions(env: RefreshCookieEnv): CookieOptions {
   const isProduction = env.NODE_ENV === 'production';
 
   const secure = env.REFRESH_COOKIE_SECURE ?? isProduction;
-  const sameSite: CookieSameSite = env.REFRESH_COOKIE_SAME_SITE ?? (isProduction ? 'none' : 'lax');
+  const sameSite: CookieSameSite = env.REFRESH_COOKIE_SAME_SITE ?? 'lax';
 
   // SameSite=None is invalid without Secure; fail fast rather than emit a cookie
   // the browser will silently drop.

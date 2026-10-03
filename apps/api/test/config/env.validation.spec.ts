@@ -94,7 +94,7 @@ describe('envSchema validation', () => {
 
   it('defaults FRONTEND_URL', () => {
     const result = envSchema.parse(validEnv);
-    expect(result.FRONTEND_URL).toBe('http://localhost:3000');
+    expect(result.FRONTEND_URL).toBe('http://localhost:3001');
   });
 
   it('throws when EMAIL_PROVIDER=smtp but SMTP vars are missing', () => {
@@ -120,5 +120,19 @@ describe('envSchema validation', () => {
         SMTP_PASS: undefined,
       }),
     ).toThrow();
+  });
+
+  it("parses REFRESH_COOKIE_SECURE 'false' as boolean false", () => {
+    const result = envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'false' });
+    expect(result.REFRESH_COOKIE_SECURE).toBe(false);
+  });
+
+  it("parses REFRESH_COOKIE_SECURE 'true' as boolean true", () => {
+    const result = envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'true' });
+    expect(result.REFRESH_COOKIE_SECURE).toBe(true);
+  });
+
+  it("rejects REFRESH_COOKIE_SECURE 'yes'", () => {
+    expect(() => envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'yes' })).toThrow();
   });
 });

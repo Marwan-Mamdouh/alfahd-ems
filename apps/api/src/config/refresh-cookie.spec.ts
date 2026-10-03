@@ -7,10 +7,10 @@ import {
 } from './refresh-cookie.js';
 
 describe('refreshCookieOptions', () => {
-  it('uses SameSite=None + Secure in production for cross-origin deploys', () => {
+  it('uses SameSite=Lax + Secure in production (same-origin via the /api rewrite)', () => {
     const options = refreshCookieOptions({ NODE_ENV: 'production' });
 
-    expect(options.sameSite).toBe('none');
+    expect(options.sameSite).toBe('lax');
     expect(options.secure).toBe(true);
   });
 
@@ -32,11 +32,15 @@ describe('refreshCookieOptions', () => {
     }
   });
 
-  it('always scopes the cookie to the auth routes', () => {
-    // Keeps a long-lived credential off every non-auth request, e.g. GET /users.
+  it('scopes the cookie to the whole origin so both the refresh route and the middleware guard receive it', () => {
+    // Per RFC 6265 a cookie is sent only on request paths it prefixes. The
+    // browser-visible refresh path is `/api/auth/refresh` (Next.js rewrite) and
+    // the proxy guard reads the cookie on `/dashboard`. Only `/` reaches both:
+    // `/auth` never reaches the refresh call and `/api/auth` never reaches the
+    // guarded page routes.
     expect(refreshCookieOptions({ NODE_ENV: 'production' }).path).toBe(REFRESH_COOKIE_PATH);
     expect(refreshCookieOptions({ NODE_ENV: 'development' }).path).toBe(REFRESH_COOKIE_PATH);
-    expect(REFRESH_COOKIE_PATH).toBe('/auth');
+    expect(REFRESH_COOKIE_PATH).toBe('/');
   });
 
   it('honours explicit env overrides', () => {

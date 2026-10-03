@@ -16,14 +16,15 @@ async function bootstrap() {
   // Required to read the refresh cookie on POST /auth/refresh.
   app.use(cookieParser());
 
-  // The dashboard (Vercel) and the API (Railway) are different origins, and the
-  // refresh token travels as a cookie — so credentialed CORS is mandatory, not
-  // cosmetic. `origin` is an explicit allowlist: a wildcard is rejected by
-  // browsers on credentialed requests, which would block the cookie entirely.
+  // The web dashboard is same-origin with this API through the Next.js
+  // `/api/*` rewrite, so credentialed CORS is not needed for it. CORS with an
+  // explicit allowlist remains for the mobile app and direct API consumers
+  // (FR-017). A wildcard is rejected by browsers on credentialed requests,
+  // which would block the cookie entirely.
   app.enableCors({
     origin: corsOrigins({
       CORS_ORIGINS: configService.get<string>('CORS_ORIGINS'),
-      FRONTEND_URL: configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000',
+      FRONTEND_URL: configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001',
     }),
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],

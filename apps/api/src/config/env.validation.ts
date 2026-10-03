@@ -19,7 +19,7 @@ export const envSchema = z
     SMTP_USER: z.string().optional(),
     SMTP_PASS: z.string().optional(),
     SMTP_FROM: z.string().email().optional(),
-    FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+    FRONTEND_URL: z.string().url().default('http://localhost:3001'),
     // Comma-separated allowlist for credentialed CORS. Never use '*': browsers
     // reject a wildcard origin on credentialed requests, which silently breaks
     // the refresh cookie.
@@ -27,7 +27,11 @@ export const envSchema = z
     // Refresh-cookie attributes. Both default from NODE_ENV so local HTTP dev
     // and production cross-origin deploys each get a valid policy.
     REFRESH_COOKIE_SAME_SITE: z.enum(['lax', 'none']).optional(),
-    REFRESH_COOKIE_SECURE: z.coerce.boolean().optional(),
+    // Not z.coerce.boolean(): Boolean("false") === true, so "false" would parse as true.
+    REFRESH_COOKIE_SECURE: z
+      .enum(['true', 'false'])
+      .transform((v) => v === 'true')
+      .optional(),
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',
