@@ -4,6 +4,16 @@ import nextTs from "eslint-config-next/typescript";
 import prettier from "eslint-config-prettier/flat";
 
 const eslintConfig = [
+  {
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      "next-env.d.ts",
+    ],
+  },
   ...nextVitals,
   ...nextTs,
   prettier,
