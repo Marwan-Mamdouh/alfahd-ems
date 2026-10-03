@@ -10,33 +10,33 @@
 
 ## Requirement Completeness
 
-- [ ] CHK016 - Are pagination parameter requirements (page, pageSize, defaults, limits) explicitly specified for the employees list? [Completeness, Spec §FR-007]
-- [ ] CHK017 - Are empty-state requirements defined for the employees list and dashboard KPIs? [Completeness, Gap]
-- [ ] CHK018 - Are retry requirements (max attempts, backoff, user-triggered vs automatic) defined for failed API calls? [Completeness, Spec §FR-011]
-- [ ] CHK019 - Are logging requirements for data-fetch failures specified (what is logged, where, with what severity)? [Completeness, Spec §User Story 3]
+- [x] CHK016 - Are pagination parameter requirements (page, pageSize, defaults, limits) explicitly specified for the employees list? [Completeness, Spec §FR-007]
+- [x] CHK017 - Are empty-state requirements defined for the employees list and dashboard KPIs? [Completeness, Gap]
+- [x] CHK018 - Are retry requirements (max attempts, backoff, user-triggered vs automatic) defined for failed API calls? [Completeness, Spec §FR-011]
+- [x] CHK019 - Are logging requirements for data-fetch failures specified (what is logged, where, with what severity)? [Completeness, Spec §User Story 3]
 
 ## Requirement Clarity
 
-- [ ] CHK020 - Is the definition of each dashboard KPI (e.g., what counts as an "active technician") explicitly specified? [Clarity, Gap, Spec §FR-006]
-- [ ] CHK021 - Is the placeholder-value requirement for unavailable KPIs specified with exact display content and conditions? [Clarity, Spec §FR-006]
-- [ ] CHK022 - Are user-friendly error message content requirements defined per failure mode (401, 403, 429, 500, network)? [Clarity, Spec §FR-011]
-- [ ] CHK023 - Is the single-flight deduplication requirement specified with observable behavior rather than implementation mechanism? [Clarity, Spec §FR-012]
+- [x] CHK020 - Is the definition of each dashboard KPI (e.g., what counts as an "active technician") explicitly specified? [Clarity, Gap, Spec §FR-006]
+- [x] CHK021 - Is the placeholder-value requirement for unavailable KPIs specified with exact display content and conditions? [Clarity, Spec §FR-006]
+- [x] CHK022 - Are user-friendly error message content requirements defined per failure mode (401, 403, 429, 500, network)? [Clarity, Spec §FR-011]
+- [x] CHK023 - Is the single-flight deduplication requirement specified with observable behavior rather than implementation mechanism? [Clarity, Spec §FR-012]
 
 ## Requirement Consistency
 
-- [ ] CHK024 - Are response envelope requirements (ApiResponse wrapper vs raw DTO) consistent between frontend types and contracts? [Consistency, Conflict, Spec §Key Entities]
-- [ ] CHK025 - Are dashboard success criteria consistent with the placeholder-values requirement for unavailable KPIs? [Conflict, Spec §SC-004 / FR-006]
-- [ ] CHK026 - Is Employee vs User terminology used consistently across user stories, requirements, and entities? [Consistency, Spec §User Story 4]
+- [x] CHK024 - Are response envelope requirements (ApiResponse wrapper vs raw DTO) consistent between frontend types and contracts? [Consistency, Conflict, Spec §Key Entities]
+- [x] CHK025 - Are dashboard success criteria consistent with the placeholder-values requirement for unavailable KPIs? [Conflict, Spec §SC-004 / FR-006]
+- [x] CHK026 - Is Employee vs User terminology used consistently across user stories, requirements, and entities? [Consistency, Spec §User Story 4]
 
 ## Acceptance Criteria Quality
 
-- [ ] CHK027 - Can "dashboard displays real KPI data" be objectively verified given only a subset of KPIs has data sources? [Measurability, Spec §SC-004]
-- [ ] CHK028 - Are login timing requirements ("under 3 seconds") defined with measurement boundaries (form submit to redirect, including network)? [Measurability, Spec §SC-001]
+- [x] CHK027 - Can "dashboard displays real KPI data" be objectively verified given only a subset of KPIs has data sources? [Measurability, Spec §SC-004]
+- [x] CHK028 - Are login timing requirements ("under 3 seconds") defined with measurement boundaries (form submit to redirect, including network)? [Measurability, Spec §SC-001]
 
 ## Dependencies & Assumptions
 
-- [ ] CHK029 - Is the assumption that backend auth/users endpoints are fully functional validated with a reference to test evidence? [Assumption, Spec §Assumptions]
-- [ ] CHK030 - Are versioned vs unversioned path requirements reflected consistently in endpoints, contracts, and axios configuration? [Consistency, Spec §Clarifications]
+- [x] CHK029 - Is the assumption that backend auth/users endpoints are fully functional validated with a reference to test evidence? [Assumption, Spec §Assumptions]
+- [x] CHK030 - Are versioned vs unversioned path requirements reflected consistently in endpoints, contracts, and axios configuration? [Consistency, Spec §Clarifications]
 
 ## Notes
 

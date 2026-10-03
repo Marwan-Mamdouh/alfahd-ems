@@ -10,33 +10,33 @@
 
 ## Requirement Completeness
 
-- [ ] CHK001 - Are authentication requirements specified for forgot-password and reset-password flows, or only for login/refresh/logout? [Completeness, Gap]
-- [ ] CHK002 - Are sensitive-data handling requirements defined for form preservation, including what must NOT be persisted? [Completeness, Gap, Spec §FR-013]
-- [ ] CHK003 - Is email enumeration prevention specified for login and forgot-password error responses? [Completeness, Gap, Security]
-- [ ] CHK004 - Are reuse-detection requirements defined for rotated refresh tokens from the frontend perspective? [Completeness, Gap, Spec §FR-004]
+- [x] CHK001 - Are authentication requirements specified for forgot-password and reset-password flows, or only for login/refresh/logout? [Completeness, Gap]
+- [x] CHK002 - Are sensitive-data handling requirements defined for form preservation, including what must NOT be persisted? [Completeness, Gap, Spec §FR-013]
+- [x] CHK003 - Is email enumeration prevention specified for login and forgot-password error responses? [Completeness, Gap, Security]
+- [x] CHK004 - Are reuse-detection requirements defined for rotated refresh tokens from the frontend perspective? [Completeness, Gap, Spec §FR-004]
 
 ## Requirement Clarity
 
-- [ ] CHK005 - Is "stored securely" in the login acceptance criteria quantified with explicit storage locations per token type? [Clarity, Spec §User Story 1]
-- [ ] CHK006 - Are refresh token rotation semantics explicitly defined (old token invalidation timing, new token issuance)? [Clarity, Spec §FR-004]
-- [ ] CHK007 - Is the distinction between client-side RoleGuard requirements and server-side enforcement requirements documented? [Clarity, Spec §FR-008 / FR-009]
-- [ ] CHK008 - Is the scope of form-data preservation bounded to the current pages, given no complex forms exist in scope? [Clarity, Spec §FR-013]
+- [x] CHK005 - Is "stored securely" in the login acceptance criteria quantified with explicit storage locations per token type? [Clarity, Spec §User Story 1]
+- [x] CHK006 - Are refresh token rotation semantics explicitly defined (old token invalidation timing, new token issuance)? [Clarity, Spec §FR-004]
+- [x] CHK007 - Is the distinction between client-side RoleGuard requirements and server-side enforcement requirements documented? [Clarity, Spec §FR-008 / FR-009]
+- [x] CHK008 - Is the scope of form-data preservation bounded to the current pages, given no complex forms exist in scope? [Clarity, Spec §FR-013]
 
 ## Requirement Consistency
 
-- [ ] CHK009 - Are cookie attribute requirements (httpOnly, Secure, SameSite) consistent across FR-002, acceptance scenarios, and assumptions? [Consistency, Spec §FR-002]
-- [ ] CHK010 - Are deactivated-user handling requirements consistent between FR-015 and the edge case description? [Consistency, Spec §FR-015]
-- [ ] CHK011 - Are rate-limiting requirements documented in functional requirements or only implied via contracts? [Consistency, Gap]
-- [ ] CHK012 - Is the backend cookie-setting requirement consistent with the frontend-only scope decision? [Conflict, Spec §FR-002]
+- [x] CHK009 - Are cookie attribute requirements (httpOnly, Secure, SameSite) consistent across FR-002, acceptance scenarios, and assumptions? [Consistency, Spec §FR-002]
+- [x] CHK010 - Are deactivated-user handling requirements consistent between FR-015 and the edge case description? [Consistency, Spec §FR-015]
+- [x] CHK011 - Are rate-limiting requirements documented in functional requirements or only implied via contracts? [Consistency, Gap]
+- [x] CHK012 - Is the backend cookie-setting requirement consistent with the frontend-only scope decision? [Conflict, Spec §FR-002]
 
 ## Acceptance Criteria Quality
 
-- [ ] CHK013 - Are session revocation timing requirements ("immediately invalidated") quantified with measurable thresholds? [Measurability, Spec §FR-005]
-- [ ] CHK014 - Can cross-tab session expiry "within 5 seconds" be objectively measured, and is the measurement method defined? [Measurability, Spec §SC-007]
+- [x] CHK013 - Are session revocation timing requirements ("immediately invalidated") quantified with measurable thresholds? [Measurability, Spec §FR-005]
+- [x] CHK014 - Can cross-tab session expiry "within 5 seconds" be objectively measured, and is the measurement method defined? [Measurability, Spec §SC-007]
 
 ## Scenario Coverage
 
-- [ ] CHK015 - Are RBAC requirements specified for all four roles (ADMIN, WAREHOUSE_STAFF, CUSTOMER_SERVICE, TECHNICIAN) or only ADMIN/TECHNICIAN examples? [Coverage, Spec §FR-009]
+- [x] CHK015 - Are RBAC requirements specified for all four roles (ADMIN, WAREHOUSE_STAFF, CUSTOMER_SERVICE, TECHNICIAN) or only ADMIN/TECHNICIAN examples? [Coverage, Spec §FR-009]
 
 ## Notes
 
