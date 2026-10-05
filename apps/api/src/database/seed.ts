@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pkg from 'pg';
 import * as argon2 from 'argon2';
-// @ts-ignore Node native type stripping requires explicit .ts extension on disk
+// @ts-expect-error Node native type stripping requires explicit .ts extension on disk
 import { users } from './schema/index.ts';
 
 const { Pool } = pkg;
