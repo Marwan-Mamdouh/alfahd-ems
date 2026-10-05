@@ -21,6 +21,7 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed": "node src/database/seed.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
