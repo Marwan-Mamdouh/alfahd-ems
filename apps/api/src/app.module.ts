@@ -15,6 +15,8 @@ import { EmployeesModule } from './employees/employees.module.js';
 import { AttendanceModule } from './attendance/attendance.module.js';
 import { RepositoryModule } from './modules/repository/repository.module.js';
 import { ProductsModule } from './modules/products/products.module.js';
+import { WarehousesModule } from './modules/warehouses/warehouses.module.js';
+import { InventoryModule } from './modules/inventory/inventory.module.js';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { ProductsModule } from './modules/products/products.module.js';
     DatabaseModule,
     RepositoryModule,
     ProductsModule,
+    WarehousesModule,
+    InventoryModule,
     EmailModule,
     RedisModule,
     StorageModule,
