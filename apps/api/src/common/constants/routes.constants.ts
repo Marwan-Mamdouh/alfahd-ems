@@ -10,6 +10,14 @@ export const routes = {
   inventory: {
     root: 'inventory',
     id: ':id',
+    inbound: 'inbound',
+    outbound: 'outbound',
+    returns: 'returns',
+    transfer: 'transfer',
+    adjust: 'adjust',
+    movements: 'movements',
+    movementId: 'movements/:id',
+    warehouseStock: 'warehouses/:warehouseId',
   },
   routers: {
     root: 'routers',
