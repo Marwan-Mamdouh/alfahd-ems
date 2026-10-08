@@ -1,167 +1,102 @@
-// // src/app/(dashboard)/employees/page.tsx
-// "use client";
-
-// import { PageHeader } from "@/components/shared/page-header/page-header";
-// import { DataTable } from "@/components/shared/data-table/data-table";
-// import type { ColumnDef } from "@/components/shared/data-table/types";
-// import { Button } from "@/components/ui/button";
-// import { Plus } from "lucide-react";
-// import { RoleGuard } from "@/core/auth/guards";
-
-// interface Employee {
-//   id: string;
-//   name: string;
-//   email: string;
-//   role: string;
-//   status: "ACTIVE" | "INACTIVE";
-// }
-
-// const MOCK_EMPLOYEES: Employee[] = [
-//   {
-//     id: "1",
-//     name: "أحمد محمد",
-//     email: "ahmed@fahdgroup.com",
-//     role: "مدير النظام",
-//     status: "ACTIVE",
-//   },
-//   {
-//     id: "2",
-//     name: "سارة علي",
-//     email: "sara@fahdgroup.com",
-//     role: "خدمة العملاء",
-//     status: "ACTIVE",
-//   },
-//   { id: "3", name: "محمد حسن", email: "mhassan@fahdgroup.com", role: "فني", status: "ACTIVE" },
-//   {
-//     id: "4",
-//     name: "خالد إبراهيم",
-//     email: "khaled@fahdgroup.com",
-//     role: "موظف مخزن",
-//     status: "INACTIVE",
-//   },
-// ];
-
-// const columns: ColumnDef<Employee>[] = [
-//   { key: "name", header: "الاسم", className: "font-medium" },
-//   { key: "email", header: "البريد الإلكتروني", hideOnMobile: true },
-//   { key: "role", header: "الدور" },
-//   {
-//     key: "status",
-//     header: "الحالة",
-//     render: (row) =>
-//       row.status === "ACTIVE" ? (
-//         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-//           نشط
-//         </span>
-//       ) : (
-//         <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
-//           غير نشط
-//         </span>
-//       ),
-//   },
-// ];
-
-// export default function EmployeesPage() {
-//   return (
-//     <RoleGuard permission="employees.manage">
-//       <div className="space-y-6">
-//         <PageHeader
-//           title="الموظفون"
-//           description="إدارة حسابات الموظفين والأدوار"
-//           action={
-//             <Button>
-//               <Plus className="ml-2 h-4 w-4" />
-//               إضافة موظف
-//             </Button>
-//           }
-//         />
-//         <DataTable columns={columns} data={MOCK_EMPLOYEES} />
-//       </div>
-//     </RoleGuard>
-//   );
-// }
 // src/app/(dashboard)/employees/page.tsx
+//
+// The route stays `/employees` so existing bookmarks survive (R9), but the page
+// reads "Users" because `GET /users` returns `UserDto`, which carries no employee
+// fields (no name, no department). Employee data arrives with the HR schema in
+// M2 #14/#15.
+//
+// Note: `(dashboard)` is a route GROUP, so it contributes no URL segment. This
+// file serves `/employees`, which is what `nav-config.ts` already links to.
 
 "use client";
 
+import { useMemo, useState } from "react";
+import type { UserDto } from "@alfahd/types";
+import { useQuery } from "@tanstack/react-query";
+import { Users } from "lucide-react";
+
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
-import { Button } from "@/components/ui/button";
-import { Plus, Users } from "lucide-react";
+import { RoleGuard } from "@/core/auth/guards";
+import { roleLabel } from "@/core/auth/role-labels";
 
-interface Employee {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  status: "ACTIVE" | "INACTIVE";
-}
-
-const MOCK_EMPLOYEES: Employee[] = [
-  {
-    id: "1",
-    name: "أحمد محمد",
-    email: "ahmed@fahdgroup.com",
-    role: "مدير النظام",
-    status: "ACTIVE",
-  },
-  {
-    id: "2",
-    name: "سارة علي",
-    email: "sara@fahdgroup.com",
-    role: "خدمة العملاء",
-    status: "ACTIVE",
-  },
-  {
-    id: "3",
-    name: "محمد حسن",
-    email: "mhassan@fahdgroup.com",
-    role: "فني",
-    status: "ACTIVE",
-  },
-  {
-    id: "4",
-    name: "خالد إبراهيم",
-    email: "khaled@fahdgroup.com",
-    role: "موظف مخزن",
-    status: "INACTIVE",
-  },
-];
-
-const columns: ColumnDef<Employee>[] = [
-  {
-    key: "name",
-    header: "الاسم",
-    className: "font-semibold text-slate-800 dark:text-slate-100",
-  },
-  {
-    key: "email",
-    header: "البريد الإلكتروني",
-    hideOnMobile: true,
-  },
-  {
-    key: "role",
-    header: "الدور",
-  },
-  {
-    key: "status",
-    header: "الحالة",
-    render: (row) =>
-      row.status === "ACTIVE" ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 dark:border-teal-900 dark:bg-teal-950/50 dark:text-teal-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
-          نشط
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-          غير نشط
-        </span>
-      ),
-  },
-];
+import { fetchUsers, USERS_QUERY_KEY } from "@/core/api/users";
 
 export default function EmployeesPage() {
+  return (
+    <RoleGuard permission="employees.manage">
+      <UsersList />
+    </RoleGuard>
+  );
+}
+
+function UsersList() {
+  const { data, isPending, isError, refetch, isFetching } = useQuery({
+    queryKey: USERS_QUERY_KEY,
+    queryFn: fetchUsers,
+  });
+
+  const users = useMemo(() => data ?? [], [data]);
+
+  const [search, setSearch] = useState("");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  /**
+   * Client-side filter and sort (R10). `GET /users` returns the full array with
+   * no pagination parameters, so neither triggers a request.
+   */
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    const filtered = term
+      ? users.filter(
+          (u) => u.email.toLowerCase().includes(term) || roleLabel(u.role).includes(search.trim())
+        )
+      : users;
+
+    return [...filtered].sort((a, b) => {
+      const comparison = a.email.localeCompare(b.email);
+      return sortAsc ? comparison : -comparison;
+    });
+  }, [users, search, sortAsc]);
+
+  const columns: ColumnDef<UserDto>[] = [
+    {
+      key: "email",
+      header: "البريد الإلكتروني",
+      className: "font-semibold text-slate-800 dark:text-slate-100",
+    },
+    {
+      // Never the raw wire value — `CS` must render as an Arabic label.
+      key: "role",
+      header: "الدور",
+      render: (row) => roleLabel(row.role),
+    },
+    {
+      key: "isActive",
+      header: "الحالة",
+      render: (row) =>
+        row.isActive ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 dark:border-teal-900 dark:bg-teal-950/50 dark:text-teal-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
+            نشط
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+            غير نشط
+          </span>
+        ),
+    },
+    {
+      key: "createdAt",
+      header: "تاريخ الإنشاء",
+      // `createdAt` is not in the JWT, so it comes from `GET /users` — never
+      // from the session store.
+      render: (row) => formatDate(row.createdAt),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -173,22 +108,16 @@ export default function EmployeesPage() {
             </div>
 
             <div>
-              <h1 className="text-2xl font-bold">
-                الموظفون
-              </h1>
+              <h1 className="text-2xl font-bold">المستخدمون</h1>
 
-              <p className="mt-1 text-sm text-teal-50/80">
-                إدارة حسابات الموظفين والأدوار
-              </p>
+              <p className="mt-1 text-sm text-teal-50/80">إدارة حسابات المستخدمين والأدوار</p>
             </div>
           </div>
 
-          <Button
-            className="bg-white text-teal-700 shadow-sm hover:bg-teal-50"
-          >
-            <Plus className="ml-2 h-4 w-4" />
-            إضافة موظف
-          </Button>
+          {/* Count badge reads the fetched array, never a constant. */}
+          <div className="w-fit rounded-full bg-white/15 px-3 py-1 text-sm font-semibold backdrop-blur-sm">
+            {users.length} مستخدم
+          </div>
         </div>
 
         {/* Decorative shapes */}
@@ -198,29 +127,64 @@ export default function EmployeesPage() {
 
       {/* Table Card */}
       <div className="overflow-hidden rounded-2xl border border-teal-100/80 bg-card shadow-sm">
-        <div className="flex items-center justify-between border-b border-teal-100/70 px-5 py-4">
+        <div className="flex flex-col gap-3 border-b border-teal-100/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-semibold text-foreground">
-              قائمة الموظفين
-            </h2>
+            <h2 className="font-semibold text-foreground">قائمة المستخدمين</h2>
 
             <p className="mt-1 text-xs text-muted-foreground">
-              عرض وإدارة جميع الموظفين المسجلين في النظام
+              عرض جميع المستخدمين المسجلين في النظام
             </p>
           </div>
 
-          <div className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">
-            {MOCK_EMPLOYEES.length} موظفين
-          </div>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث بالبريد الإلكتروني..."
+            aria-label="بحث عن مستخدم"
+            className="h-9 w-full rounded-lg border border-teal-100 bg-background px-3 text-sm outline-none focus-visible:border-teal-500 sm:w-64"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 border-b border-teal-100/70 px-5 py-2">
+          <button
+            type="button"
+            onClick={() => setSortAsc((prev) => !prev)}
+            className="text-xs font-medium text-teal-700 hover:underline dark:text-teal-300"
+          >
+            ترتيب حسب البريد الإلكتروني {sortAsc ? "↑" : "↓"}
+          </button>
         </div>
 
         <div className="p-2 sm:p-4">
           <DataTable
             columns={columns}
-            data={MOCK_EMPLOYEES}
+            data={visible}
+            isLoading={isPending}
+            error={isError ? new Error("Failed to load users") : null}
+            onRetry={() => void refetch()}
+            emptyTitle="لا يوجد مستخدمون"
+            emptyDescription="لم يتم تسجيل أي مستخدم بعد."
           />
+
+          {isFetching && !isPending && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">جارٍ التحديث...</p>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function formatDate(value: string): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("ar-EG", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }

@@ -1,85 +1,166 @@
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export enum Role {
-  ADMIN = 'ADMIN',
-  WAREHOUSE_STAFF = 'WAREHOUSE_STAFF',
-  CS = 'CS',
-  TECHNICIAN = 'TECHNICIAN',
+export const Role = {
+  ADMIN: 'ADMIN',
+  WAREHOUSE_STAFF: 'WAREHOUSE_STAFF',
+  CS: 'CS',
+  TECHNICIAN: 'TECHNICIAN',
+} as const;
+
+export type Role = (typeof Role)[keyof typeof Role];
+
+// ─── Auth DTOs ──────────────────────────────────────────────────────────────
+export interface LoginRequestDto {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponseDto {
+  accessToken: string;
+  // Refresh token is handled via HTTP-only cookie for web, or explicitly returned for mobile
+  refreshToken?: string;
+  user: UserDto;
+}
+
+export interface RefreshTokenRequestDto {
+  // Used by mobile apps; web clients send no token and rely on the HTTP-only
+  // refresh cookie, so this is optional. At least one of cookie/body must be
+  // present or the request is rejected with 401.
+  refreshToken?: string;
+}
+
+export interface RefreshTokenResponseDto {
+  accessToken: string;
+}
+
+export interface ForgotPasswordRequestDto {
+  email: string;
+}
+
+export interface ResetPasswordRequestDto {
+  token: string;
+  newPassword: string;
+}
+
+export interface ChangePasswordRequestDto {
+  oldPassword: string;
+  newPassword: string;
+}
+
+// ─── User DTOs ──────────────────────────────────────────────────────────────
+export interface UserDto {
+  id: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateUserDto {
+  email: string;
+  password: string; // Initially set by admin
+  role: Role;
+}
+
+export interface UpdateUserDto {
+  email?: string;
+  role?: Role;
+  isActive?: boolean; // Used for soft-deactivation
 }
 
 // ─── Ticket ───────────────────────────────────────────────────────────────────
-export enum TicketStatus {
-  PENDING = 'PENDING',
-  ASSIGNED = 'ASSIGNED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
-}
+export const TicketStatus = {
+  PENDING: 'PENDING',
+  ASSIGNED: 'ASSIGNED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
 
-export enum TicketType {
-  INSTALLATION = 'INSTALLATION',
-  TECHNICAL_ISSUE = 'TECHNICAL_ISSUE',
-  COMPLAINT = 'COMPLAINT',
-  MAINTENANCE = 'MAINTENANCE',
-}
+export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus];
 
-export enum TicketPriority {
-  LOW = 'LOW',
-  MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH',
-  URGENT = 'URGENT',
-}
+export const TicketType = {
+  INSTALLATION: 'INSTALLATION',
+  TECHNICAL_ISSUE: 'TECHNICAL_ISSUE',
+  COMPLAINT: 'COMPLAINT',
+  MAINTENANCE: 'MAINTENANCE',
+} as const;
+
+export type TicketType = (typeof TicketType)[keyof typeof TicketType];
+
+export const TicketPriority = {
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  URGENT: 'URGENT',
+} as const;
+
+export type TicketPriority = (typeof TicketPriority)[keyof typeof TicketPriority];
 
 // ─── Router ───────────────────────────────────────────────────────────────────
-export enum RouterStatus {
-  AVAILABLE = 'AVAILABLE',
-  ASSIGNED_TO_TECHNICIAN = 'ASSIGNED_TO_TECHNICIAN',
-  INSTALLED_AT_CUSTOMER = 'INSTALLED_AT_CUSTOMER',
-  RETURNED = 'RETURNED',
-  DAMAGED = 'DAMAGED',
-  UNDER_REPAIR = 'UNDER_REPAIR',
-  LOST = 'LOST',
-  DECOMMISSIONED = 'DECOMMISSIONED',
-}
+export const RouterStatus = {
+  AVAILABLE: 'AVAILABLE',
+  ASSIGNED_TO_TECHNICIAN: 'ASSIGNED_TO_TECHNICIAN',
+  INSTALLED_AT_CUSTOMER: 'INSTALLED_AT_CUSTOMER',
+  RETURNED: 'RETURNED',
+  DAMAGED: 'DAMAGED',
+  UNDER_REPAIR: 'UNDER_REPAIR',
+  LOST: 'LOST',
+  DECOMMISSIONED: 'DECOMMISSIONED',
+} as const;
 
-export enum RouterHolderType {
-  WAREHOUSE = 'WAREHOUSE',
-  TECHNICIAN = 'TECHNICIAN',
-  CUSTOMER = 'CUSTOMER',
-}
+export type RouterStatus = (typeof RouterStatus)[keyof typeof RouterStatus];
+
+export const RouterHolderType = {
+  WAREHOUSE: 'WAREHOUSE',
+  TECHNICIAN: 'TECHNICIAN',
+  CUSTOMER: 'CUSTOMER',
+} as const;
+
+export type RouterHolderType = (typeof RouterHolderType)[keyof typeof RouterHolderType];
 
 // ─── IP Address ───────────────────────────────────────────────────────────────
-export enum IpStatus {
-  AVAILABLE = 'AVAILABLE',
-  ASSIGNED = 'ASSIGNED',
-  RESERVED = 'RESERVED',
-  RETIRED = 'RETIRED',
-}
+export const IpStatus = {
+  AVAILABLE: 'AVAILABLE',
+  ASSIGNED: 'ASSIGNED',
+  RESERVED: 'RESERVED',
+  RETIRED: 'RETIRED',
+} as const;
+
+export type IpStatus = (typeof IpStatus)[keyof typeof IpStatus];
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
-export enum AttendanceStatus {
-  ON_TIME = 'ON_TIME',
-  LATE = 'LATE',
-  ABSENT = 'ABSENT',
-}
+export const AttendanceStatus = {
+  ON_TIME: 'ON_TIME',
+  LATE: 'LATE',
+  ABSENT: 'ABSENT',
+} as const;
+
+export type AttendanceStatus = (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
 
 // ─── Customer ─────────────────────────────────────────────────────────────────
-export enum CustomerStatus {
-  ACTIVE = 'ACTIVE',
-  INACTIVE = 'INACTIVE',
-  SUSPENDED = 'SUSPENDED',
-}
+export const CustomerStatus = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+  SUSPENDED: 'SUSPENDED',
+} as const;
+
+export type CustomerStatus = (typeof CustomerStatus)[keyof typeof CustomerStatus];
 
 // ─── Employee / Department ────────────────────────────────────────────────────
 // OI-02: Department enum values are UNRESOLVED pending client confirmation.
 // Placeholder values below. DO NOT use in production schema until confirmed.
-export enum Department {
-  WAREHOUSE = 'WAREHOUSE',
-  TECHNICAL = 'TECHNICAL',
-  CUSTOMER_SERVICE = 'CUSTOMER_SERVICE',
-  MANAGEMENT = 'MANAGEMENT',
-}
+export const Department = {
+  WAREHOUSE: 'WAREHOUSE',
+  TECHNICAL: 'TECHNICAL',
+  CUSTOMER_SERVICE: 'CUSTOMER_SERVICE',
+  MANAGEMENT: 'MANAGEMENT',
+} as const;
 
-export enum EmployeeStatus {
-  ACTIVE = 'ACTIVE',
-  INACTIVE = 'INACTIVE',
-}
+export type Department = (typeof Department)[keyof typeof Department];
+
+export const EmployeeStatus = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+} as const;
+
+export type EmployeeStatus = (typeof EmployeeStatus)[keyof typeof EmployeeStatus];

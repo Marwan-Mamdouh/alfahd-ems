@@ -7,6 +7,13 @@
       "tag": "0000_baseline",
       "version": "7",
       "when": 1789416820027
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790465024339,
+      "tag": "0001_giant_the_executioner",
+      "breakpoints": true
     }
   ],
   "version": "7"

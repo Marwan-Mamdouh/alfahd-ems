@@ -5,11 +5,14 @@ import { envSchema } from './config/env.validation.js';
 import { RedisModule, buildRedisConnectionOptions } from './redis/redis.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AuthModule } from './auth/auth.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { RepositoryModule } from './modules/repository/repository.module.js';
 import { ProductsModule } from './modules/products/products.module.js';
 import { WarehousesModule } from './modules/warehouses/warehouses.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
+import { EmailModule } from './email/email.module.js';
+import { UsersModule } from './users/users.module.js';
 
 @Module({
   imports: [
@@ -22,7 +25,10 @@ import { InventoryModule } from './modules/inventory/inventory.module.js';
     ProductsModule,
     WarehousesModule,
     InventoryModule,
+    EmailModule,
     RedisModule,
+    AuthModule,
+    UsersModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({

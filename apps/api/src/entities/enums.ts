@@ -1,12 +1,8 @@
 import { pgEnum } from 'drizzle-orm/pg-core';
 
-// 1. System User Roles (Section 2.1.1 & Section 5 of SOW)
-export const userRoleEnum = pgEnum('user_role', [
-  'ADMIN',
-  'WAREHOUSE_STAFF',
-  'CUSTOMER_SERVICE',
-  'TECHNICIAN',
-]);
+// 1. System User Roles (Section 2.1.1 of SOW, matches migration 0001 & @alfahd/types)
+export const roleEnum = pgEnum('role', ['ADMIN', 'WAREHOUSE_STAFF', 'CS', 'TECHNICIAN']);
+export const userRoleEnum = roleEnum;
 
 // 2. Company Departments (Stored as attribute on employee per SOW 2.1.3)
 export const departmentEnum = pgEnum('department', [

@@ -1,4 +1,4 @@
-import type { Role } from "@/core/api/types";
+import type { Role } from "@alfahd/types";
 
 export const PERMISSIONS = {
   "dashboard.view": ["ADMIN"],
@@ -13,7 +13,7 @@ export const PERMISSIONS = {
 
   "routers.manage": ["ADMIN", "WAREHOUSE_STAFF"],
 
-  "ips.view": ["ADMIN", "WAREHOUSE_STAFF", "CUSTOMER_SERVICE"],
+  "ips.view": ["ADMIN", "WAREHOUSE_STAFF", "CS"],
 
   "ips.manage": ["ADMIN"],
 
@@ -21,13 +21,13 @@ export const PERMISSIONS = {
 
   "tracking.view": ["ADMIN"],
 
-  "customers.view": ["ADMIN", "CUSTOMER_SERVICE"],
+  "customers.view": ["ADMIN", "CS"],
 
-  "customers.manage": ["ADMIN", "CUSTOMER_SERVICE"],
+  "customers.manage": ["ADMIN", "CS"],
 
-  "tickets.view": ["ADMIN", "CUSTOMER_SERVICE"],
+  "tickets.view": ["ADMIN", "CS"],
 
-  "tickets.manage": ["ADMIN", "CUSTOMER_SERVICE"],
+  "tickets.manage": ["ADMIN", "CS"],
 
   "reports.view": ["ADMIN"],
 

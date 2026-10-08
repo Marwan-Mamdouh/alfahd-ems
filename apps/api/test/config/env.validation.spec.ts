@@ -9,6 +9,10 @@ const validEnv = {
   JWT_REFRESH_SECRET: 'b'.repeat(32),
   EMAIL_PROVIDER: 'smtp',
   EMAIL_FROM: 'test@example.com',
+  SMTP_HOST: 'localhost',
+  SMTP_PORT: '1025',
+  SMTP_USER: 'test',
+  SMTP_PASS: 'test',
 };
 
 describe('envSchema validation', () => {
@@ -86,5 +90,49 @@ describe('envSchema validation', () => {
     const result = envSchema.parse(validEnv);
     expect(result.JWT_ACCESS_EXPIRES_IN).toBe('15m');
     expect(result.JWT_REFRESH_EXPIRES_IN).toBe('7d');
+  });
+
+  it('defaults FRONTEND_URL', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.FRONTEND_URL).toBe('http://localhost:3001');
+  });
+
+  it('throws when EMAIL_PROVIDER=smtp but SMTP vars are missing', () => {
+    expect(() =>
+      envSchema.parse({
+        ...validEnv,
+        SMTP_HOST: undefined,
+        SMTP_PORT: undefined,
+        SMTP_USER: undefined,
+        SMTP_PASS: undefined,
+      }),
+    ).toThrow('SMTP_HOST is required when EMAIL_PROVIDER is smtp');
+  });
+
+  it('rejects EMAIL_PROVIDER values other than smtp', () => {
+    expect(() =>
+      envSchema.parse({
+        ...validEnv,
+        EMAIL_PROVIDER: 'sendgrid',
+        SMTP_HOST: undefined,
+        SMTP_PORT: undefined,
+        SMTP_USER: undefined,
+        SMTP_PASS: undefined,
+      }),
+    ).toThrow();
+  });
+
+  it("parses REFRESH_COOKIE_SECURE 'false' as boolean false", () => {
+    const result = envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'false' });
+    expect(result.REFRESH_COOKIE_SECURE).toBe(false);
+  });
+
+  it("parses REFRESH_COOKIE_SECURE 'true' as boolean true", () => {
+    const result = envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'true' });
+    expect(result.REFRESH_COOKIE_SECURE).toBe(true);
+  });
+
+  it("rejects REFRESH_COOKIE_SECURE 'yes'", () => {
+    expect(() => envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'yes' })).toThrow();
   });
 });

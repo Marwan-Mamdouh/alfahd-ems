@@ -16,6 +16,7 @@ describe('ProductsController', () => {
     category: 'Cables',
     description: 'Outdoor FTTH drop cable 100m',
     lowStockThreshold: 10,
+    isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };

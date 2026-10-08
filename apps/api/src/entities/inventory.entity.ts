@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   integer,
+  boolean,
   timestamp,
   uniqueIndex,
   index,
@@ -21,6 +22,7 @@ export const products = pgTable('products', {
   category: varchar('category', { length: 100 }).notNull(),
   description: text('description'),
   lowStockThreshold: integer('low_stock_threshold').default(10).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

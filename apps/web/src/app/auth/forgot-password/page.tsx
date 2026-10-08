@@ -1,32 +1,42 @@
+// src/app/auth/forgot-password/page.tsx
 
 "use client";
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { ArrowRight } from "lucide-react";
+
 import { LOGIN_PATH } from "@/core/auth/routes";
+import { api } from "@/core/api/axios-instance";
+import { ENDPOINTS } from "@/core/api/endpoints";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    // TODO: Phase 2
-    // سيتم استبداله لاحقًا بـ:
-    // POST /auth/forgot-password
+    setLoading(true);
+    setError(null);
 
-    setSent(true);
+    try {
+      // The endpoint always returns 200, whether or not the address is
+      // registered, so this confirmation cannot be used to enumerate accounts.
+      await api.post(ENDPOINTS.auth.forgotPassword, { email });
+      setSent(true);
+    } catch {
+      // Only a transport or server failure reaches here — never "no such user".
+      setError("تعذّر إرسال الطلب. يرجى المحاولة مرة أخرى.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -37,7 +47,7 @@ export default function ForgotPasswordPage() {
 
           <p className="text-sm text-muted-foreground">
             {sent
-              ? "تم إرسال رابط إعادة التعيين إلى بريدك الإلكتروني"
+              ? "تم استلام طلبك"
               : "أدخل بريدك الإلكتروني وسنرسل لك رابط إعادة التعيين"}
           </p>
         </CardHeader>
@@ -74,8 +84,10 @@ export default function ForgotPasswordPage() {
                 />
               </div>
 
-              <Button type="submit" className="w-full">
-                إرسال رابط إعادة التعيين
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "جارٍ الإرسال..." : "إرسال رابط إعادة التعيين"}
               </Button>
             </form>
           )}
@@ -84,4 +96,3 @@ export default function ForgotPasswordPage() {
     </div>
   );
 }
-;

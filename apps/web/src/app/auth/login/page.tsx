@@ -1,8 +1,9 @@
-// src/app/(auth)/login/page.tsx
+// src/app/auth/login/page.tsx
 
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 
@@ -11,6 +12,38 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { api, unwrap } from "@/core/api/axios-instance";
+import { ENDPOINTS } from "@/core/api/endpoints";
+import type { ApiResponse } from "@/core/api/types";
+import type { LoginResponseDto } from "@alfahd/types";
+import { FORGOT_PASSWORD_PATH } from "@/core/auth/routes";
+import { httpStatus, retryAfterSeconds } from "@/core/api/errors";
+
+/**
+ * Resolve the post-login redirect target.
+ *
+ * Allowlist, not a denylist: the value must be a single-slash-prefixed relative
+ * path. A prefix check alone is defeated by `/%09/evil.example`, which
+ * `URLSearchParams` decodes to a leading tab that the URL parser then strips,
+ * leaving a protocol-relative `//evil.example`.
+ */
+function safeRedirect(raw: string | null): string {
+  // One leading `/`, no `//`, no `/\`, and no ASCII control characters anywhere.
+  if (!raw || !/^\/(?![/\\])[^\u0000-\u001f\u007f]*$/.test(raw)) {
+    return "/dashboard";
+  }
+
+  return raw;
+}
+
+/**
+ * One generic failure message for both an unknown email and a wrong password.
+ *
+ * This text MUST stay byte-identical across every failure branch: a more
+ * specific message ("account not found") turns the login form into an oracle for
+ * enumerating staff accounts.
+ */
+const INVALID_CREDENTIALS_MESSAGE = "بيانات الدخول غير صحيحة";
 
 export default function LoginPage() {
   return (
@@ -25,28 +58,59 @@ function LoginForm() {
   const searchParams = useSearchParams();
 
   const setSession = useAuthStore((s) => s.setSession);
-  const setUser = useAuthStore((s) => s.setUser);
 
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
     setLoading(true);
+    setError(null);
+    setRetryAfter(null);
 
-    // وهمي مؤقت — الباك لسه مش جاهز
-    setTimeout(() => {
-      setSession("fake-access-token", "fake-refresh-token");
-
-      setUser({
-        id: "1",
-        name: "مدير النظام",
-        email: "admin@fahdgroup.com",
-        role: "ADMIN",
-        status: "ACTIVE",
+    try {
+      // The refresh token arrives as an httpOnly cookie on this response; the
+      // body copy is ignored by the web client and never stored in JS.
+      const response = await api.post<ApiResponse<LoginResponseDto>>(ENDPOINTS.auth.login, {
+        email,
+        password,
       });
 
-      router.push(searchParams.get("redirect") ?? "/dashboard");
-    }, 500);
+      const { accessToken, user } = unwrap(response);
+
+      setSession(accessToken, user);
+      router.push(safeRedirect(searchParams.get("redirect")));
+    } catch (err) {
+      const status = httpStatus(err);
+
+      if (status === 429) {
+        setError("تم تجاوز عدد محاولات الدخول المسموح بها. يرجى المحاولة مرة أخرى بعد قليل.");
+        setRetryAfter(retryAfterSeconds(err));
+      } else if (status === 401) {
+        // Intentionally the same text as every other 401 — never branch further.
+        setError(INVALID_CREDENTIALS_MESSAGE);
+      } else if (status === undefined) {
+        // No HTTP response at all: the API is unreachable, OR the dashboard is
+        // serving itself (Next.js defaults to 3000 too; without `--port 3001`,
+        // `API_URL` can point back at the dashboard, and the rewrite returns the
+        // app's own HTML which fails to parse). Both look identical from the
+        // browser, so name the likely cause.
+        //
+        // Safe for FR-022: this branch is only reached when there is no HTTP
+        // response, so it can never reveal whether the account exists.
+        setError("انقطع الاتصال بالخادم. تحقق من اتصالك وحاول مرة أخرى.");
+      } else {
+        // 5xx or any other settled failure. Deliberately does not distinguish
+        // causes that could reveal whether the account exists.
+        setError("تعذّر الاتصال بالخادم. يرجى المحاولة مرة أخرى.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -72,9 +136,6 @@ function LoginForm() {
               </CardTitle>
 
               <p className="text-sm text-muted-foreground">تسجيل الدخول إلى نظام الإدارة</p>
-              <p className="mx-auto mt-3 w-fit rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-                وضع العرض التجريبي — دخول وهمي للاختبار فقط
-              </p>
             </div>
           </CardHeader>
 
@@ -98,6 +159,8 @@ function LoginForm() {
                     dir="ltr"
                     placeholder="name@fahdgroup.com"
                     required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="h-11 rounded-xl border-slate-200 pr-10 text-left transition-colors focus-visible:border-teal-500 focus-visible:ring-teal-500/20 dark:border-slate-800"
                   />
                 </div>
@@ -105,12 +168,21 @@ function LoginForm() {
 
               {/* Password */}
               <div className="space-y-2">
-                <Label
-                  htmlFor="password"
-                  className="text-sm font-semibold text-slate-700 dark:text-slate-200"
-                >
-                  كلمة المرور
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label
+                    htmlFor="password"
+                    className="text-sm font-semibold text-slate-700 dark:text-slate-200"
+                  >
+                    كلمة المرور
+                  </Label>
+
+                  <Link
+                    href={FORGOT_PASSWORD_PATH}
+                    className="text-xs font-medium text-teal-700 underline-offset-4 hover:underline dark:text-teal-400"
+                  >
+                    نسيت كلمة المرور؟
+                  </Link>
+                </div>
 
                 <div className="relative">
                   <LockKeyhole className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
@@ -120,10 +192,27 @@ function LoginForm() {
                     type="password"
                     dir="ltr"
                     required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="h-11 rounded-xl border-slate-200 pr-10 text-left transition-colors focus-visible:border-teal-500 focus-visible:ring-teal-500/20 dark:border-slate-800"
                   />
                 </div>
               </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  aria-live="polite"
+                  className="rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+                >
+                  {error}
+                  {retryAfter !== null && (
+                    <span className="mt-1 block text-xs font-normal opacity-80">
+                      يمكنك المحاولة بعد {retryAfter} ثانية
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Login Button */}
               <Button
@@ -156,3 +245,4 @@ function LoginForm() {
     </div>
   );
 }
+
