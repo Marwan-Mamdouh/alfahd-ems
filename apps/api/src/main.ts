@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
@@ -35,6 +36,17 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.enableShutdownHooks();
+
+  const config = new DocumentBuilder()
+    .setTitle('Alfahd EMS API')
+    .setDescription('The Alfahd EMS API documentation')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const documentFactory = () => SwaggerModule.createDocument(app, config);
+  if (process.env.NODE_ENV !== 'production') {
+    SwaggerModule.setup('/', app, documentFactory);
+  }
 
   await app.listen(port);
 }

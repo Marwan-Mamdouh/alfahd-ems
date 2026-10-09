@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { AppModule } from './../src/app.module.js';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter.js';
 import { ResponseInterceptor } from './../src/common/interceptors/response.interceptor.js';
 import { vi } from 'vitest';
 
-describe('AppController (e2e)', () => {
+describe('Swagger & App (e2e)', () => {
   let app: INestApplication;
   let redisClient: { ping: () => Promise<string>; quit: () => Promise<void> };
 
@@ -29,17 +30,27 @@ describe('AppController (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     app.useGlobalFilters(new HttpExceptionFilter());
     app.useGlobalInterceptors(new ResponseInterceptor());
+
+    const config = new DocumentBuilder().setTitle('Alfahd EMS API').build();
+    const documentFactory = () => SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('/', app, documentFactory);
+
     await app.init();
   });
 
-  it('/ (GET) returns success shape { data }', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect((res) => {
-        expect(res.body).toHaveProperty('data');
-        expect(res.body.data).toBe('Hello World!');
-      });
+  it('/ (GET) returns Swagger HTML documentation', () => {
+    return request(app.getHttpServer()).get('/').expect(200).expect('Content-Type', /html/);
+  });
+
+  it('/-json (GET) returns Swagger OpenAPI specification with full DTO schemas', async () => {
+    const res = await request(app.getHttpServer()).get('/-json').expect(200);
+    expect(res.body.components.schemas).toHaveProperty('LoginRequestDto');
+    expect(res.body.components.schemas.LoginRequestDto.properties).toHaveProperty('email');
+    expect(res.body.components.schemas.LoginRequestDto.properties).toHaveProperty('password');
+    expect(res.body.components.schemas).toHaveProperty('CreateUserRequestDto');
+    expect(res.body.components.schemas.CreateUserRequestDto.properties).toHaveProperty('role');
+    expect(res.body.components.schemas).toHaveProperty('UserResponseDto');
+    expect(res.body.components.schemas.UserResponseDto.properties).toHaveProperty('role');
   });
 
   it('/nonexistent (GET) returns error shape { statusCode, message, path, timestamp }', () => {
@@ -63,9 +74,12 @@ describe('AppController (e2e)', () => {
   it('Redis quit is called on shutdown', async () => {
     await app.close();
     expect(redisClient.quit).toHaveBeenCalledTimes(1);
+    app = null as any;
   });
 
   afterEach(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 });
