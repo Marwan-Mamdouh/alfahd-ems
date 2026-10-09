@@ -1,4 +1,3 @@
-import type { LoginResponseDto, RefreshTokenResponseDto } from '@alfahd/types';
 import {
   Body,
   Controller,
@@ -9,13 +8,24 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBadRequestResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import {
+  AuthOkResponseDto,
   ForgotPasswordRequestDto,
   LoginRequestDto,
+  LoginResponseDto,
   RefreshTokenRequestDto,
+  RefreshTokenResponseDto,
   ResetPasswordRequestDto,
 } from './dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -30,6 +40,7 @@ import {
 // `cookies` is populated by cookie-parser and already typed by @types/cookie-parser.
 type CookieRequest = Request;
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -40,6 +51,10 @@ export class AuthController {
   @Post('login')
   @UseGuards(RateLimitGuard)
   @HttpCode(200)
+  @ApiOperation({ summary: 'Authenticate user and issue tokens' })
+  @ApiOkResponse({ description: 'Authentication successful', type: LoginResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid email or password input' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
   async login(
     @Body() dto: LoginRequestDto,
     @Res({ passthrough: true }) res: Response,
@@ -56,6 +71,12 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Refresh access token using refresh token cookie or body' })
+  @ApiOkResponse({
+    description: 'Access token refreshed successfully',
+    type: RefreshTokenResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing refresh token' })
   async refresh(
     @Body() dto: RefreshTokenRequestDto,
     @Req() req: CookieRequest,
@@ -87,10 +108,14 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Log out and invalidate session' })
+  @ApiOkResponse({ description: 'Session invalidated successfully', type: AuthOkResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   async logout(
     @Req() req: Request & { user: JwtUser },
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ ok: true }> {
+  ): Promise<AuthOkResponseDto> {
     await this.authService.logout(req.user.userId, req.user.tokenId);
     // Path must match the path used when setting the cookie, or the browser
     // retains it and the session appears to survive logout.
@@ -109,14 +134,23 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(200)
-  async forgotPassword(@Body() dto: ForgotPasswordRequestDto): Promise<{ ok: true }> {
+  @ApiOperation({ summary: 'Request a password reset link' })
+  @ApiOkResponse({
+    description: 'Password reset email sent if account exists',
+    type: AuthOkResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid email input' })
+  async forgotPassword(@Body() dto: ForgotPasswordRequestDto): Promise<AuthOkResponseDto> {
     await this.authService.forgotPassword(dto.email);
     return { ok: true };
   }
 
   @Post('reset-password')
   @HttpCode(200)
-  async resetPassword(@Body() dto: ResetPasswordRequestDto): Promise<{ ok: true }> {
+  @ApiOperation({ summary: 'Reset password using a valid token' })
+  @ApiOkResponse({ description: 'Password reset successfully', type: AuthOkResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid or expired token, or invalid password' })
+  async resetPassword(@Body() dto: ResetPasswordRequestDto): Promise<AuthOkResponseDto> {
     await this.authService.resetPassword(dto.token, dto.newPassword);
     return { ok: true };
   }
