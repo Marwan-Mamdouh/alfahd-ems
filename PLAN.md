@@ -1,392 +1,395 @@
 # alfahd-ems — Master Implementation Plan
 
-**Client:** الفهد جروب (Egyptian ISP/telecom) · **Governing docs:** SoW (binding, governs scope disputes) + SRS v0.1 (draft, superseded wherever it conflicts with the SoW)
-**Author:** Marwan (backend) · **Status:** M1 in progress, M2 drafted, M3–M5 derived below for the first time
+**Client:** الفهد جروب (Egyptian ISP/telecom) · **Governing docs:** SoW (binding, unsigned as of v1.0) + SRS v0.1 (draft; superseded wherever it conflicts with the SoW)
+**Author:** Marwan (backend)
+
+Implementation ground truth for spec-kit. Every phase states what it must produce, how to know it is done, and the specific ways a cheaper model will plausibly get it wrong. Feed each phase section to `/specify` as-is. Sources were re-checked against SoW v1.0, SRS v0.1, m1 and m2 on 2026-10-08.
 
 ---
 
-## 0. How to use this file with spec-kit
+## 1. Constitution — locked across every phase
 
-This is **not** a single spec-kit `plan.md` for one feature — it's the project-level backlog that each milestone's spec-kit cycle should be generated from. Practical flow:
+| Layer                  | Choice                                                                                                                                             | Rule for the agent                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Backend                | NestJS + TypeScript, **ESM**, compiled with **SWC**                                                                                                | Do not "fix" problems by switching to CJS. See ESM/SWC rules below.                                                          |
+| ORM / DB               | **Drizzle ORM** + drizzle-kit migrations, PostgreSQL                                                                                               | Pin `drizzle-orm` and `drizzle-kit` to exact, mutually compatible versions. Prisma is not used; never add it.                |
+| Queue / Cache          | Redis + BullMQ                                                                                                                                     | Background work never runs on the request thread.                                                                            |
+| Auth                   | `@nestjs/passport` + `@nestjs/jwt`, **argon2id** (`argon2` package), refresh tokens in **Redis**, custom guards                                    | bcrypt is not used. Library-default argon2id parameters unless benchmarked on the target host; do not hand-tune from memory. |
+| Enums                  | **No TypeScript `enum` keyword.** `as const` tuples in `packages/types`, union types derived from them, Drizzle `pgEnum` built from the same tuple | One tuple = one source of truth for API, DB and mobile. Enforce with ESLint `no-restricted-syntax` on `TSEnumDeclaration`.   |
+| Real-time              | Socket.io + Redis adapter                                                                                                                          | Multi-instance support is a requirement.                                                                                     |
+| Storage / Email / Push | Cloudflare R2 · SendGrid · FCM                                                                                                                     | —                                                                                                                            |
+| Mobile                 | React Native + Expo (EAS Starter), Android only                                                                                                    | iOS is a separately priced future phase.                                                                                     |
+| Maps                   | Leaflet.js + OpenStreetMap                                                                                                                         | No Google Maps.                                                                                                              |
+| Infra                  | **Docker Compose locally** (postgres:16, redis:7-alpine). Railway deploy is deferred to the deploy gate before M4a                                 | Nothing before the gate may require Railway to work.                                                                         |
+| Monorepo               | pnpm workspaces, no Turborepo/Nx; shared code in `packages/types` (`@alfahd/types`)                                                                | `@alfahd/types` stays runtime-light: no Nest, Drizzle or Node-only imports, so Metro can consume it.                         |
 
-1. For each milestone (M1…M5) below, run `/specify` with that milestone's issue list as the seed content → produces `specs/m{n}-{name}/spec.md`.
-2. Run `/plan` against that spec → spec-kit generates the per-feature `plan.md` (Technical Context, Constitution Check, Project Structure, Phase 0/1 research + design). Point it at **§1 Technical Context** below so it doesn't re-derive your stack from scratch or invent alternatives — all major choices below are locked, never let an agent re-litigate them.
-3. Run `/tasks` to get `tasks.md` — this should map close to 1:1 onto the numbered issues under each milestone here, since those are already written at task granularity.
-4. Whichever agent you hand implementation to, feed it the acceptance criteria verbatim — they're written as testable assertions on purpose.
+```ts
+// packages/types — the pattern, not the only file
+export const ROLES = ["ADMIN", "WAREHOUSE_STAFF", "CS", "TECHNICIAN"] as const;
+export type Role = (typeof ROLES)[number];
+// apps/api schema: export const roleEnum = pgEnum('role', ROLES);
+```
 
-Do **not** treat M3–M5's issue numbers below as final GitHub issue numbers. They're sequential placeholders for planning; your real repo has already diverged from even the M1/M2 numbering (see §2 note).
+A Postgres enum value can be added by migration but not cleanly removed or renamed. The router status set is the one most likely to change (SoW §7 still lists "additional router statuses" as pending client confirmation).
 
----
+**ESM/SWC rules — violating any is "not done":**
 
-## 1. Technical Context (feed this to spec-kit's Constitution Check)
+- SWC has no type checker. `tsc --noEmit` (e.g. `pnpm --filter api typecheck`) must pass alongside the build; a green SWC build proves nothing about types.
+- SWC config must enable legacy decorators and `decoratorMetadata`; Nest DI depends on it.
+- Circular imports between providers/modules can fail at boot under ESM with "Cannot access 'X' before initialization". Remove the cycle (or use `forwardRef`); do not paper over it.
+- Relative imports must resolve under the configured module resolution (explicit extensions where required).
 
-| Layer          | Choice                                                                                                                   | Locked because                                                                                                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend        | NestJS 12 + TypeScript, **ESM** (`"type": "module"`)                                                                     | Already built this way; all relative imports use `.js` extension; SWC compiler via `nest build -b swc`. Never switch to CJS — it breaks AGENTS.md rules and existing imports. |
-| ORM / DB       | **Drizzle ORM** (`drizzle-orm` + `pg`), PostgreSQL 16                                                                    | Already in use — `drizzle.config.ts`, schema in `src/database/schema/`, migrations in `apps/api/drizzle/`. Never let an agent suggest Prisma; the decision is closed.         |
-| Queue / Cache  | Redis + BullMQ                                                                                                           | Report generation and background jobs must never run on the request thread (NFR-02)                                                                                           |
-| Auth           | `@nestjs/passport` + `@nestjs/jwt`, argon2id (OWASP default params), refresh tokens in Redis, custom guards               | Better Auth was evaluated and rejected — cookie-first design conflicts with React Native's bearer-token flow, and RBAC model didn't map cleanly                               |
-| Real-time      | Socket.io + Redis adapter                                                                                                | Multi-instance WebSocket support for live tracking                                                                                                                            |
-| Storage        | **Cloudinary**                                                                                                           | Object storage for employee photos, ticket photos, report exports                                                                                                             |
-| Email          | **Nodemailer**                                                                                                           | Password reset and notification emails; simpler setup than SendGrid for this scale                                                                                            |
-| Push           | Firebase Cloud Messaging                                                                                                 | Android-first                                                                                                                                                                 |
-| Web            | Next.js on **Vercel**                                                                                                    | Owned by a separate frontend dev, not Marwan. API contract freeze in M4 #54 is the hard dependency.                                                                           |
-| Mobile         | React Native + Expo (EAS Starter), Android only this phase                                                               | iOS deferred, at additional cost, future phase                                                                                                                                |
-| Maps           | Leaflet.js + OpenStreetMap                                                                                               | Avoids per-request Google Maps cost                                                                                                                                           |
-| Infra          | **API/DB/Redis on Railway** (staging/prod) · **Web on Vercel** · local Docker Compose (postgres:16, redis:7-alpine)      | Railway for backend services; Vercel for web dashboard                                                                                                                        |
-| Monorepo       | pnpm workspaces, no Turborepo/Nx                                                                                         | Team too small to justify it; shared types in `packages/types` (`@alfahd/types`)                                                                                              |
-| Access control | CODEOWNERS + branch protection so frontend dev can't merge to `apps/api/` or `packages/types/` without Marwan's approval | —                                                                                                                                                                             |
+**Global rules — any violation is an automatic "not done":**
 
-**Standing engineering rule:** no over-engineering. Ask before making a decision not covered by SoW/SRS/this plan rather than assuming.
-
----
-
-## 2. Locked Decisions vs. SRS Open Items — reconciled
-
-The SRS lists 13 open items (§7, OI-01…OI-13) as blockers. As of now, several were resolved during M1/M2 build but **the SRS document itself was never updated** — anyone reading it cold would think these are still open. Fix that document, or at minimum don't let an AI agent re-ask questions you've already answered.
-
-| #       | SRS says                                         | Actual status                     | Resolution / source                                                                                                                                                                   |
-| ------- | ------------------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OI-01 ★ | Total dev fee (EGP) blank                        | **RESOLVED**                      | Client signature confirmed on a separate file (not the uploaded SoW/SRS doc). Agreement is valid and signed.                                                                          |
-| OI-02 ★ | Department enum values                           | **RESOLVED**                      | `TECHNICAL, CUSTOMER_SERVICE, WAREHOUSE, MANAGEMENT` — already in schema                                                                                                              |
-| OI-03   | Check-in cutoff / check-out requirement          | **RESOLVED**                      | Cutoff = configurable env var, default 09:00, flags `LATE`. Check-out has **no GPS requirement** — works from anywhere, technicians aren't required to return to base.                |
-| OI-04   | Ticket priority model (enum vs SLA)              | **RESOLVED by SoW**               | SoW §2.1.12 already fixes it: `Low / Medium / High / Urgent` enum. SRS FR-TK and OI-04 were never updated to match — the SRS is asking a question the governing SoW already answered. |
-| OI-05   | Morning batch schedule (exact run/confirm times) | **STILL OPEN**                    | Algorithm + CS-review flow is locked; the clock times are not. Needed before the BullMQ cron can be written.                                                                          |
-| OI-06   | Router assignment: automatic vs manual           | **RESOLVED**                      | Manual, by Warehouse Manager only (M2 #24)                                                                                                                                            |
-| OI-07   | Non-router inventory items                       | **RESOLVED**                      | Scope is **routers only**. Client has signed off. SoW §2.1.6's broader catalog language is explicitly excluded from this project; no change request needed.                           |
-| OI-08   | Subscription plan model (label vs. logic)        | **STILL OPEN**                    | Affects CRM data model in M4                                                                                                                                                          |
-| OI-09   | IPv4 only vs IPv6                                | **LARGELY MOOT**                  | Schema uses Postgres `INET`, which natively supports both — but confirm scope/UI expectations regardless                                                                              |
-| OI-10   | GPS polling interval on mobile                   | **STILL OPEN**                    | Battery/data tradeoff, needed before M3 tracking work                                                                                                                                 |
-| OI-11   | Concurrent user peak estimate                    | **STILL OPEN**                    | Needed for Railway instance sizing                                                                                                                                                    |
-| OI-12   | Data retention (tickets, GPS, audit logs)        | **STILL OPEN**                    | Affects M3 route-history storage and general DB cost                                                                                                                                  |
-| OI-13   | Mobile dev ownership (Marwan vs. recruited)      | **STILL OPEN**                    | Directly affects M5 timeline/capacity                                                                                                                                                 |
+- No hard deletes. Soft deactivate or status flag only.
+- RBAC enforced server-side in guards; a client-side-only check is not RBAC.
+- GPS distance, timestamps and totals are computed server-side, never trusted from the client.
+- File generation, bulk email and bulk row processing run as BullMQ jobs.
+- Every migration is safe to run against rows that already exist in that table.
+- Redis key discovery uses `SCAN`, never `KEYS`.
+- No invented business logic. If a rule is not in this file, the SoW or the SRS, stop and ask.
 
 ---
 
-## 3. Milestone Map
+## 2. Decisions
 
-### Note on current repo state
+### 2a. SoW vs SRS vs issue docs — resolved (SoW governs)
 
-Per your own tracking: the live repo has 18 issues, not the 27 drafted across M1+M2 below, and the numbering/order has already drifted (a "CI fix" and "foundation hardening" issue exist in the real repo with no equivalent here). **Reconcile the drift before feeding this to an agent as ground truth** — an agent trusting this document over your actual GitHub state will create duplicate or conflicting issues.
+| Topic             | Conflict                                                                                                        | Locked decision                                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roles             | SRS lists 6 roles; SoW lists 4                                                                                  | 4 roles: `ADMIN, WAREHOUSE_STAFF, CS, TECHNICIAN`. m2 says "Warehouse Manager" for router/IP actions: there is no such role. Use `WAREHOUSE_STAFF` (+ `ADMIN`). |
+| GPS ping window   | SoW §2.2.4: continuously while checked in. SRS FR-RT-02: while ticket In Progress                               | Ping while checked in (SoW). Tag each point with the active ticket id when one is In Progress, so per-ticket routes (SRS FR-RT-04) still work.                  |
+| Avg response time | SoW §3: ticket creation → technician arrival. SRS §3.2.4: assignment → In Progress                              | SoW. "Arrival" = first transition to In Progress (SoW §4.3: technician marks it on arrival).                                                                    |
+| Leave             | SRS has a module; SoW does not                                                                                  | Cut. `users.status` includes `ON_LEAVE` as the lightweight substitute.                                                                                          |
+| Password hashing  | SRS NFR-06: bcrypt cost 12. Actual: argon2id                                                                    | argon2id. SoW §8 makes technology the developer's call. Update SRS NFR-06 wording.                                                                              |
+| Public routes     | SRS NFR-04: only login/refresh public                                                                           | Four public routes: login, refresh, forgot-password, reset-password (SoW §2.1.1 requires the last two).                                                         |
+| IP history        | m2 #14 gives `ip_history.action` only `ASSIGNED \| RELEASED`; #27 needs a row for retire and manual changes too | Every status mutation writes one row recording `from_status` and `to_status`; extend the action set to cover all of them. Fix in the m2 issue.                  |
+
+### 2b. SRS open items
+
+| #     | Topic                       | Status            | Handling                                                                                                       |
+| ----- | --------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------- |
+| OI-02 | Department values           | LOCKED            | `TECHNICAL, CUSTOMER_SERVICE, WAREHOUSE, MANAGEMENT` only.                                                     |
+| OI-03 | Check-in cutoff / check-out | LOCKED            | Cutoff = env var, default `09:00`, sets `LATE`. Check-out has no GPS check.                                    |
+| OI-04 | Ticket priority             | LOCKED            | `LOW, MEDIUM, HIGH, URGENT` (SoW §2.1.12).                                                                     |
+| OI-06 | Router assignment           | LOCKED            | Manual by warehouse staff. Never automatic on ticket creation.                                                 |
+| OI-09 | IPv4/IPv6                   | MOOT              | `INET` covers both.                                                                                            |
+| OI-05 | Morning batch times         | **OPEN**          | Configurable env var, placeholder default, marked provisional. Do not hardcode as settled.                     |
+| OI-08 | Subscription plan           | **OPEN**          | Plain label field. No pricing/bandwidth logic.                                                                 |
+| OI-10 | GPS polling interval        | **OPEN**          | Configurable constant on the client.                                                                           |
+| OI-11 | Peak concurrent users       | OPEN              | Not a coding blocker.                                                                                          |
+| OI-12 | GPS/route retention         | **OPEN**          | Conservative provisional default (e.g. 90 days) plus a cleanup job, commented as provisional. Never unbounded. |
+| OI-13 | Mobile dev ownership        | OPEN              | Affects M5 schedule, not scope.                                                                                |
+| OI-07 | Non-router inventory        | **CONTRADICTION** | See §5 Risk 1.                                                                                                 |
+
+---
+
+## 3. Phases
+
+Run in this order; each is its own `/specify` → `/plan` → `/tasks` → `/implement` cycle. Do not merge phases or build a later phase's tables early. "Payment %" is the SRS §6 split; see §5 Risk 2.
 
 ---
 
 ### M1 — Foundation
 
-_13 issues · ~3–4 weeks · 25% payment · labels: `setup` `infra` `database` `auth` `rbac` `api`_
+_13 issues · SRS payment 25%_
 
-| #   | Title                                                                                     | Label    |
-| --- | ----------------------------------------------------------------------------------------- | -------- |
-| 1   | Initialize NestJS project + repo (Zod-validated env, global exception filter/interceptor) | setup    |
-| 2   | PostgreSQL + Prisma on Railway (dev/staging envs)                                         | infra    |
-| 3   | Redis on Railway (ioredis + BullMQ module)                                                | infra    |
-| 4   | SendGrid email service                                                                    | infra    |
-| 5   | Core schema + ERD (`users`, `warehouses` stub)                                            | database |
-| 6   | Login endpoint (`POST /auth/login`)                                                       | auth     |
-| 7   | Token refresh + logout                                                                    | auth     |
-| 8   | Login rate limiting (5/10min per IP)                                                      | auth     |
-| 9   | Forgot password + reset flow                                                              | auth     |
-| 10  | JWT guard + `@Roles()` decorator + RBAC guard                                             | rbac     |
-| 11  | Admin: revoke any user session                                                            | rbac     |
-| 12  | User management CRUD (Admin only, no hard delete)                                         | api      |
-| 13  | Change own password (all roles)                                                           | api      |
+**Goal:** bootable NestJS service with working auth and RBAC. Nothing else.
 
-**Key contracts:** access token JWT 15min TTL; refresh token 7-day TTL in Redis (`rt:{userId}:{tokenId}`), httpOnly cookie on web, `expo-secure-store` on mobile. Role enum: `ADMIN | WAREHOUSE_STAFF | CS | TECHNICIAN`. No hard deletes anywhere, ever — soft deactivate only.
+**Issues:** scaffold (Zod env validation, global exception filter + response interceptor) · Postgres + Drizzle (Docker) · Redis + BullMQ (Docker) · SendGrid · core schema (`users`, `warehouses` stub) + ERD · login · refresh/logout · login rate limiting · forgot/reset password · JWT guard + `@Roles()` · admin session revoke · user CRUD · change own password.
 
-_(Full issue bodies/acceptance criteria: see your existing `m1` document — unchanged here.)_
+**Definition of done:**
 
----
+- `docker compose up` brings up Postgres and Redis; migrations apply on a fresh DB; `start:dev` boots. A missing required env var throws at boot.
+- `users`: `role` enum as above; `status` = `ACTIVE | INACTIVE` in this phase; `department` is a nullable VARCHAR (OI-02 not yet applied); `assigned_warehouse_id` FK to the `warehouses` stub.
+- Passwords stored as argon2id (hash string starts `$argon2id$`).
+- Access token: JWT, 15 min, payload `{ sub, role }`. Refresh token: UUID v4 at `rt:{userId}:{tokenId}`, 7-day TTL, **rotated on every use**; replaying a rotated token → 401. Web: httpOnly+Secure+SameSite=Strict cookie; mobile: response body.
+- Wrong password → 401. Unknown email → same 401, and that path still performs an argon2 verify against a dummy hash so timing does not reveal which emails exist. Inactive user → 403.
+- `rl:login:{ip}`, TTL 10 min: 6th attempt → 429 with `Retry-After`; a successful login resets the counter.
+- Forgot password: token at `pw-reset:{token}`, 15 min TTL, single use. Reset revokes all of that user's refresh tokens.
+- Guards applied globally; only the four `@Public()` routes work without a token. No token → 401; wrong role → 403.
+- Admin revoke deletes `rt:{userId}:*` via `SCAN`. Deactivate sets `INACTIVE`, revokes sessions, keeps the row.
+- Admin creating a user sends a temp-password email. Change-own-password: wrong current → 400; success revokes refresh tokens.
 
-### M2 — HR + Supply Chain
+**Bad shape — reject if:**
 
-_14 issues · ~4–5 weeks · 20% payment · labels: `hr` `supply-chain` `inventory` · Leave management cut per your decision — SoW governs, SRS's leave module does not exist._
-
-| #   | Title                                                                                                                          | Label        |
-| --- | ------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| 14  | Schema: employees (extend users), warehouses (full), routers, router_assignments, ip_addresses, ip_history, attendance_records | database, hr |
-| 15  | Employee CRUD (Admin only)                                                                                                     | hr           |
-| 16  | Employee profile photo upload (R2, 5MB, jpeg/png)                                                                              | hr           |
-| 17  | Cloudflare R2 storage service (generic `uploadFile`)                                                                           | infra        |
-| 18  | Attendance check-in (GPS ≤150m Haversine, 09:00 cutoff → LATE flag)                                                            | hr           |
-| 19  | Attendance check-out (no GPS requirement)                                                                                      | hr           |
-| 20  | Admin manual attendance override (reason required)                                                                             | hr           |
-| 21  | Attendance report export (Excel, BullMQ background job)                                                                        | hr           |
-| 22  | Warehouse CRUD (block delete if referenced, 409)                                                                               | supply-chain |
-| 23  | Router CRUD + enforced status transitions                                                                                      | supply-chain |
-| 24  | Manual router assignment to technician                                                                                         | supply-chain |
-| 25  | Router inventory report per warehouse                                                                                          | supply-chain |
-| 26  | IP address CRUD + bulk CSV import                                                                                              | supply-chain |
-| 27  | IP history log (audit trail)                                                                                                   | supply-chain |
-
-**Deferred dependency flagged in #14:** `ip_addresses.customer_id` references a table (`customers`) that doesn't exist until M4 — use a plain UUID column without an FK constraint for now; formalize the FK in M4 (#43 below). This pattern **must repeat** for tickets in M3 — see next section.
-
-**Unresolved (§5 Risk 1):** this milestone builds router lifecycle only. If the SoW's generic item/catalog inventory module (§2.1.6) is truly in scope, it is missing entirely from this milestone and has no home in M3–M5 either. Decide and either add it as a change request or get written client sign-off that routers-only satisfies §2.1.6.
-
-_(Full issue bodies/acceptance criteria: see your existing `m2` document — unchanged here.)_
+- Refresh tokens in Postgres, or without TTL, or not rotated.
+- Anything other than argon2id for passwords, or bcrypt/Prisma imports anywhere.
+- TS `enum` keyword used; role values renamed or added.
+- A route reachable without the guards other than the four public ones.
+- Hard delete of a user.
+- Redis `KEYS` used for session revoke.
+- Docs/issues describing Prisma, bcrypt or Railway are treated as instructions (they are stale; see §5 Risk 5).
 
 ---
 
-### M3 — Field Operations _(new — derived from SoW §2.1.9–2.1.12, §4.3–4.5 and SRS §3.4)_
+### M2a — HR
 
-_~15 issues · est. 4–5 weeks · 20% payment · labels: `field-ops` `tracking` `notifications`_
+_8 issues · SRS payment: M2 20% (shared with M2b)_
 
-**Schema additions (#28):**
+**Goal:** employee records and attendance. No supply chain.
 
-- `customers` **(stub only — mirrors the M1→M2 `warehouses` stub pattern)**: `id, name, phone, address, gps_lat, gps_lng, status(enum ACTIVE|INACTIVE|SUSPENDED), created_at`. Full profile (national_id, subscription_plan, secondary phones) lands in M4 — same deferral discipline you already applied to warehouses.
-- `tickets`: `id, customer_id(FK→customers), type(enum INSTALLATION|TECHNICAL_ISSUE|COMPLAINT|MAINTENANCE), description, priority(enum LOW|MEDIUM|HIGH|URGENT), status(enum PENDING|ASSIGNED|IN_PROGRESS|COMPLETED|CANCELLED), address, gps_lat, gps_lng, assigned_technician_id(FK, nullable), assigned_at, created_by(FK→users), created_at, completed_at, cancelled_reason(nullable), satisfaction_rating(1-5, nullable)`
-- `ticket_status_history`: `id, ticket_id(FK), from_status, to_status, actor_id(FK), created_at`
-- `ticket_photos`: `id, ticket_id(FK), url, uploaded_at`
-- `technician_locations`: latest-position cache per technician (`technician_id, lat, lng, updated_at`)
-- `ticket_routes`: point-in-time GPS samples per ticket while "In Progress" (`id, ticket_id, lat, lng, recorded_at`) — **retention policy is OI-12, still open; don't build unbounded storage without an answer**
-- `device_tokens`: `id, user_id(FK), token, platform, created_at` — FCM registration
+**Issues:** schema changes · employee CRUD · photo upload · R2 storage service · check-in · check-out · admin override · attendance Excel export (**this issue also builds the reusable report-job pipeline**).
 
-| #   | Title                                                                                                                                                     | Label               |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| 28  | Schema: customers stub, tickets, ticket_status_history, ticket_photos, technician_locations, ticket_routes, device_tokens                                 | database, field-ops |
-| 29  | Ticket CRUD (CS creates/reads/updates; fields per SoW §2.1.12)                                                                                            | field-ops           |
-| 30  | Ticket status transitions, no-skip enforced (Pending→Assigned→In Progress→Completed/Cancelled)                                                            | field-ops           |
-| 31  | Photo upload on completion — mandatory for Installation, optional for Maintenance/Complaint                                                               | field-ops           |
-| 32  | Ticket cancellation with reason at any status, full history retained                                                                                      | field-ops           |
-| 33  | On installation ticket close: auto-trigger router status → Installed at Customer + IP status → Assigned (integration with M2 #23/#26)                     | field-ops           |
-| 34  | Morning batch suggestion algorithm: proximity (technician home warehouse ↔ ticket cluster) + load balance, **exclude technicians with `status=ON_LEAVE`** | field-ops           |
-| 35  | Morning batch CS review/confirm screen endpoint — technicians notified **only** after CS confirms                                                         | field-ops           |
-| 36  | Manual assign/reassign endpoint for urgent/overflow, any time, any status; notifies both old and new technician                                           | field-ops           |
-| 37  | Mobile GPS ping ingestion via WebSocket (Socket.io + Redis adapter), only while ticket "In Progress" or technician checked in                             | tracking            |
-| 38  | Live technician map channel/endpoint for Admin/CS/Ops (online/offline indicator, last-update timestamp)                                                   | tracking            |
-| 39  | Historical route storage per ticket — **blocked on OI-12 retention decision**                                                                             | tracking            |
-| 40  | FCM device token registration endpoint                                                                                                                    | notifications       |
-| 41  | Push notifications: morning batch confirmed, manual urgent assignment, reassignment (to both parties)                                                     | notifications       |
-| 42  | CS manually logs customer satisfaction rating (1–5) post-closure                                                                                          | field-ops           |
+**Definition of done:**
 
-**Acceptance criteria highlights:**
+- Migration: `users.department` VARCHAR → enum, `users.status` → `ACTIVE | ON_LEAVE | INACTIVE`, plus `national_id`, `hire_date`, `profile_photo_url`; `attendance_records` (`check_in_lat/lng`, `check_out_at` nullable with no GPS columns, `status` `ON_TIME | LATE`). The migration runs cleanly against existing M1 users.
+- `PATCH /employees/:id/status` requires a reason, logged. `INACTIVE` revokes sessions; `ON_LEAVE` does **not** (it only affects assignment eligibility later).
+- Employee list filters compose (role + department + status together).
+- Check-in (`TECHNICIAN`): server Haversine to `assigned_warehouse_id` coordinates; over 150 m → 400 with the distance in the message; second check-in same day with no check-out → 409; after cutoff → `LATE`.
+- Check-out: no GPS check; no open check-in → 400.
+- Override (`ADMIN`, `PATCH /attendance/:id`): `reason` required, stored with the edit.
+- Photo upload: over 5 MB or not jpeg/png → 400 and **nothing written to R2**.
+- R2 service: generic `uploadFile(buffer, key, mimeType)`; missing credentials fail at boot.
+- Report pipeline: BullMQ job → `exceljs` → R2 → `GET /jobs/:id` status/download URL. A 12-month range does not block other requests. Later reports reuse this pipeline.
 
-- Skipping a status (e.g. Pending → Completed directly) → 400.
-- Installation ticket cannot be marked Completed with zero photos attached → 400.
-- Morning batch suggestions exclude `ON_LEAVE` technicians even though the Leave module itself doesn't exist — this only works because the enum value survived the scope cut (per decisions log).
-- Reassignment always fires two notifications, not one.
+**Bad shape — reject if:**
 
-**Blockers before this milestone can start cleanly:** OI-05 (batch schedule times), OI-10 (GPS polling interval), OI-12 (retention policy). Building `ticket_routes` (#39) without OI-12 answered risks unbounded storage growth you can't cost.
+- Distance or "late" decided from client-supplied values.
+- Check-out given a GPS requirement "for consistency".
+- Report generated synchronously, or the cutoff hardcoded.
+- The `department`/`status` migration fails or drops data on existing rows.
+- An employee row hard-deleted.
+- Report pipeline written report-specific so M2b has to copy it.
 
 ---
 
-### M4 — CRM + Reports + Dashboard _(new — derived from SoW §2.1.11, §2.1.13 and SRS §3.5, §3.7)_
+### M2b — Supply Chain
 
-_~13 issues · est. 3–4 weeks · 20% payment · labels: `crm` `reports` `dashboard`_
+_7 issues · SRS payment: M2 20% (shared with M2a)_
 
-**Schema additions (#43):**
+**Goal:** warehouse, router and IP lifecycle. No tickets, no customers.
 
-- `customers`: extend stub with `national_id, subscription_plan(TBD — OI-08), created_at` finalized
-- `customer_phones`: secondary numbers, if "phone number(s)" plural in SoW §2.1.11 is taken literally rather than one field
-- **Formalize deferred FKs**: `ip_addresses.customer_id → customers.id` (deferred from M2 #14), `tickets.customer_id → customers.id` (deferred from M3 #28)
-- `report_jobs`: `id, type, params(jsonb), status, file_url, requested_by(FK), created_at` — backs every background-export endpoint
+**Issues:** schema · warehouse CRUD · router CRUD + transitions · manual router assignment · router inventory report · IP CRUD + bulk CSV import · IP history.
 
-| #   | Title                                                                                                                                                                | Label         |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| 43  | Full customer schema + add the two deferred FK constraints                                                                                                           | database, crm |
-| 44  | Customer CRUD (Admin/CS), full profile                                                                                                                               | crm           |
-| 45  | Customer search (name, phone, national ID, IP address)                                                                                                               | crm           |
-| 46  | Customer ticket history endpoint                                                                                                                                     | crm           |
-| 47  | Customer average satisfaction rating (computed across all closed tickets)                                                                                            | crm           |
-| 48  | On customer deactivation: auto-release assigned IP to Available (FR-CRM-07)                                                                                          | crm           |
-| 49  | Report job infrastructure: `report_jobs` table, generic BullMQ job runner, `GET /jobs/:id` status                                                                    | reports       |
-| 50  | Technician performance report (completion rate, avg response time, rating, first-visit resolution, tickets/day, late check-ins)                                      | reports       |
-| 51  | Ticket summary report (Excel + PDF)                                                                                                                                  | reports       |
-| 52  | Finalize router/IP reports with PDF export where the report type calls for it                                                                                        | reports       |
-| 53  | Admin dashboard summary endpoints (employee/attendance/ticket/inventory/router KPI snapshot)                                                                         | dashboard     |
-| 54  | API contract freeze + OpenAPI/Swagger doc handoff to the Next.js frontend dev                                                                                        | dashboard     |
-| 55  | System configuration endpoints (shift hours, GPS radius, low-stock thresholds) — Admin only                                                                          | dashboard     |
-| 56  | Customer GPS capture via CS map-picker (Leaflet) — **required, not optional**, per your locked override of the SRS; WhatsApp location-link parsing as secondary path | crm           |
+**Definition of done:**
 
-**Note:** #54 is a real dependency, not paperwork — if the frontend developer is building against a moving API, expect churn. Freeze the contract before M4 implementation starts, not after.
+- Router statuses: `AVAILABLE, ASSIGNED_TO_TECHNICIAN, INSTALLED_AT_CUSTOMER, RETURNED, DAMAGED, UNDER_REPAIR, LOST, DECOMMISSIONED`. Allowed transitions, and nothing else:
+  `AVAILABLE→ASSIGNED_TO_TECHNICIAN` · `ASSIGNED_TO_TECHNICIAN→INSTALLED_AT_CUSTOMER|RETURNED|DAMAGED|LOST` · `INSTALLED_AT_CUSTOMER→RETURNED` · `RETURNED→AVAILABLE|UNDER_REPAIR|DAMAGED` · `DAMAGED→UNDER_REPAIR|DECOMMISSIONED` · `UNDER_REPAIR→AVAILABLE|DECOMMISSIONED` · `LOST`, `DECOMMISSIONED` terminal. Anything else → 400.
+- `router_assignments.holder_type` = `WAREHOUSE | TECHNICIAN | CUSTOMER`. Every status change inserts a new row and sets `released_at` on the previous one **in the same transaction**; the current holder is the row where `released_at IS NULL`.
+- Router creation inserts the initial `WAREHOUSE` assignment row. Serial uniqueness enforced by a DB unique constraint.
+- Assign (`WAREHOUSE_STAFF`/`ADMIN`, `POST /routers/:id/assign`): router not `AVAILABLE` → 409.
+- Manual status override requires a reason.
+- IPs: `address` as `INET`, unique and indexed; status `AVAILABLE | ASSIGNED | RESERVED | RETIRED`. Bulk import of 1000+ rows returns `{ inserted, skipped, errors }`; duplicates are skipped and reported, never abort the batch. Every status mutation writes exactly one history row.
+- Warehouse delete with technicians or routers attached → 409.
+- Router report uses the M2a pipeline; a warehouse with zero routers does not error.
+
+**Bad shape — reject if:**
+
+- Router status updated without closing the previous assignment row.
+- Any transition outside the list above.
+- One bad CSV row rolls back or fails the whole import.
+- `ip_addresses.customer_id` created as a real FK (stays a bare nullable UUID until M4a).
+- Report logic duplicated instead of reusing the M2a pipeline.
 
 ---
 
-### M5 — Mobile App + QA + Handover _(new — derived from SoW §2.2, §11–14 and SRS §8)_
+### M3a — Ticket Core
 
-_~14 issues · est. 3–4 weeks · 15% payment · labels: `mobile` `qa` `deployment`_
+_7 issues · SRS payment: M3 20% (shared across M3a–c)_
 
-| #   | Title                                                                                                                    | Label      |
-| --- | ------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| 57  | Expo project scaffold, navigation, secure token storage (`expo-secure-store`)                                            | mobile     |
-| 58  | Login screen + forgot-password flow                                                                                      | mobile     |
-| 59  | Home screen: attendance status, working-hours counter, task summary                                                      | mobile     |
-| 60  | Attendance check-in/check-out screens (GPS on check-in only)                                                             | mobile     |
-| 61  | My Tasks: tabbed list (All/Pending/In Progress/Completed) + detail view, read-only customer/router/IP fields             | mobile     |
-| 62  | Start/Complete task actions + mandatory photo upload for installation tickets                                            | mobile     |
-| 63  | Push notification handling (FCM) + deep link into the relevant task                                                      | mobile     |
-| 64  | Offline check-in caching + sync on reconnect (NFR-10)                                                                    | mobile     |
-| 65  | Profile screen: view details, change password, logout                                                                    | mobile     |
-| 66  | Full E2E test pass across all modules against staging                                                                    | qa         |
-| 67  | Load/perf validation against NFR-01/NFR-02 (API p95 < 500ms; report jobs < 60s for 12-month datasets)                    | qa         |
-| 68  | Production deployment: Railway (API/DB/Redis/Workers) + Vercel (dashboard) + EAS build; full credential handover package | deployment |
-| 69  | Admin training session + technical documentation handoff                                                                 | deployment |
-| 70  | 30-day bug-fix warranty window: tracking + triage process kickoff                                                        | deployment |
+**Goal:** ticket CRUD, status machine, mandatory-photo rule, close-time triggers. `customers` is a **stub** only.
 
-**Blocker:** OI-13 (mobile dev ownership) directly determines whether this milestone is Marwan's own timeline or someone else's — resolve before estimating M5 duration to a client.
+**Issues:** schema (`customers` stub: `id, name, phone, address, gps_lat, gps_lng, status (ACTIVE|INACTIVE|SUSPENDED), created_at`; `tickets`, `ticket_status_history`, `ticket_photos`) · ticket CRUD · transitions · photo on completion · cancellation · router/IP update on install close · CS satisfaction rating.
 
----
+**Definition of done:**
 
-## 4. Cross-Milestone Schema Evolution (quick reference for an agent)
+- Types `INSTALLATION | TECHNICAL_ISSUE | COMPLAINT | MAINTENANCE`; priority `LOW | MEDIUM | HIGH | URGENT`; status `PENDING → ASSIGNED → IN_PROGRESS → COMPLETED | CANCELLED`. Skipping a step → 400.
+- Installation ticket cannot reach `COMPLETED` with zero photos → 400; for maintenance/complaint the photo is optional. One shared validation path, not per-endpoint copies.
+- Every status change writes a `ticket_status_history` row (actor, timestamp).
+- On installation close: router → `INSTALLED_AT_CUSTOMER` (with its assignment-row handoff) and IP → `ASSIGNED`, **in the same transaction** as the ticket update.
+- CS can cancel at any status with a reason; history retained and reportable.
+- Rating 1–5, entered by CS after closure.
 
-| Table                                                 | Introduced     | Extended                                            | Deferred FK resolved     |
-| ----------------------------------------------------- | -------------- | --------------------------------------------------- | ------------------------ |
-| `users`                                               | M1 (#5)        | M2 (#14: department, national_id, hire_date, photo) | —                        |
-| `warehouses`                                          | M1 (#5, stub)  | M2 (#22, full CRUD)                                 | —                        |
-| `routers` / `router_assignments`                      | M2 (#14)       | —                                                   | —                        |
-| `ip_addresses` / `ip_history`                         | M2 (#14)       | —                                                   | M4 (#43: FK → customers) |
-| `attendance_records`                                  | M2 (#14)       | —                                                   | —                        |
-| `customers`                                           | M3 (#28, stub) | M4 (#43, full)                                      | —                        |
-| `tickets` / `ticket_status_history` / `ticket_photos` | M3 (#28)       | —                                                   | M4 (#43: FK → customers) |
-| `technician_locations` / `ticket_routes`              | M3 (#28)       | —                                                   | —                        |
-| `device_tokens`                                       | M3 (#28)       | —                                                   | —                        |
-| `report_jobs`                                         | M4 (#49)       | —                                                   | —                        |
+**Bad shape — reject if:**
 
-The stub-then-extend pattern used for `warehouses` (M1→M2) is deliberately repeated for `customers` (M3→M4). Don't let an agent "clean this up" by building the full `customers` table early in M3 — that pulls M4 scope forward and blurs the payment-milestone boundaries your contract is priced against.
+- `customers` gets `national_id`, `subscription_plan` or other M4 fields.
+- Router/IP updates run as separate non-transactional calls.
+- Photo rule enforced in one entry point only.
+- `tickets.customer_id` created as a real FK.
+- Router transition on close bypasses the M2b whitelist or assignment-row logic.
 
 ---
 
-## 5. Risks worth resolving before you generate specs from this document
+### M3b — Morning Batch Assignment
 
-1. **OI-05, OI-10, OI-12 all block concrete M3 implementation decisions** (cron schedule, GPS polling battery/data tradeoff, and route-history retention/cost). None of these are "nice to know later" — they change actual code you'd write in #34, #37, #39.
-2. **Repo/document drift (§3 note).** Your live GitHub issues have already diverged from the M1/M2 lists that this plan is built on. Reconcile before an agent trusts this file as current state.
+_3 issues_
 
----
+**Goal:** CS-reviewed daily assignment suggestions. This is an optimization problem, not CRUD.
 
-## 6. Infrastructure & DevOps Backlog _(absorbed from former FUTURE.md — now the single source of truth)_
+**Issues:** suggestion algorithm · CS review/confirm endpoint · manual assign/reassign.
 
-These items are not feature milestones and don't map to GitHub issues, but they are required before
-or alongside specific milestones. Do not omit them when planning sprint capacity.
+**Definition of done:**
 
-### 6.1 — API Dockerfile _(before M5 #68, i.e. before production deployment)_
+- The exact load-balance metric is written into the spec **before** the algorithm (e.g. "minimize the maximum tickets per technician" vs "even count"). If `/specify` has no answer, stop and ask.
+- Technicians with `status = ON_LEAVE` are excluded.
+- Generating suggestions notifies nobody. Technicians are notified only after CS confirms.
+- Manual assign/reassign works at any time and any ticket status; reassignment notifies both the original technician (if any) and the new one.
+- The schedule comes from config (OI-05), commented as provisional.
+- Tickets that cannot be placed stay `PENDING`.
 
-Multi-stage build: `builder` stage installs pnpm via corepack, builds `@alfahd/types` then
-`@alfahd/api` via SWC; `runner` stage copies only `dist/`, production `node_modules`, and
-`package.json` files. Non-root user (`alfahd:1001`). Port exposed from env (default 3000).
+**Bad shape — reject if:**
 
-```dockerfile
-# Stage 1: Build
-FROM node:22-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@11.26.0 --activate
-WORKDIR /app
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
-COPY packages/types ./packages/types
-COPY apps/api ./apps/api
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @alfahd/types build
-RUN pnpm --filter @alfahd/api build
-
-# Stage 2: Production
-FROM node:22-alpine AS runner
-RUN corepack enable && corepack prepare pnpm@11.26.0 --activate
-WORKDIR /app
-RUN addgroup -g 1001 -S alfahd && adduser -S alfahd -u 1001
-COPY --from=builder --chown=alfahd:alfahd /app/packages/types/dist ./packages/types/dist
-COPY --from=builder --chown=alfahd:alfahd /app/packages/types/package.json ./packages/types/
-COPY --from=builder --chown=alfahd:alfahd /app/apps/api/dist ./apps/api/dist
-COPY --from=builder --chown=alfahd:alfahd /app/apps/api/package.json ./apps/api/
-COPY --from=builder --chown=alfahd:alfahd /app/node_modules ./node_modules
-USER alfahd
-EXPOSE 3000
-CMD ["node", "apps/api/dist/main.js"]
-```
-
-**Verification:** `docker build -f apps/api/Dockerfile .` → `docker run -p 3000:3000 --env-file apps/api/.env alfahd-api` → API responds on `http://localhost:3000`.
+- An undefined, invented balancing heuristic.
+- A notification fires at suggestion time.
+- A guessed cron time hardcoded as settled.
+- Reassignment notifies only the new technician.
+- Suggestions auto-confirm after a timeout (SoW §6 excludes fully automated routing).
 
 ---
 
-### 6.2 — CI pnpm Store Caching _(after CI workflow is confirmed green)_
+### M3c — Tracking + Notifications
 
-Add to both `.github/workflows/ci.yml` and `deploy-api.yml`, immediately after the `Setup pnpm` step:
+_6 issues · requires M3a and M3b_
 
-```yaml
-- name: Get pnpm store directory
-  shell: bash
-  run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
-  id: pnpm-cache
+**Goal:** live GPS and push infrastructure.
 
-- name: Cache pnpm store
-  uses: actions/cache@v4
-  with:
-    path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-    key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-    restore-keys: |
-      ${{ runner.os }}-pnpm-store-
-```
+**Issues:** schema (`technician_locations`, `ticket_routes`, `device_tokens`) · WebSocket ingestion · live map channel · route history · FCM token registration · push notifications.
 
-Expected speedup: 2–3× on cache hits.
+**Definition of done:**
 
----
+- Pings accepted only while the technician is checked in (§2a); each point carries the active ticket id when one is `IN_PROGRESS`.
+- The WebSocket connection is authenticated, and the technician id comes from the connection identity, never the payload.
+- Socket.io runs with the Redis adapter.
+- `ticket_routes` has a retention window and a scheduled cleanup job (provisional, OI-12).
+- Device token registration is an upsert per `(user_id, device)`; no duplicate pushes.
+- Pushes: batch confirmed, urgent assignment, reassignment (original technician and new one).
+- Live map payload: name, online/offline, last-update timestamp.
 
-### 6.3 — Dependabot Configuration _(after repo is pushed to GitHub)_
+**Bad shape — reject if:**
 
-File: `.github/dependabot.yml`
-
-```yaml
-version: 2
-updates:
-  - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    labels: ["dependencies"]
-    groups:
-      nestjs:
-        patterns: ["@nestjs/*"]
-      drizzle:
-        patterns: ["drizzle-orm", "drizzle-kit"]
-      typescript:
-        patterns: ["typescript"]
-      eslint:
-        patterns: ["eslint*", "@eslint/*"]
-
-  - package-ecosystem: "npm"
-    directory: "/apps/api"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    labels: ["dependencies"]
-
-  - package-ecosystem: "npm"
-    directory: "/packages/types"
-    schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 5
-    labels: ["dependencies"]
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    labels: ["ci"]
-```
+- No retention bound on location data.
+- `technician_id` trusted from the payload.
+- No Redis adapter.
+- Pings accepted outside a checked-in session.
+- Push sent inline on the request thread for bulk batches.
 
 ---
 
-### 6.4 — Structured Logging with pino _(M1 scope, do alongside #1)_
+### Deploy gate (before M4a)
 
-Install `nestjs-pino` + `pino-pretty` (dev only). Configure as the global logger in `AppModule`.
-Log level controlled via env var (`LOG_LEVEL`, default `info`). Do not use NestJS's default
-`ConsoleLogger` in production — it has no structured output.
-
-```bash
-pnpm --filter @alfahd/api add nestjs-pino pino-http
-pnpm --filter @alfahd/api add -D pino-pretty
-```
+Stand up Railway staging (API, Postgres, Redis, worker) with real R2, SendGrid and FCM credentials; run migrations there; re-run M1–M3 acceptance checks against it. This is a deliverable, not a footnote: SRS §8 defines acceptance as passing QA **on staging**. Latest allowed slip: before M5a starts (mobile testing needs a reachable API).
 
 ---
 
-### 6.5 — CORS Configuration _(M1 scope, do in `main.ts` alongside #1)_
+### M4a — Customer Data Reconciliation
 
-Enable CORS in `main.ts` with an allowlist driven by an env var (`CORS_ORIGINS`, comma-separated).
-The web dashboard origin (Vercel) and the local dev origin must both be allowed. The mobile app
-uses bearer tokens, not cookies, so it is not affected by CORS.
+_3 issues · a gate, not a feature phase_
 
-```typescript
-app.enableCors({
-  origin: process.env.CORS_ORIGINS?.split(",") ?? ["http://localhost:3001"],
-  credentials: true,
-});
-```
+**Goal:** make the deferred FKs on `ip_addresses.customer_id` and `tickets.customer_id` safe. The only output is trustworthy data.
+
+**Issues:** full `customers` schema (adds `national_id`, `subscription_plan` as a plain label) · audit existing placeholder `customer_id` values · add the FK constraints.
+
+**Definition of done:**
+
+- The audit produces a concrete report: how many rows reference a non-existent customer and what happened to each (nulled, backfilled or flagged). The report is reviewed **before** the constraint migration runs.
+- The FK migration applies cleanly.
+
+**Bad shape — reject if:**
+
+- FKs added with no prior audit.
+- This phase folded into M4b.
+- Orphans silently nulled with no record.
+
+---
+
+### M4b — CRM + Reports + Dashboard
+
+_13 issues · SRS payment: M4 20%_
+
+**Goal:** customer features, reports, dashboard endpoints, API contract freeze.
+
+**Issues:** customer CRUD · search · ticket history · average rating · auto-release IP on deactivation · report persistence (`report_jobs`) · technician performance report · ticket summary (Excel + PDF) · router/IP reports finalised · dashboard summary endpoints · OpenAPI freeze · system config endpoints · customer GPS capture.
+
+**Definition of done:**
+
+- Customer GPS is **required** for active customers (overrides SRS FR-CRM-01); capture via CS map picker (Leaflet), WhatsApp location-link parsing secondary.
+- Deactivating a customer releases their IP to `AVAILABLE` in the same transaction.
+- `report_jobs` persists job history and ownership on top of the M2a pipeline; the attendance and router reports migrate onto it. No report is a one-off synchronous endpoint.
+- Technician performance metrics follow SoW §3 definitions (response time per §2a).
+- Search covers name, phone, national ID and IP address.
+- System config endpoints (ADMIN): shift hours, GPS radius, low-stock thresholds.
+- OpenAPI contract is published and frozen before the frontend developer builds against it.
+
+**Bad shape — reject if:**
+
+- GPS optional "to match the SRS".
+- IP release needs a separate manual step.
+- A second report mechanism alongside the M2a pipeline.
+- Contract still changing after the freeze without a versioned change.
+
+---
+
+### M5a — Mobile Screens + Core Flows
+
+_8 issues_
+
+**Goal:** screens and happy-path flows. Not offline sync.
+
+**Issues:** Expo scaffold + secure token storage · login/forgot password · home · attendance screens · My Tasks (tabs + detail) · start/complete + install photo · push handling + deep link · profile.
+
+**Definition of done:**
+
+- Refresh token in `expo-secure-store` only.
+- Every server-enforced rule (install photo, no-skip transitions, GPS on check-in) is mirrored in the UI for UX, and the server remains the authority.
+- Task detail shows customer, router serial and IP read-only.
+- API base URL comes from Expo config/env.
+
+**Bad shape — reject if:**
+
+- Tokens in `AsyncStorage`.
+- A rule enforced only client-side.
+- Hardcoded base URL.
+- Edit affordances on read-only fields.
+
+---
+
+### M5b — Offline Sync + QA + Deployment
+
+_6 issues · SRS payment: M5 15%_
+
+**Goal:** offline check-in, verification, production go-live.
+
+**Issues:** offline check-in caching + sync · full E2E against staging · load/perf validation · production deployment + credential handover · admin training + docs · warranty tracking kickoff.
+
+**Definition of done:**
+
+- Offline-then-synced check-in is **idempotent** (idempotency key or equivalent); retrying sync cannot create a duplicate attendance row.
+- E2E runs against staging and covers every milestone's criteria, as a repeatable suite with a recorded pass/fail.
+- Load results are measured against NFR-01 (API p95 < 500 ms) and NFR-02 (report jobs < 60 s on 12 months) and recorded.
+- The credential handover package exists and is verified before production is called done.
+
+**Bad shape — reject if:**
+
+- Sync can duplicate a check-in/check-out.
+- "E2E" means one manual click-through.
+- Production deploy happens before the handover package exists.
+
+---
+
+## 4. Cross-Milestone Schema Ownership
+
+| Table                                                      | Created    | Extended                                                          | FK added            |
+| ---------------------------------------------------------- | ---------- | ----------------------------------------------------------------- | ------------------- |
+| `users`                                                    | M1         | M2a (`department` → enum, `status` + `ON_LEAVE`, personal fields) | —                   |
+| `warehouses`                                               | M1 (stub)  | M2b (full CRUD)                                                   | —                   |
+| `attendance_records`                                       | M2a        | —                                                                 | —                   |
+| `routers` / `router_assignments`                           | M2b        | —                                                                 | —                   |
+| `ip_addresses` / `ip_history`                              | M2b        | —                                                                 | M4a (`customer_id`) |
+| `customers`                                                | M3a (stub) | M4a (full)                                                        | —                   |
+| `tickets` / `ticket_status_history` / `ticket_photos`      | M3a        | —                                                                 | M4a (`customer_id`) |
+| `technician_locations` / `ticket_routes` / `device_tokens` | M3c        | —                                                                 | —                   |
+| Report-job pipeline (BullMQ, no table)                     | M2a        | —                                                                 | —                   |
+| `report_jobs` (persistence)                                | M4b        | —                                                                 | —                   |
+
+A phase that touches a table before its "Created" phase, or adds an FK before its "FK added" phase, is building out of order. Stop and flag it.
+
+---
+
+## 5. Risks that need your decision (not the agent's)
+
+1. **Inventory scope gap.** SoW §2.1.6 describes a generic item/product catalog with inbound, outbound, returns, low-stock alerts and per-item movement history. SRS FR-WH-02 narrowed this to routers only, and M2b builds router lifecycle only. The SoW governs, so this is potential under-delivery. Get written client sign-off that routers-only satisfies §2.1.6, or raise a change request. `/specify` must not resolve it silently.
+2. **Milestones do not match the contract.** SoW §10 pays by five _phases_ (25% at signing; Phase 2 Core Backend; Phase 3 Operations Backend; Phase 4 Reports, Notifications & Mobile; Phase 5 QA/Deploy). These M1–M5 follow SRS §6 and your m1/m2 instead. The groupings differ (e.g. IP management is Phase 3 in the SoW but M2 here; mobile sits with reports in SoW Phase 4). Also, SoW v1.0 is "Awaiting Client Signature" with the fee and amounts blank, and §10.3 says each phase starts only after the prior payment. Confirm what is actually signed and which milestone list the acceptance and payments hang on.
+3. **Staging deferral vs acceptance.** Local-only dev is fine, but SRS §8 defines acceptance as QA on staging, so M1–M3 cannot be formally accepted until the deploy gate. Agree in writing to accept against a demo build, or move the gate earlier.
+4. **OI-05, OI-10, OI-12** gate M3b/M3c behaviour; the placeholders above are provisional by design.
+5. **Stale issue bodies.** m1 #2, #6, #13 and m2 (via m1 conventions) describe Prisma, bcrypt and Railway. An agent reading those issues will fight this plan. Rewrite them to Drizzle, argon2id and Docker before feeding them to anything.
