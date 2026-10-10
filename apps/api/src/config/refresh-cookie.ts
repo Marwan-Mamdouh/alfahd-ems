@@ -96,11 +96,15 @@ function refreshMaxAgeSeconds(refreshExpiresIn: string | undefined): number {
 export function corsOrigins(env: Pick<EnvConfig, 'CORS_ORIGINS' | 'FRONTEND_URL'>): string[] {
   const configured = env.CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
+    .filter((origin) => origin.length > 0 && origin !== '*');
 
   if (configured && configured.length > 0) {
     return configured;
   }
 
-  return [env.FRONTEND_URL];
+  if (env.FRONTEND_URL && env.FRONTEND_URL !== '*') {
+    return [env.FRONTEND_URL];
+  }
+
+  return ['http://localhost:3001'];
 }

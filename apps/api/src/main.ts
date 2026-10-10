@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Logger } from 'nestjs-pino';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
@@ -9,7 +10,8 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor.
 import { corsOrigins } from './config/refresh-cookie.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 3000;
@@ -28,7 +30,8 @@ async function bootstrap() {
       FRONTEND_URL: configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001',
     }),
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'X-Request-Id'],
+    exposedHeaders: ['x-request-id', 'X-Request-Id'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 

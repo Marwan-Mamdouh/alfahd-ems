@@ -1,13 +1,30 @@
-# Docker ignore patterns for alfahd-ems monorepo
+# Git and repository metadata
 .git/
+.github/
+.husky/
+.agents/
+.specify/
+.opencode/
+specs/
+docs/
+
+# Dependencies and build outputs
 node_modules/
+**/node_modules/
 dist/
-build
+**/dist/
+build/
 .next/
 coverage/
-*.log
-.env*
-Dockerfile*
-.dockerignore
+**/coverage/
 .coverage
 .turbosnap
+
+# Logs and environment
+*.log
+.env*
+!.env.example
+
+# Other apps not needed for API image
+apps/web/
+apps/mobile/
