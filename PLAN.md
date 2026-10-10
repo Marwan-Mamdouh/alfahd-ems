@@ -89,7 +89,16 @@ A Postgres enum value can be added by migration but not cleanly removed or renam
 
 ## 3. Phases
 
-Each milestone is its own `/specify` → `/plan` → `/tasks` → `/implement` cycle (run per stream, in that stream's own worktree — see §6.2 rule 9). Scheduling is **not** strictly serial any more: §6–§7 define the work-streams, contract cards and waves that run several milestones concurrently. The two hard constraints that survive serial execution are §4 table ownership (never create or extend a later phase's tables early) and the §6.2 shared-surface rules. "Payment %" is the SRS §6 split; see §5 Risk 2.
+Each milestone is its own spec-kit cycle (run per stream, in that stream's own worktree — see §6.2 rule 9):
+
+1. `/speckit-specify` (or `/specify`) with that milestone's issue list as the seed content → produces `specs/m{n}-{name}/spec.md`.
+2. `/speckit-clarify` (or `/clarify`) against that spec → identifies underspecified areas, asks targeted questions, and encodes answers back into the spec before planning.
+3. `/speckit-plan` (or `/plan`) against that spec → generates the per-feature `plan.md` (Technical Context, Constitution Check, Project Structure, Phase 0/1 research + design). Point it at the **§1 Constitution** above so it does not re-derive the stack or invent alternatives — all major choices are locked; never let an agent re-litigate them.
+4. `/speckit-checklist` (or `/checklist`) → generates a quality checklist (e.g. under `checklists/`) validating requirements completeness, clarity, consistency and edge cases before generating tasks.
+5. `/speckit-tasks` (or `/tasks`) → produces `tasks.md`, which should map close to 1:1 onto the numbered issues for that milestone in §3, since they are already written at task granularity.
+6. `/speckit-implement` — feed it the acceptance criteria verbatim; they are written as testable assertions on purpose.
+
+Scheduling is **not** strictly serial any more: §6–§7 define the work-streams, contract cards and waves that run several milestones concurrently. The two hard constraints that survive serial execution are §4 table ownership (never create or extend a later phase's tables early) and the §6.2 shared-surface rules. "Payment %" is the SRS §6 split; see §5 Risk 2.
 
 ---
 
