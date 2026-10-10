@@ -101,6 +101,22 @@ describe('corsOrigins', () => {
       'http://localhost:3000',
     ]);
   });
+
+  it('rejects wildcard "*" and falls back safely to FRONTEND_URL', () => {
+    expect(
+      corsOrigins({
+        CORS_ORIGINS: '*',
+        FRONTEND_URL: 'http://localhost:3000',
+      }),
+    ).toEqual(['http://localhost:3000']);
+
+    expect(
+      corsOrigins({
+        CORS_ORIGINS: '*, https://app.example.com',
+        FRONTEND_URL: 'http://localhost:3000',
+      }),
+    ).toEqual(['https://app.example.com']);
+  });
 });
 
 describe('REFRESH_COOKIE_NAME', () => {

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { LoggerModule } from 'nestjs-pino';
+import { createPinoConfig } from './common/logger/logger.config.js';
 import { envSchema } from './config/env.validation.js';
 import { RedisModule, buildRedisConnectionOptions } from './redis/redis.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -13,6 +15,13 @@ import { UsersModule } from './users/users.module.js';
     ConfigModule.forRoot({
       isGlobal: true,
       validate: (config) => envSchema.parse(config),
+    }),
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) =>
+        createPinoConfig({
+          NODE_ENV: configService.get<string>('NODE_ENV'),
+        }),
     }),
     DatabaseModule,
     EmailModule,
