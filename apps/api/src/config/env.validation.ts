@@ -32,6 +32,17 @@ export const envSchema = z
       .enum(['true', 'false'])
       .transform((v) => v === 'true')
       .optional(),
+    // Cloudinary configuration (optional in test environments where FakeStorageService is used)
+    CLOUDINARY_CLOUD_NAME: z.string().optional(),
+    CLOUDINARY_API_KEY: z.string().optional(),
+    CLOUDINARY_API_SECRET: z.string().optional(),
+    // Attendance configuration
+    ATTENDANCE_CUTOFF_TIME: z
+      .string()
+      .regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format')
+      .default('09:00'),
+    ATTENDANCE_RADIUS_M: z.coerce.number().positive().default(150),
+    APP_TIMEZONE: z.string().default('Africa/Cairo'),
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',
