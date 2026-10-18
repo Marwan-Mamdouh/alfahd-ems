@@ -7,7 +7,6 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,10 +21,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
-import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
 import { AuthOkResponseDto } from '../auth/dto.js';
 import { SessionService } from '../redis/session.service.js';
@@ -41,7 +39,7 @@ import { UsersService } from './users.service.js';
 @ApiTags('Users')
 @ApiBearerAuth()
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
@@ -101,11 +99,11 @@ export class UsersController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserRequestDto,
-    @Req() req: Request & { user: JwtUser },
+    @CurrentUser() user: JwtUser,
   ): Promise<UserResponseDto> {
     // Deactivation (isActive === false) and its session revocation are the
     // service's concern; the controller only routes and authorizes.
-    return this.usersService.update(id, dto, req.user.userId);
+    return this.usersService.update(id, dto, user.userId);
   }
 
   @Post('change-password')
@@ -115,9 +113,9 @@ export class UsersController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   async changePassword(
     @Body() dto: ChangePasswordRequestDto,
-    @Req() req: Request & { user: JwtUser },
+    @CurrentUser() user: JwtUser,
   ): Promise<AuthOkResponseDto> {
-    await this.usersService.changePassword(req.user.userId, dto);
+    await this.usersService.changePassword(user.userId, dto);
     return { ok: true };
   }
 

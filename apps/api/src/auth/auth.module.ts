@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
@@ -11,6 +11,7 @@ import { RateLimitGuard } from './guards/rate-limit.guard.js';
 import { RolesGuard } from './guards/roles.guard.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 
+@Global()
 @Module({
   imports: [
     RedisModule,
@@ -28,6 +29,6 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, RateLimitGuard],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, PassportModule, JwtModule],
 })
 export class AuthModule {}
