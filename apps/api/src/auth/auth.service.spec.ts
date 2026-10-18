@@ -24,9 +24,17 @@ const PASSWORD = 'correct-horse-battery-staple';
 
 const ACTIVE_USER: User = {
   id: '11111111-1111-4111-8111-111111111111',
+  name: 'Admin',
   email: 'admin@alfahd.local',
   passwordHash: '',
   role: 'ADMIN',
+  department: null,
+  phone: null,
+  nationalId: null,
+  hireDate: null,
+  profilePhotoKey: null,
+  status: 'ACTIVE',
+  assignedWarehouseId: null,
   isActive: true,
   createdAt: new Date('2026-09-27T10:00:00.000Z'),
   updatedAt: new Date('2026-09-27T10:00:00.000Z'),
