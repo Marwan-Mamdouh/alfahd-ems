@@ -129,13 +129,17 @@ export const IpStatus = {
 export type IpStatus = (typeof IpStatus)[keyof typeof IpStatus];
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
+export const ATTENDANCE_STATUSES = [
+  'ON_TIME',
+  'LATE',
+] as const;
+
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
 export const AttendanceStatus = {
   ON_TIME: 'ON_TIME',
   LATE: 'LATE',
-  ABSENT: 'ABSENT',
 } as const;
-
-export type AttendanceStatus = (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
 
 // ─── Customer ─────────────────────────────────────────────────────────────────
 export const CustomerStatus = {
@@ -146,21 +150,141 @@ export const CustomerStatus = {
 
 export type CustomerStatus = (typeof CustomerStatus)[keyof typeof CustomerStatus];
 
-// ─── Employee / Department ────────────────────────────────────────────────────
-// OI-02: Department enum values are UNRESOLVED pending client confirmation.
-// Placeholder values below. DO NOT use in production schema until confirmed.
+// ─── Department ───────────────────────────────────────────────────────────────
+export const DEPARTMENTS = [
+  'TECHNICAL',
+  'CUSTOMER_SERVICE',
+  'WAREHOUSE',
+  'MANAGEMENT',
+] as const;
+
+export type Department = (typeof DEPARTMENTS)[number];
+
 export const Department = {
-  WAREHOUSE: 'WAREHOUSE',
   TECHNICAL: 'TECHNICAL',
   CUSTOMER_SERVICE: 'CUSTOMER_SERVICE',
+  WAREHOUSE: 'WAREHOUSE',
   MANAGEMENT: 'MANAGEMENT',
 } as const;
 
-export type Department = (typeof Department)[keyof typeof Department];
+// ─── User / Employee Status ───────────────────────────────────────────────────
+export const USER_STATUSES = [
+  'ACTIVE',
+  'ON_LEAVE',
+  'INACTIVE',
+] as const;
 
-export const EmployeeStatus = {
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export const UserStatus = {
   ACTIVE: 'ACTIVE',
+  ON_LEAVE: 'ON_LEAVE',
   INACTIVE: 'INACTIVE',
 } as const;
 
-export type EmployeeStatus = (typeof EmployeeStatus)[keyof typeof EmployeeStatus];
+export const EmployeeStatus = UserStatus;
+export type EmployeeStatus = UserStatus;
+
+// ─── Employee DTOs ────────────────────────────────────────────────────────────
+export interface EmployeeDto {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  department: Department | null;
+  phone?: string | null;
+  nationalId?: string | null;
+  hireDate?: string | null;
+  status: UserStatus;
+  assignedWarehouseId?: string | null;
+  profilePhotoKey?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CreateEmployeeDto {
+  name: string;
+  email: string;
+  role: Role;
+  department?: Department;
+  phone?: string;
+  nationalId?: string;
+  hireDate?: string;
+  assignedWarehouseId?: string;
+}
+
+export type CreateEmployeeRequestDto = CreateEmployeeDto;
+
+export interface UpdateEmployeeDto {
+  name?: string;
+  department?: Department;
+  phone?: string;
+  assignedWarehouseId?: string;
+}
+
+export type UpdateEmployeeRequestDto = UpdateEmployeeDto;
+
+export interface UpdateEmployeeStatusDto {
+  status: UserStatus;
+  reason: string;
+}
+
+export type UpdateEmployeeStatusRequestDto = UpdateEmployeeStatusDto;
+
+export interface EmployeeQueryDto {
+  role?: Role;
+  department?: Department;
+  status?: UserStatus;
+  warehouse_id?: string;
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+// ─── Attendance DTOs ──────────────────────────────────────────────────────────
+export interface CheckInRequestDto {
+  lat: number;
+  lng: number;
+}
+
+export type CheckInDto = CheckInRequestDto;
+
+export interface AttendanceRecordDto {
+  id: string;
+  userId?: string;
+  workDate: string;
+  checkInAt: string;
+  checkInLat?: number;
+  checkInLng?: number;
+  checkInDistanceM: number;
+  checkOutAt?: string | null;
+  status: AttendanceStatus;
+  hoursWorked?: number | null;
+  overrideReason?: string | null;
+  overriddenBy?: string | null;
+  overriddenAt?: string | null;
+}
+
+export interface OverrideAttendanceDto {
+  checkInAt?: string;
+  checkOutAt?: string;
+  status?: AttendanceStatus;
+  overrideReason: string;
+}
+
+export type OverrideAttendanceRequestDto = OverrideAttendanceDto;
+
+export interface AttendanceQueryDto {
+  from?: string;
+  to?: string;
+  department?: Department;
+  employee_id?: string;
+}
+
+export interface JobStatusResponseDto {
+  id: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  downloadUrl?: string | null;
+  error?: string | null;
+}
+
