@@ -14,6 +14,13 @@
       "when": 1790465024339,
       "tag": "0001_giant_the_executioner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792351980023,
+      "tag": "0002_melodic_northstar",
+      "breakpoints": true
     }
   ],
   "version": "7"
