@@ -5,14 +5,25 @@ import { Redis } from 'ioredis';
 export const REDIS_CLIENT = 'REDIS_CLIENT';
 
 export function buildRedisConnectionOptions(configService: ConfigService): RedisOptions {
+  const isTest = configService.get<string>('NODE_ENV') === 'test';
   const url = configService.get<string>('REDIS_URL');
-  if (url) {
-    return { url, maxRetriesPerRequest: null };
-  }
+  const base = url
+    ? { url }
+    : {
+        host: configService.get<string>('REDIS_HOST'),
+        port: configService.get<number>('REDIS_PORT'),
+      };
+
   return {
-    host: configService.get<string>('REDIS_HOST'),
-    port: configService.get<number>('REDIS_PORT'),
+    ...base,
     maxRetriesPerRequest: null,
+    ...(isTest
+      ? {
+          enableOfflineQueue: false,
+          lazyConnect: true,
+          retryStrategy: () => null,
+        }
+      : {}),
   };
 }
 
