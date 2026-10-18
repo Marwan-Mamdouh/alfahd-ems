@@ -20,29 +20,37 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // A bare `@Catch()` filter turns every unexpected error into an opaque 500 and
-    // logs nothing, so an unhandled exception is undiagnosable from the response
-    // or the server log. Log the cause; never the request body (it carries
-    // passwords on the auth routes). `request.path` excludes the query string so
-    // a token or key passed as a query param cannot land in the log either.
     if (!(exception instanceof HttpException)) {
       const detail = exception instanceof Error ? exception.stack : String(exception);
       this.logger.error(`Unhandled exception on ${request.method} ${request.path}: ${detail}`);
     }
 
-    const rawMessage =
+    const rawResponse =
       exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
 
     let normalizedMessage: string;
-    if (typeof rawMessage === 'string') {
-      normalizedMessage = rawMessage;
-    } else if (Array.isArray(rawMessage)) {
-      normalizedMessage = rawMessage.join(', ');
-    } else if (rawMessage && typeof rawMessage === 'object' && 'message' in rawMessage) {
-      const msg = (rawMessage as Record<string, unknown>).message;
-      normalizedMessage = Array.isArray(msg)
-        ? msg.join(', ')
-        : String(msg ?? 'Internal server error');
+    let code = 'ERROR';
+    let details: unknown = undefined;
+
+    if (typeof rawResponse === 'string') {
+      normalizedMessage = rawResponse;
+    } else if (Array.isArray(rawResponse)) {
+      normalizedMessage = rawResponse.join(', ');
+    } else if (rawResponse && typeof rawResponse === 'object') {
+      const resObj = rawResponse as Record<string, unknown>;
+      if ('code' in resObj && typeof resObj.code === 'string') {
+        code = resObj.code;
+      }
+      if ('details' in resObj) {
+        details = resObj.details;
+      }
+      if ('message' in resObj) {
+        normalizedMessage = Array.isArray(resObj.message)
+          ? resObj.message.join(', ')
+          : String(resObj.message ?? 'Internal server error');
+      } else {
+        normalizedMessage = 'Internal server error';
+      }
     } else {
       normalizedMessage = 'Internal server error';
     }
@@ -50,6 +58,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message: normalizedMessage,
+      error: {
+        code,
+        message: normalizedMessage,
+        ...(details !== undefined ? { details } : {}),
+      },
       path: request.url,
       timestamp: new Date().toISOString(),
     });
