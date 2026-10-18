@@ -9,6 +9,10 @@ import { AuthModule } from './auth/auth.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { EmailModule } from './email/email.module.js';
 import { UsersModule } from './users/users.module.js';
+import { StorageModule } from './storage/storage.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
+import { EmployeesModule } from './employees/employees.module.js';
+import { AttendanceModule } from './attendance/attendance.module.js';
 
 @Module({
   imports: [
@@ -26,8 +30,12 @@ import { UsersModule } from './users/users.module.js';
     DatabaseModule,
     EmailModule,
     RedisModule,
+    StorageModule,
     AuthModule,
     UsersModule,
+    EmployeesModule,
+    AttendanceModule,
+    JobsModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
