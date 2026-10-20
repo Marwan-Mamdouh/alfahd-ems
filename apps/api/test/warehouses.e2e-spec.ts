@@ -29,7 +29,11 @@ describe('Warehouses (e2e)', () => {
       findById: async (id: string) => {
         return warehouseStore.find((w) => w.id === id);
       },
-      findManyWithPagination: async (params: { search?: string; limit: number; offset: number }) => {
+      findManyWithPagination: async (params: {
+        search?: string;
+        limit: number;
+        offset: number;
+      }) => {
         let items = [...warehouseStore];
         if (params.search) {
           const s = params.search.toLowerCase();
@@ -228,10 +232,7 @@ describe('Warehouses (e2e)', () => {
 
     it('returns 400 Bad Request when warehouse ID param is not a valid UUID', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
-      await request(app.getHttpServer())
-        .get('/warehouses/not-a-valid-uuid')
-        .set(auth)
-        .expect(400);
+      await request(app.getHttpServer()).get('/warehouses/not-a-valid-uuid').set(auth).expect(400);
     });
 
     it('returns 409 Conflict when creating a warehouse with existing name', async () => {
