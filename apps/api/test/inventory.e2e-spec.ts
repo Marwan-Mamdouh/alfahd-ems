@@ -46,9 +46,7 @@ describe('Inventory (e2e)', () => {
     },
     inventory: {
       getStock: async (warehouseId: string, productId: string) => {
-        return stockStore.find(
-          (s) => s.warehouseId === warehouseId && s.productId === productId,
-        );
+        return stockStore.find((s) => s.warehouseId === warehouseId && s.productId === productId);
       },
       recordMovementInTransaction: async (movement: NewStockMovement, newQuantity: number) => {
         let stock = stockStore.find(

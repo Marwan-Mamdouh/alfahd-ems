@@ -248,18 +248,12 @@ describe('Products (e2e)', () => {
 
     it('returns 403 Forbidden when WAREHOUSE_STAFF attempts to delete a product', async () => {
       const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
-      await request(app.getHttpServer())
-        .delete(`/products/${PRODUCT_1_ID}`)
-        .set(auth)
-        .expect(403);
+      await request(app.getHttpServer()).delete(`/products/${PRODUCT_1_ID}`).set(auth).expect(403);
     });
 
     it('allows ADMIN to delete a product', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
-      await request(app.getHttpServer())
-        .delete(`/products/${PRODUCT_1_ID}`)
-        .set(auth)
-        .expect(204);
+      await request(app.getHttpServer()).delete(`/products/${PRODUCT_1_ID}`).set(auth).expect(204);
     });
   });
 
@@ -277,10 +271,7 @@ describe('Products (e2e)', () => {
 
     it('returns 400 Bad Request when product ID is not a valid UUID', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
-      await request(app.getHttpServer())
-        .get('/products/not-a-valid-uuid')
-        .set(auth)
-        .expect(400);
+      await request(app.getHttpServer()).get('/products/not-a-valid-uuid').set(auth).expect(400);
     });
 
     it('returns 409 Conflict when creating a product with duplicate SKU', async () => {
@@ -301,10 +292,7 @@ describe('Products (e2e)', () => {
 
     it('returns 404 Not Found when requesting non-existent product', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
-      await request(app.getHttpServer())
-        .get(`/products/${NON_EXISTENT_ID}`)
-        .set(auth)
-        .expect(404);
+      await request(app.getHttpServer()).get(`/products/${NON_EXISTENT_ID}`).set(auth).expect(404);
     });
 
     it('returns 409 Conflict when deleting a product that has active stock', async () => {

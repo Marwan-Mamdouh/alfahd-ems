@@ -58,9 +58,7 @@ export async function setupTestApp(options: SetupTestAppOptions = {}): Promise<{
     imports: [AppModule],
   });
 
-  const hasRedisOverride = options.overrideProviders?.some(
-    (p) => p.provide === 'REDIS_CLIENT',
-  );
+  const hasRedisOverride = options.overrideProviders?.some((p) => p.provide === 'REDIS_CLIENT');
 
   if (!hasRedisOverride) {
     builder = builder.overrideProvider('REDIS_CLIENT').useValue(createRedisStub());

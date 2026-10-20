@@ -52,10 +52,7 @@ export class InventoryController {
   @Post(routes.inventory.inbound)
   @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
   @HttpCode(HttpStatus.CREATED)
-  async receiveInbound(
-    @Body() dto: InboundStockDto,
-    @CurrentUser() user?: JwtUser,
-  ) {
+  async receiveInbound(@Body() dto: InboundStockDto, @CurrentUser() user?: JwtUser) {
     return this.inventoryService.receiveInbound({
       ...dto,
       responsibleUserId: user?.userId ?? dto.responsibleUserId,
@@ -65,10 +62,7 @@ export class InventoryController {
   @Post(routes.inventory.outbound)
   @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
   @HttpCode(HttpStatus.CREATED)
-  async issueOutbound(
-    @Body() dto: OutboundStockDto,
-    @CurrentUser() user?: JwtUser,
-  ) {
+  async issueOutbound(@Body() dto: OutboundStockDto, @CurrentUser() user?: JwtUser) {
     return this.inventoryService.issueOutbound({
       ...dto,
       responsibleUserId: user?.userId ?? dto.responsibleUserId,
@@ -78,10 +72,7 @@ export class InventoryController {
   @Post(routes.inventory.returns)
   @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
   @HttpCode(HttpStatus.CREATED)
-  async receiveReturn(
-    @Body() dto: ReturnStockDto,
-    @CurrentUser() user?: JwtUser,
-  ) {
+  async receiveReturn(@Body() dto: ReturnStockDto, @CurrentUser() user?: JwtUser) {
     return this.inventoryService.receiveReturn({
       ...dto,
       responsibleUserId: user?.userId ?? dto.responsibleUserId,
@@ -91,10 +82,7 @@ export class InventoryController {
   @Post(routes.inventory.transfer)
   @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
   @HttpCode(HttpStatus.OK)
-  async transferStock(
-    @Body() dto: TransferStockDto,
-    @CurrentUser() user?: JwtUser,
-  ) {
+  async transferStock(@Body() dto: TransferStockDto, @CurrentUser() user?: JwtUser) {
     return this.inventoryService.transferStock({
       ...dto,
       responsibleUserId: user?.userId ?? dto.responsibleUserId,
@@ -104,10 +92,7 @@ export class InventoryController {
   @Post(routes.inventory.adjust)
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.OK)
-  async adjustStock(
-    @Body() dto: AdjustStockDto,
-    @CurrentUser() user?: JwtUser,
-  ) {
+  async adjustStock(@Body() dto: AdjustStockDto, @CurrentUser() user?: JwtUser) {
     return this.inventoryService.adjustStock({
       ...dto,
       responsibleUserId: user?.userId ?? dto.responsibleUserId,

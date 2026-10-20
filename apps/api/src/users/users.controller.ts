@@ -1,14 +1,5 @@
 import { Role } from '@alfahd/types';
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -79,7 +70,7 @@ export class UsersController {
   @ApiNotFoundResponse({ description: 'User not found' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
+  findOne(@Param('id') id: string): Promise<UserResponseDto> {
     return this.usersService.findOne(id);
   }
 
@@ -97,13 +88,14 @@ export class UsersController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
   update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: UpdateUserRequestDto,
     @CurrentUser() user: JwtUser,
   ): Promise<UserResponseDto> {
-    // Deactivation (isActive === false) and its session revocation are the
-    // service's concern; the controller only routes and authorizes.
-    return this.usersService.update(id, dto, user.userId);
+    if (dto.isActive === false) {
+      return this.usersService.deactivate(id, user.userId);
+    }
+    return this.usersService.update(id, dto);
   }
 
   @Post('change-password')
@@ -131,7 +123,7 @@ export class UsersController {
   @ApiNotFoundResponse({ description: 'User not found' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
-  async revokeSession(@Param('id', ParseUUIDPipe) id: string): Promise<RevokeSessionResponseDto> {
+  async revokeSession(@Param('id') id: string): Promise<RevokeSessionResponseDto> {
     const revoked = await this.sessionService.revokeAllSessions(id);
     return { ok: true, revoked };
   }
