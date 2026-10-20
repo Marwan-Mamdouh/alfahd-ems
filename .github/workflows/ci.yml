@@ -38,10 +38,11 @@ jobs:
       # `apps/web/.env.local` is gitignored, so a fresh checkout has no API_URL.
       # `next.config.ts` throws without it, which fails the `Build` step below
       # (and `pnpm dev` for any new contributor) unless it is set here.
-      - name: Build dashboard env
+      - name: Build environment configs
         run: |
           echo "API_URL=http://localhost:3000" >> apps/web/.env.local
           echo "PORT=3001" >> apps/web/.env.local
+          cp apps/api/.env.example apps/api/.env
 
       - name: Audit dependencies
         run: pnpm audit --audit-level=high
@@ -61,3 +62,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: E2E Test
+        run: pnpm --filter @alfahd/api test:e2e

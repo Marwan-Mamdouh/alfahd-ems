@@ -2,4 +2,5 @@ pnpm --filter @alfahd/types build && \
 pnpm --filter @alfahd/api typecheck && \
 pnpm --filter @alfahd/api format && \
 pnpm --filter @alfahd/api lint && \
-pnpm --filter @alfahd/api test
+pnpm --filter @alfahd/api test && \
+pnpm --filter @alfahd/api test:e2e
