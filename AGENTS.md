@@ -28,7 +28,7 @@ pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fah
 - Local services: `docker compose up -d` starts postgres:16 (user `alfahd`, db `alfahd_ems`, port 5432) and redis:7.
 - Database: `pnpm db:setup` — migrate + seed. Individual scripts in `@alfahd/api`: `db:generate` (drizzle-kit generate, writes to `drizzle/`), `db:migrate`, `db:seed`, `db:studio`. Unlike tests, `db:migrate`/`db:seed` DO require the Docker Postgres running. `db:seed` seeds dev logins (`admin@alfahd.local`, `warehouse@alfahd.local`, `cs@alfahd.local`, all password `password123`) and runs plain `node src/database/seed.ts` using Node's native type stripping.
 
-- Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test. Full-project gates (`pnpm typecheck`/`lint`/`build`/`test`) run in CI. Do not bypass it; keep it green before pushing.
+- Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test -> api test:e2e. Full-project gates (`pnpm typecheck`/`lint`/`build`/`test`/`api test:e2e`) run in CI. Do not bypass it; keep it green before pushing.
 
 ## Env & data layer
 
