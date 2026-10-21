@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
@@ -16,6 +17,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+
+    // Multer's LIMIT_FILE_SIZE is translated to PayloadTooLargeException (413)
+    // by @nestjs/platform-express. Normalize it to 400 with a machine-readable
+    // code so clients can distinguish "upload too big" from other failures.
+    if (exception instanceof PayloadTooLargeException) {
+      const message = 'File exceeds the maximum allowed upload size';
+      response.status(HttpStatus.BAD_REQUEST).json({
+        statusCode: HttpStatus.BAD_REQUEST,
+        message,
+        error: {
+          code: 'FILE_TOO_LARGE',
+          message,
+        },
+        path: request.url,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
 
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;

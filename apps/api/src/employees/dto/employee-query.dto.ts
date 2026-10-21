@@ -30,16 +30,18 @@ export class EmployeeQueryRequestDto implements EmployeeQueryDto {
   @IsString()
   q?: string;
 
-  @IsOptional()
+  /**
+   * Bounds (1..100) are enforced here so the DTO is the single source of truth
+   * for pagination: services must not re-clamp.
+   */
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  page?: number = 1;
+  page: number = 1;
 
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
-  pageSize?: number = 20;
+  pageSize: number = 20;
 }

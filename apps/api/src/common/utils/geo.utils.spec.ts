@@ -49,4 +49,18 @@ describe('haversineDistanceMeters', () => {
     expect(d150).toBeLessThanOrEqual(150.0001);
     expect(d151).toBeGreaterThan(150);
   });
+
+  it('never returns NaN for near-antipodal points where `a` exceeds 1 (float rounding)', () => {
+    // Before the clamp, a = 1.0000000000000002 here made sqrt(1 - a) === NaN,
+    // and `NaN > allowedRadius` === false let an out-of-range check-in succeed.
+    const halfCircumference = Math.PI * 6371000;
+
+    const d1 = haversineDistanceMeters(45, 0, -45, 180);
+    const d2 = haversineDistanceMeters(-12.345678, -45.678901, 12.345678, 134.321099);
+
+    expect(Number.isNaN(d1)).toBe(false);
+    expect(Number.isNaN(d2)).toBe(false);
+    expect(d1).toBeCloseTo(halfCircumference, 0);
+    expect(d2).toBeCloseTo(halfCircumference, 0);
+  });
 });

@@ -76,10 +76,11 @@ export class AuthService {
   async refresh(refreshToken: string, ip?: string): Promise<{ accessToken: string }> {
     const session = await this.sessionService.findSessionByTokenId(refreshToken);
     if (!session) {
-      if (await this.sessionService.isRevoked(refreshToken)) {
+      const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
+      if (revokedUserId) {
         this.logger.warn('Revoked refresh token reuse detected', {
           tokenId: refreshToken,
-          userId: null, // Session already deleted; userId not resolvable
+          userId: revokedUserId,
           ip: ip ?? 'unknown',
           timestamp: new Date().toISOString(),
           reason: 'revoked_token_reuse',
@@ -145,5 +146,9 @@ export class AuthService {
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, userId));
+    // Reset via a (possibly stolen) token must kill every session that could
+    // have been established under the old credential — otherwise an attacker
+    // holding an old refresh token keeps access for up to 7 days.
+    await this.sessionService.revokeAllSessions(userId);
   }
 }

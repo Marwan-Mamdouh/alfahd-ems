@@ -2,10 +2,13 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import ExcelJS from 'exceljs';
 import { Inject, Logger, OnApplicationShutdown } from '@nestjs/common';
-import { and, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { attendanceRecords, users } from '../database/schema/index.js';
 import { StorageService } from '../storage/storage.interface.js';
+import { calculateHoursWorked } from '../common/utils/attendance.utils.js';
+import { formatLocalTimestamp } from '../common/services/clock.service.js';
+import { sanitizeSpreadsheetCell } from '../common/utils/spreadsheet.utils.js';
 
 @Processor('reports')
 export class AttendanceReportWorker extends WorkerHost implements OnApplicationShutdown {
@@ -37,6 +40,9 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
     if (from) conditions.push(gte(attendanceRecords.workDate, from));
     if (to) conditions.push(lte(attendanceRecords.workDate, to));
     if (employee_id) conditions.push(eq(attendanceRecords.userId, employee_id));
+    // Department filter belongs in SQL: filtering in Node.js would load every
+    // attendance record of the date range across the network first.
+    if (department) conditions.push(eq(users.department, department));
 
     const rows = await this.db
       .select({
@@ -45,9 +51,10 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       })
       .from(attendanceRecords)
       .innerJoin(users, eq(attendanceRecords.userId, users.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    const filteredRows = department ? rows.filter((r) => r.user.department === department) : rows;
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      // Deterministic report ordering: PostgreSQL otherwise returns rows in
+      // physical block order, shuffling large multi-month reports arbitrarily.
+      .orderBy(asc(attendanceRecords.workDate), asc(users.name), asc(attendanceRecords.checkInAt));
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'AlFahd EMS';
@@ -79,26 +86,29 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
     };
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    for (const item of filteredRows) {
-      const checkInDate = new Date(item.record.checkInAt);
-      const checkOutDate = item.record.checkOutAt ? new Date(item.record.checkOutAt) : null;
-      let hoursWorked = '-';
-      if (checkOutDate) {
-        const ms = checkOutDate.getTime() - checkInDate.getTime();
-        hoursWorked = (ms / (1000 * 60 * 60)).toFixed(2);
-      }
+    for (const item of rows) {
+      const hours = calculateHoursWorked(item.record.checkInAt, item.record.checkOutAt);
+      const hoursWorked = hours === null ? '-' : hours.toFixed(2);
 
+      // Every dynamic user-supplied string is sanitized against formula
+      // injection (CWE-1236) before it reaches an Excel cell. Placeholders are
+      // applied *after* sanitization so a null value renders as a literal "-"
+      // instead of being turned into `''-` by the apostrophe prefix.
       worksheet.addRow({
-        name: item.user.name,
-        email: item.user.email,
-        department: item.user.department ?? '-',
+        name: sanitizeSpreadsheetCell(item.user.name),
+        email: sanitizeSpreadsheetCell(item.user.email),
+        department: item.user.department ? sanitizeSpreadsheetCell(item.user.department) : '-',
         workDate: item.record.workDate,
-        checkInAt: checkInDate.toISOString(),
-        checkOutAt: checkOutDate ? checkOutDate.toISOString() : '-',
+        // Cairo wall-clock times, not UTC ISO: staff read shift hours directly
+        // instead of mentally subtracting 2–3h from a `Z` timestamp.
+        checkInAt: formatLocalTimestamp(item.record.checkInAt),
+        checkOutAt: item.record.checkOutAt ? formatLocalTimestamp(item.record.checkOutAt) : '-',
         hoursWorked,
         status: item.record.status,
         distance: item.record.checkInDistanceM,
-        overrideReason: item.record.overrideReason ?? '-',
+        overrideReason: item.record.overrideReason
+          ? sanitizeSpreadsheetCell(item.record.overrideReason)
+          : '-',
       });
     }
 
@@ -112,7 +122,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
 
     return {
       downloadUrl: uploadResult.url,
-      totalRows: filteredRows.length,
+      totalRows: rows.length,
       completedAt: new Date().toISOString(),
     };
   }

@@ -2,12 +2,12 @@ import type {
   ChangePasswordRequestDto,
   CreateEmployeeDto,
   CreateUserDto,
-  EmployeeQueryDto,
   UpdateEmployeeDto,
   UpdateUserDto,
   UserDto,
   UserStatus,
 } from '@alfahd/types';
+import type { EmployeeQueryRequestDto } from '../employees/dto/employee-query.dto.js';
 import { Role } from '@alfahd/types';
 import {
   BadRequestException,
@@ -24,6 +24,8 @@ import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, warehouses, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
+import { SessionService } from '../redis/session.service.js';
+import { escapeHtml } from '../common/utils/html.utils.js';
 
 @Injectable()
 export class UsersService {
@@ -32,6 +34,7 @@ export class UsersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly emailService: EmailService,
+    private readonly sessionService: SessionService,
   ) {}
 
   public async findRowOrThrow(id: string): Promise<User> {
@@ -122,7 +125,9 @@ export class UsersService {
         to: dto.email.toLowerCase(),
         subject: 'Welcome to AlFahd EMS - Temporary Credentials',
         text: `Welcome to AlFahd EMS, ${dto.name}!\n\nYour account has been created with temporary password: ${tempPassword}\n\nPlease log in and update your password immediately.`,
-        html: `<p>Welcome to AlFahd EMS, <strong>${dto.name}</strong>!</p><p>Your account has been created with temporary password: <code>${tempPassword}</code></p><p>Please log in and update your password immediately.</p>`,
+        // dto.name is untrusted admin input: interpolating it unescaped would
+        // allow HTML injection in the recipient's mail client (CWE-79).
+        html: `<p>Welcome to AlFahd EMS, <strong>${escapeHtml(dto.name)}</strong>!</p><p>Your account has been created with temporary password: <code>${tempPassword}</code></p><p>Please log in and update your password immediately.</p>`,
       });
     } catch (error) {
       this.logger.warn(
@@ -133,10 +138,8 @@ export class UsersService {
     return created;
   }
 
-  async findEmployees(query: EmployeeQueryDto): Promise<{ data: User[]; total: number }> {
-    const page = Math.max(1, query.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
-    const offset = (page - 1) * pageSize;
+  async findEmployees(query: EmployeeQueryRequestDto): Promise<{ data: User[]; total: number }> {
+    const offset = (query.page - 1) * query.pageSize;
 
     const conditions = [];
 
@@ -166,7 +169,7 @@ export class UsersService {
         .from(users)
         .where(whereClause)
         .orderBy(desc(users.createdAt))
-        .limit(pageSize)
+        .limit(query.pageSize)
         .offset(offset),
     ]);
 
@@ -223,7 +226,11 @@ export class UsersService {
   async updateEmployeeStatus(id: string, status: UserStatus): Promise<User> {
     await this.findRowOrThrow(id);
 
-    const isActive = status === 'ACTIVE';
+    // Only INACTIVE deactivates the account flag. ON_LEAVE employees keep a
+    // live account and valid sessions (spec: Acceptance Scenario 5); they are
+    // simply not ACTIVE, so activity checks keyed on `status` (check-in,
+    // assignment eligibility) already exclude them.
+    const isActive = status !== 'INACTIVE';
     const rows = await this.db
       .update(users)
       .set({
@@ -269,8 +276,14 @@ export class UsersService {
     return toUserDto(await this.findRowOrThrow(id));
   }
 
-  async update(id: string, dto: UpdateUserDto): Promise<UserDto> {
+  async update(id: string, dto: UpdateUserDto, requestingUserId?: string): Promise<UserDto> {
     const user = await this.findRowOrThrow(id);
+    // The self-deactivation guard belongs here (not in the controller) so any
+    // caller of update({isActive: false}) enforces it. Missing
+    // requestingUserId means an internal call, which skips the guard.
+    if (dto.isActive === false && requestingUserId !== undefined && id === requestingUserId) {
+      throw new BadRequestException('Admin cannot deactivate their own account');
+    }
     if (dto.email !== undefined && dto.email !== user.email) {
       const existing = await this.db
         .select({ id: users.id })
@@ -295,6 +308,13 @@ export class UsersService {
     if (!updated) {
       throw new NotFoundException('User not found');
     }
+    // Deactivating an account must also terminate its live refresh sessions —
+    // otherwise active sessions linger in Redis until natural expiry (the
+    // employee-status flow already revokes; both paths live here in the
+    // service rather than in the controller).
+    if (dto.isActive === false) {
+      await this.sessionService.revokeAllSessions(id);
+    }
     return toUserDto(updated);
   }
 
@@ -302,7 +322,8 @@ export class UsersService {
     if (id === requestingUserId) {
       throw new BadRequestException('Admin cannot deactivate their own account');
     }
-    return this.update(id, { isActive: false });
+    // Session revocation happens inside `update` (isActive === false).
+    return this.update(id, { isActive: false }, requestingUserId);
   }
 
   async changePassword(userId: string, dto: ChangePasswordRequestDto): Promise<void> {
@@ -315,5 +336,8 @@ export class UsersService {
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, userId));
+    // A password change invalidates every pre-change session: refresh tokens
+    // minted under the old credential must not outlive it by up to 7 days.
+    await this.sessionService.revokeAllSessions(userId);
   }
 }

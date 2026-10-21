@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -25,6 +26,13 @@ import { CreateEmployeeRequestDto } from './dto/create-employee.dto.js';
 import { UpdateEmployeeRequestDto } from './dto/update-employee.dto.js';
 import { UpdateEmployeeStatusRequestDto } from './dto/update-employee-status.dto.js';
 import { EmployeeQueryRequestDto } from './dto/employee-query.dto.js';
+
+/**
+ * 5 MB upload cap enforced by Multer itself: with memory storage the limit must
+ * be applied while the payload streams in, otherwise the whole file is buffered
+ * on the heap before the service's own size check ever runs (DoS vector).
+ */
+const MAX_PHOTO_FILE_SIZE = 5 * 1024 * 1024;
 
 @Controller('employees')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -47,20 +55,26 @@ export class EmployeesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Req() req: Request & { user: JwtUser }): Promise<EmployeeDto> {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request & { user: JwtUser },
+  ): Promise<EmployeeDto> {
     return this.employeesService.findOne(id, req.user);
   }
 
   @Patch(':id')
   @Roles(Role.ADMIN)
-  update(@Param('id') id: string, @Body() dto: UpdateEmployeeRequestDto): Promise<EmployeeDto> {
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEmployeeRequestDto,
+  ): Promise<EmployeeDto> {
     return this.employeesService.update(id, dto);
   }
 
   @Patch(':id/status')
   @Roles(Role.ADMIN)
   updateStatus(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEmployeeStatusRequestDto,
   ): Promise<EmployeeDto> {
     return this.employeesService.updateStatus(id, dto.status, dto.reason);
@@ -69,9 +83,13 @@ export class EmployeesController {
   @Post(':id/photo')
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ADMIN)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_PHOTO_FILE_SIZE },
+    }),
+  )
   uploadPhoto(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,
   ): Promise<{ profilePhotoKey: string; url: string }> {
     return this.employeesService.uploadPhoto(id, file);

@@ -1,5 +1,15 @@
 import { Role } from '@alfahd/types';
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -71,7 +81,7 @@ export class UsersController {
   @ApiNotFoundResponse({ description: 'User not found' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
-  findOne(@Param('id') id: string): Promise<UserResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
     return this.usersService.findOne(id);
   }
 
@@ -89,14 +99,13 @@ export class UsersController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserRequestDto,
     @Req() req: Request & { user: JwtUser },
   ): Promise<UserResponseDto> {
-    if (dto.isActive === false) {
-      return this.usersService.deactivate(id, req.user.userId);
-    }
-    return this.usersService.update(id, dto);
+    // Deactivation (isActive === false) and its session revocation are the
+    // service's concern; the controller only routes and authorizes.
+    return this.usersService.update(id, dto, req.user.userId);
   }
 
   @Post('change-password')
@@ -124,7 +133,7 @@ export class UsersController {
   @ApiNotFoundResponse({ description: 'User not found' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
   @ApiForbiddenResponse({ description: 'Requires Admin role' })
-  async revokeSession(@Param('id') id: string): Promise<RevokeSessionResponseDto> {
+  async revokeSession(@Param('id', ParseUUIDPipe) id: string): Promise<RevokeSessionResponseDto> {
     const revoked = await this.sessionService.revokeAllSessions(id);
     return { ok: true, revoked };
   }

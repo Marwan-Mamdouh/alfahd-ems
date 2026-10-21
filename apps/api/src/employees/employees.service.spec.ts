@@ -162,5 +162,23 @@ describe('EmployeesService', () => {
       await expect(service.uploadPhoto('user-123', file)).rejects.toThrow('DB write failed');
       expect(storageServiceMock.deleteFile).toHaveBeenCalledWith('employees/photos/new-key');
     });
+
+    it('still succeeds when deleting the superseded photo fails (HARD-01)', async () => {
+      const file = {
+        buffer: validJpeg,
+      } as Express.Multer.File;
+
+      usersServiceMock.updateProfilePhotoKey.mockResolvedValue({
+        ...mockUser,
+        profilePhotoKey: 'employees/photos/new-key',
+      });
+      storageServiceMock.deleteFile.mockRejectedValueOnce(new Error('Cloudinary 401 Unauthorized'));
+
+      const result = await service.uploadPhoto('user-123', file);
+
+      // The request must not fail, and the orphaned asset must be reported.
+      expect(result.profilePhotoKey).toBe('employees/photos/new-key');
+      expect(storageServiceMock.deleteFile).toHaveBeenCalledWith('old-key');
+    });
   });
 });

@@ -66,6 +66,24 @@ export const envSchema = z
         }
       }
     }
+    // Production must fail fast when Cloudinary is unconfigured: otherwise
+    // StorageModule silently falls back to FakeStorageService and photos /
+    // reports are written to ephemeral memory, lost on every restart.
+    if (data.NODE_ENV === 'production') {
+      for (const key of [
+        'CLOUDINARY_CLOUD_NAME',
+        'CLOUDINARY_API_KEY',
+        'CLOUDINARY_API_SECRET',
+      ] as const) {
+        if (!data[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required when NODE_ENV is production`,
+          });
+        }
+      }
+    }
   });
 
 export type EnvConfig = z.infer<typeof envSchema>;

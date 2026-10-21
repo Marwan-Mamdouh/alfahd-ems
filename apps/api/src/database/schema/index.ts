@@ -3,6 +3,7 @@ import {
   check,
   date,
   doublePrecision,
+  index,
   pgEnum,
   pgTable,
   text,
@@ -70,6 +71,10 @@ export const attendanceRecords = pgTable(
   },
   (t) => [
     unique('attendance_records_user_id_work_date_unique').on(t.userId, t.workDate),
+    // Report generation filters by date range only (`work_date >= from AND
+    // work_date <= to`); the composite (user_id, work_date) unique index cannot
+    // serve that, so date-range reports would otherwise seq-scan the table.
+    index('attendance_records_work_date_idx').on(t.workDate),
     check('check_in_lat_range', sql`${t.checkInLat} >= -90 AND ${t.checkInLat} <= 90`),
     check('check_in_lng_range', sql`${t.checkInLng} >= -180 AND ${t.checkInLng} <= 180`),
   ],

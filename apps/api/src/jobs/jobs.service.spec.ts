@@ -62,7 +62,47 @@ describe('JobsService', () => {
 
     const failedRes = await service.getJobStatus('failed');
     expect(failedRes.status).toBe('FAILED');
-    expect(failedRes.error).toBe('Something blew up');
+    expect(failedRes.error).toBe('Report generation failed');
+  });
+
+  it('never leaks the raw failedReason (DB strings, stack traces) to the client', async () => {
+    const leakyReason =
+      'connect ECONNREFUSED 10.0.3.7:5432 - select * from attendance_records failed';
+    const queueMock = {
+      getJob: vi.fn().mockResolvedValue({
+        id: 'job-leaky',
+        getState: vi.fn().mockResolvedValue('failed'),
+        returnvalue: null,
+        failedReason: leakyReason,
+      }),
+    } as any;
+
+    const service = new JobsService(queueMock);
+    const res = await service.getJobStatus('job-leaky');
+
+    expect(res.status).toBe('FAILED');
+    expect(res.error).toBe('Report generation failed');
+    expect(JSON.stringify(res)).not.toContain('ECONNREFUSED');
+    expect(JSON.stringify(res)).not.toContain('attendance_records');
+  });
+
+  it('still populates error for a FAILED job whose failedReason is empty (HARD-07)', async () => {
+    // Contract: a FAILED job always reports a client-safe error string — an
+    // empty failedReason must not turn `error` into null.
+    const queueMock = {
+      getJob: vi.fn().mockResolvedValue({
+        id: 'job-no-reason',
+        getState: vi.fn().mockResolvedValue('failed'),
+        returnvalue: null,
+        failedReason: null,
+      }),
+    } as any;
+
+    const service = new JobsService(queueMock);
+    const res = await service.getJobStatus('job-no-reason');
+
+    expect(res.status).toBe('FAILED');
+    expect(res.error).toBe('Report generation failed');
   });
 
   describe('authorization', () => {

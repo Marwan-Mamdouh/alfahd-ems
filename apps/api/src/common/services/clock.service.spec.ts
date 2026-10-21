@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { ClockService, getLocalWorkDate, isAfterCutoff } from './clock.service.js';
+import {
+  ClockService,
+  formatLocalTimestamp,
+  getLocalWorkDate,
+  isAfterCutoff,
+} from './clock.service.js';
 
 describe('ClockService & Timezone Helpers', () => {
   it('ClockService returns current date instance', () => {
@@ -30,6 +35,23 @@ describe('ClockService & Timezone Helpers', () => {
       const d2 = new Date('2026-07-15T21:01:00.000Z');
       expect(getLocalWorkDate(d2)).toBe('2026-07-16');
     });
+
+    it('returns identical output across repeated calls with the cached formatter (HARD-01)', () => {
+      // The formatter instance is now cached per timezone for hot check-in/
+      // check-out paths — caching must not change the produced dates.
+      const d = new Date('2026-10-11T06:00:00.000Z');
+      const fresh = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Cairo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+
+      const results = new Set(Array.from({ length: 50 }, () => getLocalWorkDate(d)));
+      expect([...results]).toHaveLength(1);
+      expect([...results][0]).toBe(fresh.format(d));
+      expect(getLocalWorkDate(d)).toBe('2026-10-11');
+    });
   });
 
   describe('isAfterCutoff', () => {
@@ -55,6 +77,27 @@ describe('ClockService & Timezone Helpers', () => {
       expect(isAfterCutoff(beforeCutoff, '09:00')).toBe(false);
       expect(isAfterCutoff(exactCutoff, '09:00')).toBe(false);
       expect(isAfterCutoff(afterCutoff, '09:00')).toBe(true);
+    });
+  });
+
+  describe('formatLocalTimestamp', () => {
+    it('renders Cairo wall-clock time instead of a UTC ISO string (HARD-09)', () => {
+      // 06:00Z in July (Cairo DST, UTC+3) = 09:00:00 local — the hour staff
+      // actually started, not the UTC value.
+      expect(formatLocalTimestamp(new Date('2026-07-15T06:00:00Z'))).toBe('15/07/2026, 09:00:00');
+      expect(formatLocalTimestamp('2026-07-15T06:00:00Z')).toBe('15/07/2026, 09:00:00');
+    });
+
+    it('honours an explicit timezone and stays stable across cached calls', () => {
+      expect(formatLocalTimestamp('2026-07-15T06:00:00Z', 'UTC')).toBe('15/07/2026, 06:00:00');
+      expect(formatLocalTimestamp('2026-07-15T06:00:00Z')).toBe(
+        formatLocalTimestamp('2026-07-15T06:00:00Z'),
+      );
+    });
+
+    it("returns '-' for unparseable input", () => {
+      expect(formatLocalTimestamp('not-a-date')).toBe('-');
+      expect(formatLocalTimestamp('')).toBe('-');
     });
   });
 });

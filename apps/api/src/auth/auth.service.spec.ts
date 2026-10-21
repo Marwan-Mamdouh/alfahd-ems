@@ -51,11 +51,16 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
 
   const db = {
     select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve(rows) }) }) }),
+    update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
   } as unknown as Db;
 
   const sessionService = {
+    createSession: vi.fn().mockResolvedValue(undefined),
     createPasswordResetToken: vi.fn().mockResolvedValue(undefined),
     consumePasswordResetToken: vi.fn(),
+    revokeAllSessions: vi.fn().mockResolvedValue(0),
+    findSessionByTokenId: vi.fn().mockResolvedValue(null),
+    getRevokedTokenUserId: vi.fn().mockResolvedValue(null),
   } as unknown as SessionService;
 
   const emailService = {
@@ -137,5 +142,62 @@ describe('login — wrong password and unknown email are indistinguishable', () 
     );
 
     expect(sessionService.createPasswordResetToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('resetPassword — revokes live sessions (HARD-08)', () => {
+  it('revokes every active session after a successful reset', async () => {
+    const { service, sessionService } = makeService();
+    vi.mocked(sessionService.consumePasswordResetToken).mockResolvedValue(ACTIVE_USER.id);
+
+    await service.resetPassword('reset-token', 'brand-new-password-1');
+
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledWith(ACTIVE_USER.id);
+  });
+
+  it('does not revoke anything for an invalid reset token', async () => {
+    const { service, sessionService } = makeService();
+    vi.mocked(sessionService.consumePasswordResetToken).mockResolvedValue(null);
+
+    await expect(service.resetPassword('bogus-token', 'whatever-123')).rejects.toThrow(
+      'Invalid or expired reset token',
+    );
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe('refresh — attributes revoked-token replay to the targeted account (HARD-03)', () => {
+  it('logs the stored userId when a revoked refresh token is replayed', async () => {
+    const { service, sessionService } = makeService();
+    const warnSpy = vi.fn();
+    (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
+    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(ACTIVE_USER.id);
+
+    await expect(service.refresh('stolen-token', '203.0.113.9')).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toBe('Revoked refresh token reuse detected');
+    // userId is populated from the denylist instead of the old `userId: null`.
+    expect(warnSpy.mock.calls[0][1]).toMatchObject({
+      tokenId: 'stolen-token',
+      userId: ACTIVE_USER.id,
+      ip: '203.0.113.9',
+      reason: 'revoked_token_reuse',
+    });
+  });
+
+  it('still returns 401 without a security log for an unknown (never-revoked) token', async () => {
+    const { service, sessionService } = makeService();
+    const warnSpy = vi.fn();
+    (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
+    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(null);
+
+    await expect(service.refresh('unknown-token')).rejects.toThrow(UnauthorizedException);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

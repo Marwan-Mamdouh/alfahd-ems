@@ -39,6 +39,7 @@ describe('Auth (e2e) — refresh cookie transport', () => {
   let users: FakeUser[];
   let redisKeys: Map<string, string>;
   let redisSetArgs: Map<string, string>;
+  let redisSets: Map<string, Set<string>>;
 
   const admin: FakeUser = {
     id: ADMIN_ID,
@@ -70,47 +71,75 @@ describe('Auth (e2e) — refresh cookie transport', () => {
     users = [admin, csUser];
     redisKeys = new Map();
     redisSetArgs = new Map();
+    redisSets = new Map();
 
     // Minimal Redis double covering only what SessionService and RateLimitGuard
-    // call: set/scan/exists/pipeline.
+    // call: set/get/exists/zrange + a pipeline with zadd/zrem/zremrangebyscore
+    // (the rt:user_tokens:{userId} session index is a sorted set scored by
+    // expiry). SessionService is O(1) per op — no SCAN is ever issued.
+    const redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
       set: vi.fn(async (key: string, value: string, _mode: string, _ttl?: number) => {
         redisKeys.set(key, value);
         redisSetArgs.set(key, value);
         return 'OK';
       }),
+      get: vi.fn(async (key: string) => redisKeys.get(key) ?? null),
       getdel: vi.fn(async () => null),
       exists: vi.fn(async (key: string) => (redisKeys.has(key) ? 1 : 0)),
-      // SessionService scans with patterns like `rt:*:{tokenId}` and
-      // `rt:{userId}:*`, so convert the glob to a matcher instead of naively
-      // stripping the `*` (which would turn `rt:*:abc` into `rt::abc` and match
-      // nothing, making every refresh look like an unknown token).
-      scan: vi.fn(async (_cursor: string, _mode: string, pattern: string) => {
-        const matcher = new RegExp(
-          `^${pattern
-            .split('*')
-            .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-            .join('.*')}$`,
-        );
-        const matches = [...redisKeys.keys()].filter((key) => matcher.test(key));
-        return ['0', matches];
+      smembers: vi.fn(async (key: string) => [...(redisSets.get(key) ?? [])]),
+      // ZRANGE 0 -1 over the session index (member ids ordered by expiry score).
+      zrange: vi.fn(async (key: string) => {
+        const zset = redisZsets.get(key);
+        if (!zset) return [];
+        return [...zset.entries()].sort((a, b) => a[1] - b[1]).map(([member]) => member);
       }),
+      scan: vi.fn(async () => ['0', []] as [string, string[]]),
       pipeline: vi.fn(() => {
         let zcard = 0;
         const pipeline = {
           // Must actually mutate the key store: logout revokes a session and
           // relies on `del` taking effect for the subsequent refresh to 401.
           del: vi.fn((...keys: string[]) => {
-            keys.forEach((key) => redisKeys.delete(key));
+            keys.forEach((key) => {
+              redisKeys.delete(key);
+              redisSets.delete(key);
+              redisZsets.delete(key);
+            });
             return pipeline;
           }),
           set: vi.fn((key: string, value: string, _mode: string, _ttl?: number) => {
             redisKeys.set(key, value);
             return pipeline;
           }),
-          zremrangebyscore: vi.fn(),
-          zadd: vi.fn(() => {
+          sadd: vi.fn((key: string, member: string) => {
+            if (!redisSets.has(key)) redisSets.set(key, new Set());
+            redisSets.get(key)!.add(member);
+            return pipeline;
+          }),
+          srem: vi.fn((key: string, member: string) => {
+            redisSets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          // Session indexing (createSession) AND the rate-limit guard both use
+          // these — chained calls must return the pipeline.
+          zadd: vi.fn((key: string, score: number, member: string) => {
             zcard += 1;
+            if (!redisZsets.has(key)) redisZsets.set(key, new Map());
+            redisZsets.get(key)!.set(member, score);
+            return pipeline;
+          }),
+          zrem: vi.fn((key: string, member: string) => {
+            redisZsets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          zremrangebyscore: vi.fn((key: string, min: number, max: number) => {
+            const zset = redisZsets.get(key);
+            if (zset) {
+              for (const [member, score] of [...zset]) {
+                if (score >= Number(min) && score <= Number(max)) zset.delete(member);
+              }
+            }
             return pipeline;
           }),
           zcard: vi.fn(() => {

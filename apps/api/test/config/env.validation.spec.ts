@@ -135,4 +135,45 @@ describe('envSchema validation', () => {
   it("rejects REFRESH_COOKIE_SECURE 'yes'", () => {
     expect(() => envSchema.parse({ ...validEnv, REFRESH_COOKIE_SECURE: 'yes' })).toThrow();
   });
+
+  it('allows missing Cloudinary vars outside production', () => {
+    const result = envSchema.parse({
+      ...validEnv,
+      CLOUDINARY_CLOUD_NAME: undefined,
+      CLOUDINARY_API_KEY: undefined,
+      CLOUDINARY_API_SECRET: undefined,
+    });
+    expect(result.NODE_ENV).toBe('development');
+  });
+
+  it('requires all three Cloudinary vars when NODE_ENV=production', () => {
+    for (const key of [
+      'CLOUDINARY_CLOUD_NAME',
+      'CLOUDINARY_API_KEY',
+      'CLOUDINARY_API_SECRET',
+    ] as const) {
+      expect(() =>
+        envSchema.parse({
+          ...validEnv,
+          NODE_ENV: 'production',
+          CLOUDINARY_CLOUD_NAME: 'alfahd',
+          CLOUDINARY_API_KEY: '123456789',
+          CLOUDINARY_API_SECRET: 'secret',
+          [key]: undefined,
+        }),
+      ).toThrow(`${key} is required when NODE_ENV is production`);
+    }
+  });
+
+  it('parses a fully configured production env', () => {
+    const result = envSchema.parse({
+      ...validEnv,
+      NODE_ENV: 'production',
+      CLOUDINARY_CLOUD_NAME: 'alfahd',
+      CLOUDINARY_API_KEY: '123456789',
+      CLOUDINARY_API_SECRET: 'secret',
+    });
+    expect(result.NODE_ENV).toBe('production');
+    expect(result.CLOUDINARY_CLOUD_NAME).toBe('alfahd');
+  });
 });

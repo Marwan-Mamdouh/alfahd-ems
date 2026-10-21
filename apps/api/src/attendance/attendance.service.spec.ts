@@ -133,6 +133,78 @@ describe('AttendanceService', () => {
       }
     });
 
+    it('accepts 150.04m: the rounded value reported to the client is what is enforced (HARD-06)', async () => {
+      // Same-longitude offset: Haversine degenerates to R·Δφ, so choosing
+      // Δlat = 150.04 / meters-per-degree yields a true distance of 150.04m.
+      const M_PER_DEG = (6371000 * Math.PI) / 180;
+      const edgeLat = mockWarehouse.gpsLat! + 150.04 / M_PER_DEG;
+
+      let queryCall = 0;
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => {
+              queryCall++;
+              if (queryCall === 1) return Promise.resolve([mockTechnician]);
+              if (queryCall === 2) return Promise.resolve([mockWarehouse]);
+              return Promise.resolve([]);
+            }),
+          })),
+        })),
+      }));
+      dbMock.insert.mockImplementation(() => ({
+        values: vi.fn((vals) => ({
+          returning: vi.fn().mockResolvedValue([
+            {
+              id: 'att-edge',
+              workDate: vals.workDate,
+              checkInAt: vals.checkInAt,
+              checkInDistanceM: vals.checkInDistanceM,
+              status: vals.status,
+            },
+          ]),
+        })),
+      }));
+
+      // 150.04 rounds to 150.0 ≤ 150 → accepted (previously the raw float
+      // 150.04 > 150 rejected while the message claimed "150m … maximum 150m").
+      const res = await service.checkIn('tech-123', edgeLat, mockWarehouse.gpsLng!);
+      expect(res.checkInDistanceM).toBe(150);
+    });
+
+    it('rejects 150.06m because it rounds to 150.1m — message and decision agree (HARD-06)', async () => {
+      const M_PER_DEG = (6371000 * Math.PI) / 180;
+      const edgeLat = mockWarehouse.gpsLat! + 150.06 / M_PER_DEG;
+
+      let queryCall = 0;
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => {
+              queryCall++;
+              if (queryCall === 1) return Promise.resolve([mockTechnician]);
+              if (queryCall === 2) return Promise.resolve([mockWarehouse]);
+              return Promise.resolve([]);
+            }),
+          })),
+        })),
+      }));
+
+      try {
+        await service.checkIn('tech-123', edgeLat, mockWarehouse.gpsLng!);
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(HttpException);
+        const httpErr = err as HttpException;
+        expect(httpErr.getStatus()).toBe(400);
+        const res = httpErr.getResponse() as any;
+        expect(res.code).toBe('OUT_OF_RANGE');
+        // The reported distance is exactly the rounded value that was compared.
+        expect(res.message).toContain('150.1m');
+        expect(res.details.distanceM).toBe(150.1);
+      }
+    });
+
     it('accepts check-in <= 150m and flags ON_TIME before 09:00 Cairo', async () => {
       // 05:45 UTC is 08:45 Cairo (summer DST)
       clockServiceMock.now.mockReturnValue(new Date('2026-07-15T05:45:00.000Z'));
@@ -285,6 +357,34 @@ describe('AttendanceService', () => {
         response: { code: 'NO_ACTIVE_CHECK_IN' },
       });
     });
+
+    it('returns 409 ALREADY_CHECKED_OUT when a concurrent check-out wins the race (SEC-12)', async () => {
+      // Both requests observe the same open record, but the guarded UPDATE
+      // (`WHERE check_out_at IS NULL`) only matches for the winner — the loser
+      // sees an empty `returning()` array.
+      const openAttendance = { ...mockAttendance, checkOutAt: null };
+
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([openAttendance]),
+          })),
+        })),
+      }));
+
+      dbMock.update.mockImplementation(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([]), // update matched no rows
+          })),
+        })),
+      }));
+
+      await expect(service.checkOut('tech-123')).rejects.toMatchObject({
+        status: HttpStatus.CONFLICT,
+        response: { code: 'ALREADY_CHECKED_OUT' },
+      });
+    });
   });
 
   describe('override', () => {
@@ -364,7 +464,157 @@ describe('AttendanceService', () => {
           type: 'ATTENDANCE_SUMMARY',
           requestedBy: 'admin-1',
         }),
+        expect.objectContaining({ jobId: expect.any(String) }),
       );
+    });
+
+    it('passes a random UUID as BullMQ jobId (spec: { jobId: "<uuid>" })', async () => {
+      const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+      const first = await service.enqueueReport({ from: '2026-01-01', to: '2026-02-01' }, 'a1');
+      const second = await service.enqueueReport({ from: '2026-01-01', to: '2026-02-01' }, 'a1');
+
+      const firstOpts = reportsQueueMock.add.mock.calls[0][2];
+      const secondOpts = reportsQueueMock.add.mock.calls[1][2];
+      expect(firstOpts.jobId).toMatch(uuidV4);
+      expect(secondOpts.jobId).toMatch(uuidV4);
+      // Distinct ids per enqueue — no sequential, enumerable BullMQ ids.
+      expect(firstOpts.jobId).not.toBe(secondOpts.jobId);
+      expect(first.jobId).toBe('job-987');
+      expect(second.jobId).toBe('job-987');
+    });
+  });
+
+  describe('checkIn race on the unique (user_id, work_date) constraint', () => {
+    const seedUpToInsert = () => {
+      let queryCall = 0;
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => {
+              queryCall++;
+              if (queryCall === 1) return Promise.resolve([mockTechnician]);
+              if (queryCall === 2) return Promise.resolve([mockWarehouse]);
+              return Promise.resolve([]); // pre-insert existence check passes
+            }),
+          })),
+        })),
+      }));
+    };
+
+    it('maps a Postgres 23505 unique violation to 409 ALREADY_CHECKED_IN', async () => {
+      seedUpToInsert();
+      dbMock.insert.mockImplementation(() => ({
+        values: vi.fn(() => ({
+          returning: vi.fn().mockRejectedValue({
+            code: '23505',
+            constraint: 'attendance_records_user_id_work_date_unique',
+          }),
+        })),
+      }));
+
+      await expect(
+        service.checkIn('tech-123', mockWarehouse.gpsLat!, mockWarehouse.gpsLng!),
+      ).rejects.toMatchObject({
+        status: HttpStatus.CONFLICT,
+        response: { code: 'ALREADY_CHECKED_IN' },
+      });
+    });
+
+    it('rethrows database errors that are not unique violations', async () => {
+      seedUpToInsert();
+      dbMock.insert.mockImplementation(() => ({
+        values: vi.fn(() => ({
+          returning: vi.fn().mockRejectedValue(new Error('connection terminated')),
+        })),
+      }));
+
+      await expect(
+        service.checkIn('tech-123', mockWarehouse.gpsLat!, mockWarehouse.gpsLng!),
+      ).rejects.toThrow('connection terminated');
+    });
+  });
+
+  describe('override chronology validation', () => {
+    const seedRecord = () => {
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([mockAttendance]),
+          })),
+        })),
+      }));
+      dbMock.update.mockImplementation(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([mockAttendance]),
+          })),
+        })),
+      }));
+    };
+
+    it('rejects checkOutAt before checkInAt in the same payload (400)', async () => {
+      seedRecord();
+
+      await expect(
+        service.override('att-123', 'admin-1', {
+          overrideReason: 'trying to move time backwards',
+          checkInAt: '2026-10-11T16:00:00.000Z',
+          checkOutAt: '2026-10-11T14:00:00.000Z',
+        }),
+      ).rejects.toMatchObject({
+        status: HttpStatus.BAD_REQUEST,
+        response: { code: 'CHECK_OUT_BEFORE_CHECK_IN' },
+      });
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects a checkOutAt earlier than the record's existing checkInAt (400)", async () => {
+      seedRecord();
+
+      // Record check-in is 2026-10-11T06:00:00Z.
+      await expect(
+        service.override('att-123', 'admin-1', {
+          overrideReason: 'bad adjustment',
+          checkOutAt: '2026-10-11T05:00:00.000Z',
+        }),
+      ).rejects.toMatchObject({
+        status: HttpStatus.BAD_REQUEST,
+        response: { code: 'CHECK_OUT_BEFORE_CHECK_IN' },
+      });
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it('computes hoursWorked when the override sets both times', async () => {
+      const updatedRecord = { ...mockAttendance };
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([updatedRecord]),
+          })),
+        })),
+      }));
+      dbMock.update.mockImplementation(() => ({
+        set: vi.fn((vals) => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([
+              {
+                ...updatedRecord,
+                ...(vals.checkInAt ? { checkInAt: vals.checkInAt } : {}),
+                ...(vals.checkOutAt ? { checkOutAt: vals.checkOutAt } : {}),
+              },
+            ]),
+          })),
+        })),
+      }));
+
+      const res = await service.override('att-123', 'admin-1', {
+        overrideReason: 'scanner downtime confirmed',
+        checkInAt: '2026-10-11T06:00:00.000Z',
+        checkOutAt: '2026-10-11T14:30:00.000Z',
+      });
+
+      expect(res.hoursWorked).toBe(8.5);
     });
   });
 });
