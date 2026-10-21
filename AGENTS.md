@@ -18,14 +18,15 @@ pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fah
 - `pnpm dev:web` — Next.js dev server (`fahd-dashboard`). Its script pins `--port 3001`, so it cannot collide with the API. Do **not** drop that flag: Next.js also defaults to 3000, and if the dashboard takes 3000 the API cannot start and `API_URL` points the rewrite back at the dashboard itself, so every login fails with a generic connection error.
 - `pnpm infra:up` / `pnpm infra:down` — start/stop local services (`docker compose up -d` / `down`)
 - `pnpm api:build` — SWC build; `pnpm types:build` — build shared types
-- `pnpm typecheck` — runs `tsc --noEmit` via `pnpm -r typecheck` (only api defines it)
-- `pnpm lint` / `pnpm test` — must stay as `pnpm -r` delegation. Do NOT replace with direct `eslint`/`vitest` calls: no ESLint config or vitest binary exists at root (both live in `apps/api` only). This broke PR #18.
+- `pnpm typecheck` — `tsc --noEmit` via `pnpm -r typecheck` (both api and web define it)
+- `pnpm lint` / `pnpm test` — must stay as `pnpm -r` delegation. Do NOT replace with direct `eslint`/`vitest` calls: no ESLint config or vitest binary exists at root (they live in the workspace packages only). This broke PR #18.
 - Focused checks:
   - `pnpm --filter @alfahd/api typecheck` — type-check only the api package
   - `pnpm --filter @alfahd/api test` — unit tests (`**/*.spec.ts` via `vitest.config.ts`)
   - `pnpm --filter @alfahd/api test:e2e` — e2e (`**/*.e2e-spec.ts` via `vitest.config.e2e.ts`)
   - `pnpm --filter @alfahd/api lint`
 - Local services: `docker compose up -d` starts postgres:16 (user `alfahd`, db `alfahd_ems`, port 5432) and redis:7.
+- Database: `pnpm db:setup` — migrate + seed. Individual scripts in `@alfahd/api`: `db:generate` (drizzle-kit generate, writes to `drizzle/`), `db:migrate`, `db:seed`, `db:studio`. Unlike tests, `db:migrate`/`db:seed` DO require the Docker Postgres running. `db:seed` seeds dev logins (`admin@alfahd.local`, `warehouse@alfahd.local`, `cs@alfahd.local`, all password `password123`) and runs plain `node src/database/seed.ts` using Node's native type stripping.
 
 - Pre-commit (`.husky/pre-commit`, installed via root `prepare: husky` on `pnpm install`): types build -> api typecheck -> api format -> api lint -> api test. Full-project gates (`pnpm typecheck`/`lint`/`build`/`test`) run in CI. Do not bypass it; keep it green before pushing.
 
@@ -38,6 +39,9 @@ pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fah
 - Local port conflicts are the most common cause of a mysterious 500: a **native PostgreSQL service on 5432 shadows the `postgres` container**, so the API reaches a different database and auth routes 500 with `password authentication failed`. Diagnose with `Get-NetTCPConnection -LocalPort 5432 -State Listen`.
 
 ## Style
+
+- Swagger: the API mounts Swagger UI at `/` (OpenAPI JSON at `/-json`) in non-production only. New endpoints/DTOs get `@nestjs/swagger` decorators (see `auth/` and `users/` for the pattern).
+- Nested agent docs: `apps/web/AGENTS.md` contains auto-generated Next.js rules ("this is NOT the Next.js you know" — check `node_modules/next/dist/docs/` before writing web code). Its marker block is **re-added by `next dev`** — do not remove it from a diff; committing it alongside your work keeps the tree clean. `apps/web/CLAUDE.md` is just `@AGENTS.md`.
 
 - ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is off; unused vars warn, ignore args prefixed `_`.
 - Prettier/`.editorconfig`: single quotes, trailing commas, printWidth 100, 2-space indent, LF.
