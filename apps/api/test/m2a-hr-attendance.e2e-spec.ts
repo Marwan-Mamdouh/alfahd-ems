@@ -33,9 +33,13 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
   let warehousesStore: Warehouse[];
   let attendanceStore: AttendanceRecord[];
   let redisKeys: Map<string, string>;
+  let redisSets: Map<string, Set<string>>;
+  let redisZsets: Map<string, Map<string, number>>;
   let fakeStorage: FakeStorageService;
   let adminToken: string;
   let techToken: string;
+
+  const ATT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
   const adminUser: User = {
     id: ADMIN_ID,
@@ -95,7 +99,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     warehousesStore = [{ ...cairoWarehouse }];
     attendanceStore = [
       {
-        id: 'att-123',
+        id: ATT_ID,
         userId: TECH_ID,
         workDate: '2026-10-10',
         checkInAt: new Date('2026-10-10T08:30:00Z'),
@@ -112,6 +116,8 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       },
     ];
     redisKeys = new Map();
+    redisSets = new Map();
+    redisZsets = new Map();
     fakeStorage = new FakeStorageService();
 
     const extractConditions = (clause: unknown): Record<string, unknown> => {
@@ -167,8 +173,16 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         redisKeys.set(key, value);
         return 'OK';
       }),
+      get: vi.fn(async (key: string) => redisKeys.get(key) ?? null),
       getdel: vi.fn(async () => null),
       exists: vi.fn(async (key: string) => (redisKeys.has(key) ? 1 : 0)),
+      smembers: vi.fn(async (key: string) => [...(redisSets.get(key) ?? [])]),
+      // ZRANGE 0 -1 over the session index (member ids ordered by expiry score).
+      zrange: vi.fn(async (key: string) => {
+        const zset = redisZsets.get(key);
+        if (!zset) return [];
+        return [...zset.entries()].sort((a, b) => a[1] - b[1]).map(([member]) => member);
+      }),
       scan: vi.fn(async (_cursor: string, _mode: string, pattern: string) => {
         const matcher = new RegExp(
           `^${pattern
@@ -183,16 +197,44 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         let zcard = 0;
         const pipeline = {
           del: vi.fn((...keys: string[]) => {
-            keys.forEach((k) => redisKeys.delete(k));
+            // Redis DEL removes string, set, and sorted-set keys alike.
+            keys.forEach((k) => {
+              redisKeys.delete(k);
+              redisSets.delete(k);
+              redisZsets.delete(k);
+            });
             return pipeline;
           }),
           set: vi.fn((key: string, value: string) => {
             redisKeys.set(key, value);
             return pipeline;
           }),
-          zremrangebyscore: vi.fn(),
-          zadd: vi.fn(() => {
+          sadd: vi.fn((key: string, member: string) => {
+            if (!redisSets.has(key)) redisSets.set(key, new Set());
+            redisSets.get(key)!.add(member);
+            return pipeline;
+          }),
+          srem: vi.fn((key: string, member: string) => {
+            redisSets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          zadd: vi.fn((key: string, score: number, member: string) => {
             zcard += 1;
+            if (!redisZsets.has(key)) redisZsets.set(key, new Map());
+            redisZsets.get(key)!.set(member, score);
+            return pipeline;
+          }),
+          zrem: vi.fn((key: string, member: string) => {
+            redisZsets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          zremrangebyscore: vi.fn((key: string, min: number, max: number) => {
+            const zset = redisZsets.get(key);
+            if (zset) {
+              for (const [member, score] of [...zset]) {
+                if (score >= Number(min) && score <= Number(max)) zset.delete(member);
+              }
+            }
             return pipeline;
           }),
           zcard: vi.fn(() => Promise.resolve([null, zcard])),
@@ -232,6 +274,16 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
               downloadUrl: 'https://res.cloudinary.com/alfahd/reports/attendance_20261011.xlsx',
             },
             failedReason: null,
+          };
+        }
+        if (id === 'report-failed-1') {
+          return {
+            id,
+            data: { requestedBy: ADMIN_ID },
+            getState: async () => 'failed',
+            returnvalue: null,
+            // Raw reason carries infra internals that must never reach a client.
+            failedReason: 'connect ECONNREFUSED 10.0.3.7:5432 - select * from attendance_records',
           };
         }
         return null;
@@ -464,9 +516,14 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     });
 
     it('revokes refresh tokens when status is changed to INACTIVE', async () => {
-      // Seed a refresh session in Redis
-      redisKeys.set(`rt:${TECH_ID}:session-abc`, '1');
-      expect(redisKeys.has(`rt:${TECH_ID}:session-abc`)).toBe(true);
+      // Seed a refresh session in Redis (O(1) layout: token key + user index
+      // sorted set, scored by expiry)
+      redisKeys.set('rt:token:session-abc', TECH_ID);
+      redisZsets.set(
+        `rt:user_tokens:${TECH_ID}`,
+        new Map([['session-abc', Date.now() + 604800000]]),
+      );
+      expect(redisKeys.has('rt:token:session-abc')).toBe(true);
 
       const res = await request(app.getHttpServer())
         .patch(`/employees/${TECH_ID}/status`)
@@ -478,7 +535,103 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.status).toBe('INACTIVE');
-      expect(redisKeys.has(`rt:${TECH_ID}:session-abc`)).toBe(false);
+      expect(redisKeys.has('rt:token:session-abc')).toBe(false);
+      expect(redisZsets.has(`rt:user_tokens:${TECH_ID}`)).toBe(false);
+      // HARD-03: denylist stores the owning userId for replay attribution.
+      expect(redisKeys.get('rv:session-abc')).toBe(TECH_ID);
+    });
+
+    it('keeps sessions alive when status is set to ON_LEAVE (spec scenario 5)', async () => {
+      redisKeys.set('rt:token:session-abc', TECH_ID);
+      redisZsets.set(
+        `rt:user_tokens:${TECH_ID}`,
+        new Map([['session-abc', Date.now() + 604800000]]),
+      );
+
+      const res = await request(app.getHttpServer())
+        .patch(`/employees/${TECH_ID}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'ON_LEAVE', reason: 'Annual leave' })
+        .expect(200);
+
+      expect(res.body.data.status).toBe('ON_LEAVE');
+      expect(redisKeys.has('rt:token:session-abc')).toBe(true);
+      expect(redisZsets.has(`rt:user_tokens:${TECH_ID}`)).toBe(true);
+    });
+
+    it('rejects a non-UUID employee id with 400 instead of a 500 DB crash (SEC-06)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/employees/not-a-uuid')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+
+      expect(res.body.error).toBeDefined();
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('rejects an employee photo larger than 5 MB with 400 FILE_TOO_LARGE (SEC-03)', async () => {
+      const oversized = Buffer.alloc(5 * 1024 * 1024 + 1, 0xff);
+      const res = await request(app.getHttpServer())
+        .post(`/employees/${TECH_ID}/photo`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .attach('file', oversized, 'huge.jpg')
+        .expect(400);
+
+      expect(res.body.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('rejects an unparseable hireDate with 400 instead of a Postgres date error (SEC-07)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'Dateless Dave',
+          email: 'dave@alfahd.local',
+          role: 'CS',
+          hireDate: 'not-a-date',
+        })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('rejects a phone number longer than varchar(30) with 400 (SEC-07)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'Long Phone',
+          email: 'longphone@alfahd.local',
+          role: 'CS',
+          phone: '+20123456789012345678901234567890',
+        })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('rejects a name longer than varchar(255) with 400 on create (HARD-04)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'N'.repeat(256),
+          email: 'longname@alfahd.local',
+          role: 'CS',
+        })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('rejects a name longer than varchar(255) with 400 on update (HARD-04)', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/employees/${TECH_ID}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'N'.repeat(256) })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
     });
   });
 
@@ -552,7 +705,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
   describe('3. Attendance Override & Asynchronous Reports Flow', () => {
     it('rejects attendance override without mandatory reason (400)', async () => {
       const res = await request(app.getHttpServer())
-        .patch('/attendance/att-123')
+        .patch(`/attendance/${ATT_ID}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           overrideReason: '   ',
@@ -562,9 +715,33 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       expect(res.body.error).toBeDefined();
     });
 
+    it('rejects a non-UUID attendance id with 400 instead of a 500 DB crash (SEC-06)', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/attendance/not-a-uuid')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ overrideReason: 'whatever' })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('rejects an override whose checkOutAt precedes checkInAt (400, SEC-07)', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/attendance/${ATT_ID}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          checkInAt: '2026-10-10T16:00:00.000Z',
+          checkOutAt: '2026-10-10T09:00:00.000Z',
+          overrideReason: 'Attempting to reverse time',
+        })
+        .expect(400);
+
+      expect(res.body.error.code).toBe('CHECK_OUT_BEFORE_CHECK_IN');
+    });
+
     it('overrides attendance record with reason under ADMIN role (200)', async () => {
       const res = await request(app.getHttpServer())
-        .patch('/attendance/att-123')
+        .patch(`/attendance/${ATT_ID}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           status: 'ON_TIME',
@@ -605,6 +782,18 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         .get('/jobs/report-attendance-981247')
         .set('Authorization', `Bearer ${techToken}`)
         .expect(404);
+    });
+
+    it('masks the raw failedReason of a failed job (SEC-04)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/jobs/report-failed-1')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(res.body.data.status).toBe('FAILED');
+      expect(res.body.data.error).toBe('Report generation failed');
+      expect(JSON.stringify(res.body)).not.toContain('ECONNREFUSED');
+      expect(JSON.stringify(res.body)).not.toContain('attendance_records');
     });
   });
 });

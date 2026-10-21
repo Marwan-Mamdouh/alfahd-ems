@@ -37,6 +37,9 @@ interface FakeUser {
 describe('Users (e2e)', () => {
   let app: INestApplication;
   let rows: FakeUser[];
+  let redisKeys: Map<string, string>;
+  let redisSets: Map<string, Set<string>>;
+  let redisZsets: Map<string, Map<string, number>>;
 
   const admin: FakeUser = {
     id: ADMIN_ID,
@@ -174,19 +177,75 @@ describe('Users (e2e)', () => {
       })),
     };
 
+    /**
+     * Stateful Redis double: `set`/`get`/`del` persist into `redisKeys`,
+     * set commands into `redisSets`, and sorted-set commands (the
+     * `rt:user_tokens:{userId}` session index, scored by expiry) into
+     * `redisZsets` — so tests can assert on session key lifecycles (e.g.
+     * revocation on deactivation) rather than only on call shapes.
+     */
+    redisKeys = new Map<string, string>();
+    redisSets = new Map<string, Set<string>>();
+    redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
-      set: vi.fn(async () => 'OK'),
-      getdel: vi.fn(async () => null),
-      exists: vi.fn(async () => 0),
+      set: vi.fn(async (key: string, value: string) => {
+        redisKeys.set(key, value);
+        return 'OK';
+      }),
+      get: vi.fn(async (key: string) => redisKeys.get(key) ?? null),
+      getdel: vi.fn(async (key: string) => {
+        const value = redisKeys.get(key) ?? null;
+        redisKeys.delete(key);
+        return value;
+      }),
+      exists: vi.fn(async (key: string) => (redisKeys.has(key) ? 1 : 0)),
+      smembers: vi.fn(async (key: string) => [...(redisSets.get(key) ?? [])]),
+      // ZRANGE 0 -1: every member ordered by ascending score (expiry).
+      zrange: vi.fn(async (key: string) => {
+        const zset = redisZsets.get(key);
+        if (!zset) return [];
+        return [...zset.entries()].sort((a, b) => a[1] - b[1]).map(([member]) => member);
+      }),
       scan: vi.fn(async () => ['0', []]),
       pipeline: vi.fn(() => {
         let count = 0;
         const pipeline = {
-          del: vi.fn(() => pipeline),
-          set: vi.fn(() => pipeline),
-          zremrangebyscore: vi.fn(() => pipeline),
-          zadd: vi.fn(() => {
+          del: vi.fn((key: string) => {
+            redisKeys.delete(key);
+            redisSets.delete(key);
+            redisZsets.delete(key);
+            return pipeline;
+          }),
+          set: vi.fn((key: string, value: string) => {
+            redisKeys.set(key, value);
+            return pipeline;
+          }),
+          sadd: vi.fn((key: string, member: string) => {
+            if (!redisSets.has(key)) redisSets.set(key, new Set());
+            redisSets.get(key)!.add(member);
+            return pipeline;
+          }),
+          srem: vi.fn((key: string, member: string) => {
+            redisSets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          zadd: vi.fn((key: string, score: number, member: string) => {
             count += 1;
+            if (!redisZsets.has(key)) redisZsets.set(key, new Map());
+            redisZsets.get(key)!.set(member, score);
+            return pipeline;
+          }),
+          zrem: vi.fn((key: string, member: string) => {
+            redisZsets.get(key)?.delete(member);
+            return pipeline;
+          }),
+          zremrangebyscore: vi.fn((key: string, min: number, max: number) => {
+            const zset = redisZsets.get(key);
+            if (zset) {
+              for (const [member, score] of [...zset]) {
+                if (score >= Number(min) && score <= Number(max)) zset.delete(member);
+              }
+            }
             return pipeline;
           }),
           zcard: vi.fn(() => pipeline),
@@ -380,6 +439,53 @@ describe('Users (e2e)', () => {
       expect(deactivated?.isActive).toBe(false);
       // The row still exists — constitution principle IV.
       expect(rows.some((row) => row.id === TECH_ID)).toBe(true);
+    });
+
+    it('revokes all live Redis sessions when a user is deactivated (HARD-02)', async () => {
+      // Seed a real session for the technician (login → createSession), which
+      // writes `rt:token:{tokenId}` and indexes it in the
+      // `rt:user_tokens:{userId}` sorted set, scored by expiry.
+      await tokenFor(technician);
+      const userTokensKey = `rt:user_tokens:${TECH_ID}`;
+      expect(redisZsets.has(userTokensKey)).toBe(true);
+      const seededTokenIds = [...(redisZsets.get(userTokensKey) ?? new Map()).keys()];
+      expect(seededTokenIds.length).toBeGreaterThan(0);
+      for (const tokenId of seededTokenIds) {
+        expect(redisKeys.get(`rt:token:${tokenId}`)).toBe(TECH_ID);
+      }
+
+      const token = await tokenFor(admin);
+      await request(app.getHttpServer())
+        .patch(`/users/${TECH_ID}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ isActive: false })
+        .expect(200);
+
+      // Session keys, the index, and the revocation denylist (which now stores
+      // the owning userId for attribution) must all reflect the deactivation —
+      // no session survives until TTL expiry.
+      expect(redisZsets.has(userTokensKey)).toBe(false);
+      for (const tokenId of seededTokenIds) {
+        expect(redisKeys.has(`rt:token:${tokenId}`)).toBe(false);
+        expect(redisKeys.get(`rv:${tokenId}`)).toBe(TECH_ID); // HARD-03 attribution
+      }
+      // No live session key still points at the deactivated account (the rv:*
+      // denylist entries legitimately store its userId now).
+      for (const [key, value] of redisKeys) {
+        if (key.startsWith('rt:token:')) expect(value).not.toBe(TECH_ID);
+      }
+    });
+
+    it('rejects a non-UUID user id with 400 instead of a 500 DB crash (SEC-13)', async () => {
+      const token = await tokenFor(admin);
+
+      const res = await request(app.getHttpServer())
+        .get('/users/not-a-uuid')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+
+      expect(res.body.error).toBeDefined();
+      expect(res.body.statusCode).toBe(400);
     });
 
     it('rejects a duplicate email with 409', async () => {

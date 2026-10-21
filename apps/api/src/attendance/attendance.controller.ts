@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -46,7 +47,7 @@ export class AttendanceController {
   @Patch(':id')
   @Roles(Role.ADMIN)
   override(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: OverrideAttendanceRequestDto,
     @Req() req: Request & { user: JwtUser },
   ): Promise<AttendanceRecordDto> {

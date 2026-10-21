@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import type { EmployeeDto, UserStatus } from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import { UsersService } from '../users/users.service.js';
@@ -13,6 +13,8 @@ import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
 
 @Injectable()
 export class EmployeesService {
+  private readonly logger = new Logger(EmployeesService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly storageService: StorageService,
@@ -28,14 +30,14 @@ export class EmployeesService {
     data: EmployeeDto[];
     meta: { page: number; pageSize: number; total: number };
   }> {
-    const page = Math.max(1, query.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
+    // Defaults and bounds (1..100) come from EmployeeQueryRequestDto via the
+    // global ValidationPipe — no service-side clamping.
     const result = await this.usersService.findEmployees(query);
     return {
       data: result.data.map(toEmployeeDto),
       meta: {
-        page,
-        pageSize,
+        page: query.page,
+        pageSize: query.pageSize,
         total: result.total,
       },
     };
@@ -109,8 +111,12 @@ export class EmployeesService {
     if (oldPhotoKey) {
       try {
         await this.storageService.deleteFile(oldPhotoKey);
-      } catch {
-        // Log deletion failure but don't fail request
+      } catch (error) {
+        // Deletion failure must not fail the request, but it must be visible
+        // server-side: silently swallowed errors leak orphaned assets.
+        this.logger.warn(
+          `Failed to delete superseded profile photo ${oldPhotoKey} from storage: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 

@@ -10,12 +10,19 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { and, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { AttendanceRecordDto, AttendanceStatus } from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import { DRIZZLE, type Db } from '../database/database.module.js';
-import { attendanceRecords, users, warehouses } from '../database/schema/index.js';
+import {
+  attendanceRecords,
+  users,
+  warehouses,
+  type AttendanceRecord,
+} from '../database/schema/index.js';
 import { haversineDistanceMeters } from '../common/utils/geo.utils.js';
+import { calculateHoursWorked } from '../common/utils/attendance.utils.js';
 import { ClockService, getLocalWorkDate, isAfterCutoff } from '../common/services/clock.service.js';
 import type { OverrideAttendanceRequestDto } from './dto/override-attendance.dto.js';
 import type { AttendanceQueryRequestDto } from './dto/attendance-query.dto.js';
@@ -71,7 +78,11 @@ export class AttendanceService {
     const allowedRadius = this.configService.get<number>('ATTENDANCE_RADIUS_M') ?? 150;
     const roundedDistance = Math.round(distance * 10) / 10;
 
-    if (distance > allowedRadius) {
+    // Evaluate against the same rounded value that is reported and persisted:
+    // `distance = 150.04m` used to reject while the message claimed "150m away
+    // (maximum 150m allowed)" — a boundary the client never actually crossed
+    // as reported.
+    if (roundedDistance > allowedRadius) {
       throw new HttpException(
         {
           code: 'OUT_OF_RANGE',
@@ -107,18 +118,39 @@ export class AttendanceService {
     const isLate = isAfterCutoff(now, cutoff, timezone);
     const status: AttendanceStatus = isLate ? 'LATE' : 'ON_TIME';
 
-    const rows = await this.db
-      .insert(attendanceRecords)
-      .values({
-        userId,
-        workDate,
-        checkInAt: now,
-        checkInLat: lat,
-        checkInLng: lng,
-        checkInDistanceM: roundedDistance,
-        status,
-      })
-      .returning();
+    let rows: AttendanceRecord[];
+    try {
+      rows = await this.db
+        .insert(attendanceRecords)
+        .values({
+          userId,
+          workDate,
+          checkInAt: now,
+          checkInLat: lat,
+          checkInLng: lng,
+          checkInDistanceM: roundedDistance,
+          status,
+        })
+        .returning();
+    } catch (error) {
+      // Two concurrent check-ins can both pass the pre-insert existence check;
+      // the loser hits the (user_id, work_date) unique constraint (23505).
+      // Surface that as 409 ALREADY_CHECKED_IN instead of an unhandled 500.
+      const pgError = error as { code?: string; constraint?: string };
+      if (
+        pgError?.code === '23505' ||
+        pgError?.constraint === 'attendance_records_user_id_work_date_unique'
+      ) {
+        throw new HttpException(
+          {
+            code: 'ALREADY_CHECKED_IN',
+            message: `Attendance record already exists for today (${workDate})`,
+          },
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
 
     const created = rows[0];
     return {
@@ -162,18 +194,30 @@ export class AttendanceService {
       );
     }
 
+    // Atomically constrain the UPDATE to rows where check_out_at is still
+    // NULL: two concurrent check-outs both observe `checkOutAt === null` above,
+    // but only one wins this update — the loser gets an empty `returning()`.
     const updatedRows = await this.db
       .update(attendanceRecords)
       .set({
         checkOutAt: now,
         updatedAt: now,
       })
-      .where(eq(attendanceRecords.id, record.id))
+      .where(and(eq(attendanceRecords.id, record.id), isNull(attendanceRecords.checkOutAt)))
       .returning();
 
+    if (updatedRows.length === 0) {
+      throw new HttpException(
+        {
+          code: 'ALREADY_CHECKED_OUT',
+          message: 'Already checked out for today',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const updated = updatedRows[0];
-    const durationMs = now.getTime() - record.checkInAt.getTime();
-    const hoursWorked = Math.round((durationMs / (1000 * 60 * 60)) * 100) / 100;
+    const hoursWorked = calculateHoursWorked(record.checkInAt, now);
 
     return {
       id: updated.id,
@@ -206,6 +250,24 @@ export class AttendanceService {
       throw new BadRequestException('overrideReason is strictly mandatory');
     }
 
+    // Chronological sanity on the *effective* record: whatever pair of
+    // check-in/check-out will exist after this update must be ordered.
+    const effectiveCheckIn = dto.checkInAt ? new Date(dto.checkInAt) : record.checkInAt;
+    const effectiveCheckOut = dto.checkOutAt ? new Date(dto.checkOutAt) : record.checkOutAt;
+    if (effectiveCheckOut && effectiveCheckOut.getTime() < effectiveCheckIn.getTime()) {
+      throw new HttpException(
+        {
+          code: 'CHECK_OUT_BEFORE_CHECK_IN',
+          message: 'checkOutAt must not be before checkInAt',
+          details: {
+            checkInAt: effectiveCheckIn.toISOString(),
+            checkOutAt: effectiveCheckOut.toISOString(),
+          },
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     const now = this.clockService.now();
     const updatedRows = await this.db
       .update(attendanceRecords)
@@ -229,6 +291,7 @@ export class AttendanceService {
       checkInDistanceM: updated.checkInDistanceM,
       checkOutAt: updated.checkOutAt?.toISOString() ?? null,
       status: updated.status as AttendanceStatus,
+      hoursWorked: calculateHoursWorked(updated.checkInAt, updated.checkOutAt),
       overrideReason: updated.overrideReason,
       overriddenBy: updated.overriddenBy,
       overriddenAt: updated.overriddenAt?.toISOString() ?? null,
@@ -267,11 +330,17 @@ export class AttendanceService {
       );
     }
 
-    const job = await this.reportsQueue.add('attendance-summary', {
-      type: 'ATTENDANCE_SUMMARY',
-      params: dto,
-      requestedBy,
-    });
+    // Random UUID job ids: BullMQ's sequential defaults are enumerable and the
+    // spec (spec.md line 72) requires `{ "jobId": "<uuid>" }`.
+    const job = await this.reportsQueue.add(
+      'attendance-summary',
+      {
+        type: 'ATTENDANCE_SUMMARY',
+        params: dto,
+        requestedBy,
+      },
+      { jobId: randomUUID() },
+    );
 
     return { jobId: String(job.id) };
   }
