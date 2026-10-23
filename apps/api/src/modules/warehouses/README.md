@@ -65,14 +65,16 @@ This module strictly adheres to the established LMS database layer architecture 
 ## 3. Database Layer (`warehouses.entity.ts` & `warehouses.repository.ts`)
 
 ### A. Entity Definition
-Defined in `apps/api/src/entities/warehouses.entity.ts`:
+Defined in `apps/api/src/database/schema/index.ts` (the API exposes
+`latitude`/`longitude`, mapped to the shared `gps_lat`/`gps_lng` columns):
 * `id`: UUID primary key (default random)
 * `name`: VARCHAR(255), not null
-* `address`: TEXT, not null
-* `latitude`: Double precision coordinate (-90 to 90)
-* `longitude`: Double precision coordinate (-180 to 180)
+* `address`: VARCHAR(255)
+* `latitude` (`gps_lat`): Double precision coordinate (-90 to 90)
+* `longitude` (`gps_lng`): Double precision coordinate (-180 to 180)
 * `geofenceRadiusMeters`: Integer, defaults to 150m (SOW 2.1.4)
-* `managerId`: UUID foreign key referencing `users.id`
+* `managerId`: UUID referencing a user (no FK constraint, to avoid a circular
+  reference with `users.assignedWarehouseId`)
 * `createdAt` / `updatedAt`: Timestamps with timezone
 
 ### B. Inferred Types (Zero `any`)

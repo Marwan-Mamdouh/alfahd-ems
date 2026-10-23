@@ -65,7 +65,7 @@ This module strictly adheres to the established LMS database layer architecture 
 ## 3. Database Layer (`inventory.entity.ts` & `products.repository.ts`)
 
 ### A. The 3 Cooperating Tables
-1. **`products` (`src/entities/inventory.entity.ts`)**:
+1. **`products` (`src/database/schema/index.ts`)**:
    * The catalog blueprint. Does not have a `quantity` column because physical quantities belong to individual warehouses.
    * Key columns: `id` (UUID), `sku` (VARCHAR 100, unique), `name`, `model`, `category`, `description`, `lowStockThreshold` (INT, default 10).
 2. **`warehouse_inventory`**:

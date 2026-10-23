@@ -7,7 +7,7 @@ import { setupTestApp, getAuthHeader } from './test-utils.js';
 import { makeCreateWarehouseDto } from './fakers/index.js';
 import { envelopeData } from './utils/supertest.util.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
-import type { Warehouse } from '../src/entities/warehouses.entity.js';
+import type { Warehouse } from '../src/modules/warehouses/warehouse.types.js';
 
 describe('Warehouses (e2e)', () => {
   let app: INestApplication;

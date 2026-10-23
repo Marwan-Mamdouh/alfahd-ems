@@ -3,7 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { WarehousesController } from './warehouses.controller.js';
 import { WarehousesService } from './warehouses.service.js';
 import type { CreateWarehouseDto, UpdateWarehouseDto, QueryWarehousesDto } from './dto/index.js';
-import type { Warehouse } from '../../entities/warehouses.entity.js';
+import type { Warehouse } from './warehouse.types.js';
 
 describe('WarehousesController', () => {
   let controller: WarehousesController;
@@ -16,6 +16,7 @@ describe('WarehousesController', () => {
     longitude: 31.2357,
     geofenceRadiusMeters: 150,
     managerId: null,
+    isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };

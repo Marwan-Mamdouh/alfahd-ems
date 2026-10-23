@@ -3,7 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ProductsController } from './products.controller.js';
 import { ProductsService } from './products.service.js';
 import type { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto/index.js';
-import type { Product, ProductWithStock } from '../../entities/inventory.entity.js';
+import type { Product, ProductWithStock } from '../../database/schema/index.js';
 
 describe('ProductsController', () => {
   let controller: ProductsController;

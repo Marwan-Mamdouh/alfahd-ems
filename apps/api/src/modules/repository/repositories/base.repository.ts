@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, getTableColumns } from 'drizzle-orm';
 import type { PgTable } from 'drizzle-orm/pg-core';
-import type { BaseEntity } from '../../../entities/base.entity.js';
+
+interface BaseEntity {
+  id: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
 
 export abstract class BaseRepository<
   TSelect extends BaseEntity,

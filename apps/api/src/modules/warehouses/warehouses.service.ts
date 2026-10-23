@@ -1,6 +1,6 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { RepositoryService } from '../repository/repository.service.js';
-import type { Warehouse } from '../../entities/warehouses.entity.js';
+import type { Warehouse } from './warehouse.types.js';
 import type { CreateWarehouseDto, UpdateWarehouseDto, QueryWarehousesDto } from './dto/index.js';
 
 @Injectable()

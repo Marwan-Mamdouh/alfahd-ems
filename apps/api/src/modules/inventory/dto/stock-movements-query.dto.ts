@@ -1,6 +1,6 @@
 import { IsUUID, IsOptional, IsInt, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
-import { stockMovementTypeEnum } from '../../../entities/enums.js';
+import { stockMovementTypeEnum } from '../../../database/schema/index.js';
 
 export class QueryStockMovementsDto {
   @IsUUID('4', { message: 'Warehouse ID must be a valid UUID' })

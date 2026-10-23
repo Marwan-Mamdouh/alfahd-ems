@@ -3,7 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { WarehousesService } from './warehouses.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
-import type { Warehouse } from '../../entities/warehouses.entity.js';
+import type { Warehouse } from './warehouse.types.js';
 import type { CreateWarehouseDto, UpdateWarehouseDto, QueryWarehousesDto } from './dto/index.js';
 
 describe('WarehousesService', () => {
@@ -17,6 +17,7 @@ describe('WarehousesService', () => {
     longitude: 31.2357,
     geofenceRadiusMeters: 150,
     managerId: null,
+    isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };
