@@ -3,7 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ProductsService } from './products.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
-import type { Product, ProductWithStock } from '../../entities/inventory.entity.js';
+import type { Product, ProductWithStock } from '../../database/schema/index.js';
 import type { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto/index.js';
 
 describe('ProductsService (TDD Unit Tests)', () => {

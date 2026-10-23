@@ -3,7 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
-import type { WarehouseInventory, StockMovement } from '../../entities/inventory.entity.js';
+import type { WarehouseInventory, StockMovement } from '../../database/schema/index.js';
 import type {
   InboundStockDto,
   OutboundStockDto,

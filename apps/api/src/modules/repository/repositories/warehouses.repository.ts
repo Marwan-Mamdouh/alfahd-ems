@@ -1,14 +1,33 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, ilike, or, and, count, sum, type SQL } from 'drizzle-orm';
-import * as schema from '../../../entities/schema.js';
-import {
-  warehouses,
-  type Warehouse,
-  type NewWarehouse,
-} from '../../../entities/warehouses.entity.js';
+import * as schema from '../../../database/schema/index.js';
+import { warehouses } from '../../../database/schema/index.js';
 import { DRIZZLE } from '../../../database/database.module.js';
 import { BaseRepository } from './base.repository.js';
+import type {
+  CreateWarehouseInput,
+  UpdateWarehouseInput,
+  Warehouse,
+} from '../../warehouses/warehouse.types.js';
+
+type WarehouseRow = typeof schema.warehouses.$inferSelect;
+type NewWarehouseRow = typeof schema.warehouses.$inferInsert;
+
+function toWarehouse(row: WarehouseRow): Warehouse {
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address ?? '',
+    latitude: row.gpsLat ?? 0,
+    longitude: row.gpsLng ?? 0,
+    geofenceRadiusMeters: row.geofenceRadiusMeters,
+    managerId: row.managerId,
+    isActive: row.isActive,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 export interface QueryWarehousesParams {
   search?: string;
@@ -19,7 +38,7 @@ export interface QueryWarehousesParams {
 @Injectable()
 export class WarehousesRepository extends BaseRepository<
   Warehouse,
-  NewWarehouse,
+  CreateWarehouseInput,
   typeof warehouses,
   typeof schema
 > {
@@ -27,14 +46,46 @@ export class WarehousesRepository extends BaseRepository<
     super(db, warehouses);
   }
 
+  override async findAll(): Promise<Warehouse[]> {
+    const rows = await this.db.select().from(schema.warehouses);
+    return rows.map(toWarehouse);
+  }
+
+  override async findById(id: string): Promise<Warehouse | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.warehouses)
+      .where(eq(schema.warehouses.id, id))
+      .limit(1);
+
+    return row ? toWarehouse(row) : null;
+  }
+
+  override async create(
+    data: Omit<CreateWarehouseInput, 'id'> & Partial<{ id: string }>,
+  ): Promise<Warehouse> {
+    const values: NewWarehouseRow = {
+      id: data.id,
+      name: data.name,
+      address: data.address,
+      gpsLat: data.latitude,
+      gpsLng: data.longitude,
+      geofenceRadiusMeters: data.geofenceRadiusMeters ?? 150,
+      managerId: data.managerId ?? null,
+    };
+
+    const [row] = await this.db.insert(schema.warehouses).values(values).returning();
+    return toWarehouse(row);
+  }
+
   async findByName(name: string): Promise<Warehouse | undefined> {
-    const [record] = await this.db
+    const [row] = await this.db
       .select()
       .from(schema.warehouses)
       .where(eq(schema.warehouses.name, name.trim()))
       .limit(1);
 
-    return record;
+    return row ? toWarehouse(row) : undefined;
   }
 
   async findManyWithPagination(
@@ -53,7 +104,7 @@ export class WarehousesRepository extends BaseRepository<
 
     const whereClause = whereConditions.length ? and(...whereConditions) : undefined;
 
-    const [items, [{ total }]] = await Promise.all([
+    const [rows, [{ total }]] = await Promise.all([
       this.db
         .select()
         .from(schema.warehouses)
@@ -63,20 +114,28 @@ export class WarehousesRepository extends BaseRepository<
       this.db.select({ total: count() }).from(schema.warehouses).where(whereClause),
     ]);
 
-    return { items, total: Number(total) };
+    return { items: rows.map(toWarehouse), total: Number(total) };
   }
 
-  async updateWarehouse(
-    id: string,
-    updates: Partial<NewWarehouse>,
-  ): Promise<Warehouse | undefined> {
+  async updateWarehouse(id: string, updates: UpdateWarehouseInput): Promise<Warehouse | undefined> {
+    const values: Partial<NewWarehouseRow> = {};
+
+    if (updates.name !== undefined) values.name = updates.name;
+    if (updates.address !== undefined) values.address = updates.address;
+    if (updates.latitude !== undefined) values.gpsLat = updates.latitude;
+    if (updates.longitude !== undefined) values.gpsLng = updates.longitude;
+    if (updates.geofenceRadiusMeters !== undefined) {
+      values.geofenceRadiusMeters = updates.geofenceRadiusMeters;
+    }
+    if (updates.managerId !== undefined) values.managerId = updates.managerId;
+
     const [updated] = await this.db
       .update(schema.warehouses)
-      .set(updates)
+      .set(values)
       .where(eq(schema.warehouses.id, id))
       .returning();
 
-    return updated;
+    return updated ? toWarehouse(updated) : undefined;
   }
 
   async countActiveInventory(warehouseId: string): Promise<number> {

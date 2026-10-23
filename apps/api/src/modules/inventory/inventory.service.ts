@@ -4,7 +4,7 @@ import type {
   WarehouseInventory,
   StockMovement,
   NewStockMovement,
-} from '../../entities/inventory.entity.js';
+} from '../../database/schema/index.js';
 import type {
   InboundStockDto,
   OutboundStockDto,

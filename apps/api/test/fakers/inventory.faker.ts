@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker';
-import type { WarehouseInventory, StockMovement } from '../../src/entities/inventory.entity.js';
+import type { WarehouseInventory, StockMovement } from '../../src/database/schema/index.js';
 import type { InboundStockDto } from '../../src/modules/inventory/dto/inbound-stock.dto.js';
 import type { OutboundStockDto } from '../../src/modules/inventory/dto/outbound-stock.dto.js';
 import type { TransferStockDto } from '../../src/modules/inventory/dto/transfer-stock.dto.js';

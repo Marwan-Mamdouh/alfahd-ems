@@ -1,13 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, ilike, or, and, count, sum, lte, type SQL } from 'drizzle-orm';
-import * as schema from '../../../entities/schema.js';
+import * as schema from '../../../database/schema/index.js';
 import {
   products,
   type Product,
   type NewProduct,
   type ProductWithStock,
-} from '../../../entities/inventory.entity.js';
+} from '../../../database/schema/index.js';
 import { DRIZZLE } from '../../../database/database.module.js';
 import { BaseRepository } from './base.repository.js';
 

@@ -7,7 +7,7 @@ import { setupTestApp, getAuthHeader } from './test-utils.js';
 import { makeCreateProductDto } from './fakers/index.js';
 import { envelopeData } from './utils/supertest.util.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
-import type { Product, ProductWithStock } from '../src/entities/inventory.entity.js';
+import type { Product, ProductWithStock } from '../src/database/schema/index.js';
 
 describe('Products (e2e)', () => {
   let app: INestApplication;
@@ -78,7 +78,6 @@ describe('Products (e2e)', () => {
           category: data.category!,
           description: data.description ?? null,
           lowStockThreshold: data.lowStockThreshold ?? 10,
-          isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -119,7 +118,6 @@ describe('Products (e2e)', () => {
         category: 'Routers',
         description: 'Gigabit dual-band wireless router',
         lowStockThreshold: 10,
-        isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -131,7 +129,6 @@ describe('Products (e2e)', () => {
         category: 'Cables',
         description: 'Shielded high-speed ethernet cable roll',
         lowStockThreshold: 5,
-        isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },

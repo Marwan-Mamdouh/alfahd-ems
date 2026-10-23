@@ -11,7 +11,7 @@ import type {
   WarehouseInventory,
   StockMovement,
   NewStockMovement,
-} from '../src/entities/inventory.entity.js';
+} from '../src/database/schema/index.js';
 
 describe('Inventory (e2e)', () => {
   let app: INestApplication;

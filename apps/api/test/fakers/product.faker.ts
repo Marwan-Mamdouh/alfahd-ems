@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker';
-import type { Product, ProductWithStock } from '../../src/entities/inventory.entity.js';
+import type { Product, ProductWithStock } from '../../src/database/schema/index.js';
 import type { CreateProductDto } from '../../src/modules/products/dto/create-product.dto.js';
 
 export function makeProduct(overrides: Partial<Product> = {}): Product {
@@ -11,7 +11,6 @@ export function makeProduct(overrides: Partial<Product> = {}): Product {
     category: faker.helpers.arrayElement(['Routers', 'Cables', 'Optics', 'Switches', 'Tools']),
     description: faker.commerce.productDescription(),
     lowStockThreshold: faker.number.int({ min: 5, max: 20 }),
-    isActive: true,
     createdAt: faker.date.past(),
     updatedAt: faker.date.recent(),
     ...overrides,

@@ -34,6 +34,8 @@ describe('AttendanceService', () => {
     address: 'Cairo, Egypt',
     gpsLat: 30.0444,
     gpsLng: 31.2357,
+    geofenceRadiusMeters: 150,
+    managerId: null,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),

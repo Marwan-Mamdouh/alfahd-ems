@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker';
-import type { Warehouse } from '../../src/entities/warehouses.entity.js';
+import type { Warehouse } from '../../src/modules/warehouses/warehouse.types.js';
 import type { CreateWarehouseDto } from '../../src/modules/warehouses/dto/create-warehouse.dto.js';
 
 export function makeWarehouse(overrides: Partial<Warehouse> = {}): Warehouse {
