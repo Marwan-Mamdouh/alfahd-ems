@@ -8,3 +8,11 @@ allowBuilds:
   msgpackr-extract: false
   argon2: true
   '@scarf/scarf': false
+overrides:
+  esbuild@<0.25.0: '>=0.25.0'
+  fast-uri@<3.1.9: '>=3.1.9'
+  multer@<2.5.0: '>=2.5.0'
+  tmp@<0.2.6: '>=0.2.6'
+  undici@6: '>=6.24.0'
+  undici@7: '>=7.30.1'
+  uuid@8: '>=8.3.3'
