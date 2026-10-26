@@ -97,36 +97,38 @@ export const TicketPriority = {
 export type TicketPriority = (typeof TicketPriority)[keyof typeof TicketPriority];
 
 // ─── Router ───────────────────────────────────────────────────────────────────
-export const RouterStatus = {
-  AVAILABLE: 'AVAILABLE',
-  ASSIGNED_TO_TECHNICIAN: 'ASSIGNED_TO_TECHNICIAN',
-  INSTALLED_AT_CUSTOMER: 'INSTALLED_AT_CUSTOMER',
-  RETURNED: 'RETURNED',
-  DAMAGED: 'DAMAGED',
-  UNDER_REPAIR: 'UNDER_REPAIR',
-  LOST: 'LOST',
-  DECOMMISSIONED: 'DECOMMISSIONED',
-} as const;
+export const ROUTER_STATUSES = [
+  'AVAILABLE',
+  'ASSIGNED_TO_TECHNICIAN',
+  'INSTALLED_AT_CUSTOMER',
+  'RETURNED',
+  'DAMAGED',
+  'UNDER_REPAIR',
+  'LOST',
+  'DECOMMISSIONED',
+] as const;
 
-export type RouterStatus = (typeof RouterStatus)[keyof typeof RouterStatus];
+type ValueMap<T extends readonly string[]> = { readonly [Value in T[number]]: Value };
 
-export const RouterHolderType = {
-  WAREHOUSE: 'WAREHOUSE',
-  TECHNICIAN: 'TECHNICIAN',
-  CUSTOMER: 'CUSTOMER',
-} as const;
+function toValueMap<const T extends readonly string[]>(values: T): ValueMap<T> {
+  return Object.fromEntries(values.map((value) => [value, value])) as ValueMap<T>;
+}
 
-export type RouterHolderType = (typeof RouterHolderType)[keyof typeof RouterHolderType];
+// Keep the existing object API while making each tuple the source of truth.
+export const RouterStatus = toValueMap(ROUTER_STATUSES);
+
+export type RouterStatus = (typeof ROUTER_STATUSES)[number];
+
+export const ROUTER_HOLDER_TYPES = ['WAREHOUSE', 'TECHNICIAN', 'CUSTOMER'] as const;
+export const RouterHolderType = toValueMap(ROUTER_HOLDER_TYPES);
+
+export type RouterHolderType = (typeof ROUTER_HOLDER_TYPES)[number];
 
 // ─── IP Address ───────────────────────────────────────────────────────────────
-export const IpStatus = {
-  AVAILABLE: 'AVAILABLE',
-  ASSIGNED: 'ASSIGNED',
-  RESERVED: 'RESERVED',
-  RETIRED: 'RETIRED',
-} as const;
+export const IP_STATUSES = ['AVAILABLE', 'ASSIGNED', 'RESERVED', 'RETIRED'] as const;
+export const IpStatus = toValueMap(IP_STATUSES);
 
-export type IpStatus = (typeof IpStatus)[keyof typeof IpStatus];
+export type IpStatus = (typeof IP_STATUSES)[number];
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
 export const ATTENDANCE_STATUSES = [
@@ -287,4 +289,3 @@ export interface JobStatusResponseDto {
   downloadUrl?: string | null;
   error?: string | null;
 }
-
