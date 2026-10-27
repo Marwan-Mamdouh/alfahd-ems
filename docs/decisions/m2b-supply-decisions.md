@@ -1,20 +1,20 @@
 # M2b supply decisions
 
-**Status:** Draft for Ahmed's review; no business decision below is approved by this document.
+**Status:** Business decisions confirmed by Marwan on 2026-10-28. Detailed handoff: [M2b implementation contract](../contracts/m2b-supply-implementation.md).
 
-This record captures the decisions called out in `docs/m2b-gap-and-delivery-plan.md` §4. Recommendations are proposals only. Dependent implementation must wait for the relevant approval to be recorded in the feature specification or contract.
+This record summarizes decisions from the planning discussion. The linked implementation contract supersedes earlier draft recommendations and lists the remaining technical freeze items. Business approval does not imply that implementation or acceptance checks have passed.
 
-| # | Decision | Proposal for review | Status |
+| # | Decision | Approved direction | Status |
 | --- | --- | --- | --- |
-| 1 | Router assets versus quantity stock | Keep serial-level routers distinct from product quantities. Do not make router lifecycle operations change `warehouse_inventory` or stock movements unless an explicit accounting rule defines atomic synchronization. Also obtain client sign-off on the generic inventory scope risk identified in `PLAN.md` §6. | Open — Ahmed/client decision |
-| 2 | Holder semantics | Treat status and physical custody as separate facts. Define a complete status-to-holder table, including `DAMAGED`, `UNDER_REPAIR`, `LOST` and `DECOMMISSIONED`, before implementation. Represent a future customer target without adding the M4a customer table or FK early. | Open — Ahmed decision |
-| 3 | Status overrides | Require a reason where the operation requires an override, but never allow a reason to bypass the approved transition whitelist. | Consistent with current M2b DoD; confirm in contract |
-| 4 | IP validation/history | Decide host-only versus CIDR input, allowed status transitions, reservation semantics, assignment inputs, reasons, and history actions for retirement/manual changes. | Open — Ahmed decision |
-| 5 | CSV import | Proposed async job result: `{ inserted, skipped, errors }`, with row-numbered errors and duplicate-tolerant row processing. Freeze headers, normalization, encoding, limits, retries/idempotency, and polling shape before implementation. | Open — Ahmed decision |
-| 6 | Authorization | Preserve the stated manual router assignment rule (ADMIN/WAREHOUSE_STAFF). Approve the remaining read/write/report/import matrix before other endpoints are implemented. | Partial — assignment rule in DoD; rest open |
-| 7 | Report storage | `PLAN.md` names Cloudflare R2, while current storage implementations include Cloudinary/fake. Choose either the required R2 adapter or an explicitly approved M2b deviation; do not represent Cloudinary as R2-compliant. | Open — platform/client decision |
-| 8 | Drizzle versions | Preserve semver ranges. Current declared ranges are `drizzle-orm: ^0.45.2` and `drizzle-kit: ^0.31.10`; the current lockfile resolves 0.45.3 and 0.31.11, respectively. These packages have different version lines; do not force matching version numbers. | Recorded in `PLAN.md`; verify compatibility when upgrading |
+| 1 | Router assets versus quantity stock | Each router references a product/SKU. Only AVAILABLE, serviceable routers physically in a warehouse contribute usable stock. Existing registration does not add quantity; new receipt does. Apply stock effects atomically. | Approved; onboarding/integration design needs technical freeze |
+| 2 | Condition, custody and location | Separate physical condition from lifecycle. Damaged/repair/lost/decommissioned cases have empty custody; preserve history and separate physical location. Warehouse damage changes condition, not the transition whitelist. | Approved; exact field values/mapping need technical freeze |
+| 3 | Status overrides | Require a reason; never bypass the whitelist. | Approved |
+| 4 | IP rules | Individual IPv4 addresses; only FREE/RESERVED. Admin management and release; archive FREE only. Technician automatic allocation is one IP per installation ticket, idempotent and deferred until tickets exist. | Approved; DTOs/history details need technical freeze |
+| 5 | CSV import | Async enqueue/poll with `{ inserted, skipped, errors }`; headers match the approved DB-column subset, processing is duplicate-tolerant with row outcomes. | Approved direction; limits/headers/polling need technical freeze |
+| 6 | Authorization | ADMIN/WAREHOUSE_STAFF manual router assignment. Admin-only IP management, reports and CSV imports; technician IP read and later automatic allocation only. | Approved subset; other router operations and CS/warehouse IP reads remain unresolved |
+| 7 | Report storage | Prefer Cloudinary with real Excel downloads; explicitly configured local disk is the temporary fallback. Fake storage is not acceptance evidence. | Approved M2b deviation from R2-only wording |
+| 8 | Drizzle versions | Keep current versions/ranges unchanged; do not introduce exact pins or upgrades for this task. | Approved |
 
 ## Implementation gate
 
-Ahmed should record approved answers in the feature specification or update the relevant contract. A proposal in this file is not sufficient authorization to implement unresolved business behavior.
+Ahmed should implement against the linked contract and review its §12 technical proposals with Marwan before the affected work. The wider client inventory-scope acceptance risk is not resolved by these decisions. No customer/ticket implementation is authorized by the future IP-allocation description.

@@ -1,6 +1,6 @@
 # Report pipeline contract — draft
 
-**Status:** Draft; documents observed behavior and proposed M2b extension. Freeze after Ahmed/Marwan review.
+**Status:** Supporting card; current behavior plus M2b extension requirements. Read the [M2b implementation contract](m2b-supply-implementation.md) for the latest approved decisions and remaining technical freeze items.
 
 ## Existing attendance report behavior
 
@@ -14,6 +14,8 @@
 
 ## Required M2b extension — not yet implemented
 
-Router report jobs must use this same queue and requester ownership model. Their payload, job name, filters, result fields and storage provider remain to be approved. The shared worker must explicitly dispatch supported types and fail unsupported types; an unsupported job must never complete with an empty URL. Preserve attendance behavior and `GET /jobs/:id` authorization while extending dispatch.
+Router report jobs must use this same queue and requester ownership model. Only admins may generate M2b supply reports or import CSVs. The shared worker must explicitly dispatch supported types and fail unsupported types; an unsupported job must never complete with an empty URL. Preserve attendance behavior and `GET /jobs/:id` authorization while extending dispatch.
 
-Before this contract is frozen, approve the router report payload/result, storage provider (including the `PLAN.md` R2 requirement), and polling response shape. Do not add the M4b `report_jobs` table as part of M2b.
+Cloudinary is the approved first choice, with explicitly configured local disk as a temporary fallback if Cloudinary cannot provide working Excel downloads. Actual downloadable bytes, not just saved metadata or a fake URL, are required. The M2b implementation contract describes storage/security requirements and the approved deviation from the earlier R2-only wording.
+
+Before the technical API is frozen, approve the router report payload/result, job name, filters, columns, polling response shape and download access contract. Import polling also needs an additive result contract; the existing status DTO does not expose `{ inserted, skipped, errors }`. Do not add the M4b `report_jobs` table as part of M2b.

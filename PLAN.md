@@ -172,6 +172,8 @@ _Lanes (other backend developer, Waves 1–2):_ The report-job pipeline is the f
 
 ### M2b — Supply Chain
 
+**Approved M2b amendments (2026-10-28):** Read [the M2b implementation contract](docs/contracts/m2b-supply-implementation.md) before implementing. Its explicit amendments supersede the older M2b wording below for router/product stock accounting, physical condition versus lifecycle, nullable current custody, FREE/RESERVED IP statuses, deferred ticket-based allocation, and downloadable Cloudinary/local reports. Remaining technical freeze items are listed in that contract; unrelated milestone requirements are unchanged.
+
 _7 issues · SRS payment: M2 20% (shared with M2a)_
 
 **Goal:** warehouse, router and IP lifecycle. No tickets, no customers.
