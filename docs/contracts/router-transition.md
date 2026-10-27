@@ -1,6 +1,6 @@
 # Router transition contract — draft
 
-**Status:** Draft; transition whitelist reflects the M2b DoD. Holder semantics and transaction interface require Ahmed's approval before freeze.
+**Status:** Supporting card. The [M2b implementation contract](m2b-supply-implementation.md) records the latest approved business decisions and takes precedence. Exact schema/interface details still require technical review.
 
 ## Status transition whitelist
 
@@ -20,10 +20,10 @@ The status values are `AVAILABLE`, `ASSIGNED_TO_TECHNICIAN`, `INSTALLED_AT_CUSTO
 ## Atomicity invariants
 
 - Router creation and its initial WAREHOUSE custody row are one transaction.
-- A status/holder change releases the prior open assignment and creates the next open assignment in the same transaction as the router update.
-- Exactly one open custody row must exist for an active router; concurrent attempts must serialize, and a losing operation must not leave partial status or custody history.
+- A status/holder change releases prior custody and creates a new assignment only when the resulting state requires a holder, in the same transaction as router/stock updates.
+- At most one open custody row may exist. Damaged, repair, lost and decommissioned cases have empty custody. Physical condition/location are separate facts; a physically damaged AVAILABLE router may also have no holder. Concurrent attempts must serialize, and failed writes must not leave partial stock, status or custody history.
 - The transition operation must accept a caller-owned database transaction so M3a can include it in ticket closure. It must not independently commit.
 
 ## Decisions still open
 
-Holder types are WAREHOUSE, TECHNICIAN and CUSTOMER. The approved target validation, physical holder mapping for every transition (especially DAMAGED, UNDER_REPAIR, LOST and DECOMMISSIONED), customer-reference representation, reason requirements by operation, and exact failure/error body are not specified here. Resolve these with Ahmed before freezing this contract or implementing dependent behavior. Status and physical custody must remain distinct concepts.
+Holder types remain WAREHOUSE, TECHNICIAN and CUSTOMER. The latest approved empty-custody, physical-condition, location and stock behavior is in the M2b implementation contract. Its §12 lists the remaining technical freeze items, including exact condition values, target validation, interface and error bodies. Do not add AVAILABLE → DAMAGED or simulate an assignment to record warehouse damage.
