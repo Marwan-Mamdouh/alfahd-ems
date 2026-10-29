@@ -85,10 +85,10 @@ export class WarehousesService {
     const { canDelete, reason } = await this.repo.warehouses.canDeleteWarehouse(id);
     if (!canDelete) {
       throw new ConflictException(
-        reason ?? 'Cannot delete warehouse due to active inventory or staff',
+        reason ?? 'Cannot deactivate warehouse due to active inventory, staff, or located routers',
       );
     }
 
-    await this.repo.warehouses.deleteById(id);
+    await this.repo.warehouses.softDeactivate(id);
   }
 }
