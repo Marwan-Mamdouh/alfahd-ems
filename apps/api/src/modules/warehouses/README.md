@@ -2,17 +2,20 @@
 
 **Path:** `apps/api/src/modules/warehouses`  
 **Architecture:** 5-Layer LMS Facade Repository Pattern  
-**Status:** Stage 1 Autonomous Implementation (100% Type-Safe, Pure Drizzle ORM, TDD Green)
+**Status:** M2b Complete (Guarded Soft-Deactivation, Router Physical Location Checks, 100% Type-Safe, Pure Drizzle ORM, TDD Green)
 
 ---
 
 ## 1. Overview & Business Scope
 
-Derived from **SOW Section 2.1.4, Section 2.1.5** and **CRM SRS Section 5**:
+Derived from **SOW Section 2.1.4, Section 2.1.5**, **CRM SRS Section 5**, and **Milestone M2b Specification**:
 * **Multi-Warehouse Management:** Regional distribution centers holding physical stock with street address, GPS coordinates (`latitude`, `longitude`), and optional manager assignment (`managerId`).
 * **150m GPS Geofence Anchor:** Stores `geofenceRadiusMeters` (defaults to **150m** strictly per SOW Section 2.1.4), used as the spatial anchor for mobile attendance check-in by field technicians.
 * **Name Uniqueness:** Warehouse names are unique across the system (e.g., "Cairo Main Hub", "Alexandria Branch"), trimmed and normalized.
-* **Guarded Deletion:** A warehouse cannot be deleted if active stock remains in `warehouse_inventory` or if staff/technicians are currently assigned to it (`users.assignedWarehouseId`).
+* **Guarded Soft-Deactivation (M2b):** Per the M2b contract, warehouses are never hard-deleted. Instead, deletion triggers a guarded soft-deactivation (`isActive: false`). Deactivation is strictly blocked if:
+  1. Active consumable inventory stock remains (`warehouse_inventory.quantity > 0`).
+  2. Active employees/technicians are assigned to it (`users.assignedWarehouseId`).
+  3. Routers are physically located at the warehouse (`routers.warehouseId = id`).
 
 ---
 
@@ -92,7 +95,9 @@ export type NewWarehouse = typeof warehouses.$inferInsert;
 * `updateWarehouse(id: string, updates: Partial<NewWarehouse>)`: Updates fields and returns updated record.
 * `countActiveInventory(warehouseId: string)`: Aggregates total stock quantity across all products held in this warehouse using `sum().mapWith(Number)`.
 * `countAssignedStaff(warehouseId: string)`: Counts total employees assigned to this warehouse.
-* `canDeleteWarehouse(warehouseId: string)`: Guard preventing deletion if active stock ($> 0$) or assigned staff ($> 0$) exist.
+* `countPhysicallyLocatedRouters(warehouseId: string)`: Counts routers physically located at this warehouse (`routers.warehouseId = warehouseId`).
+* `canDeleteWarehouse(warehouseId: string)`: Guard preventing deactivation if active stock ($> 0$), assigned staff ($> 0$), or physically located routers ($> 0$) exist.
+* `softDeactivate(warehouseId: string)`: Sets `isActive: false` on the warehouse record.
 
 ---
 
@@ -103,7 +108,7 @@ The service acts as the business orchestrator and injects **only** `RepositorySe
 * **`createWarehouse(dto: CreateWarehouseDto)`**:
   * Trims `name` and `address`.
   * Verifies name uniqueness (`findByName`), throws `ConflictException` (409) if duplicate.
-  * Inserts the warehouse record with default 150m geofence.
+  * Inserts the warehouse record with default 150m geofence and `isActive: true`.
 * **`findAll(query: QueryWarehousesDto)`**:
   * Forwards sanitized search, limit, and offset to `findManyWithPagination`.
 * **`findById(id: string)`**:
@@ -114,8 +119,8 @@ The service acts as the business orchestrator and injects **only** `RepositorySe
   * Updates coordinates, geofence radius, address, or manager.
 * **`remove(id: string)`**:
   * Ensures warehouse exists (404 check).
-  * Calls `canDeleteWarehouse(id)`. If `canDelete === false`, throws `ConflictException` (409) with specific reason (active inventory or assigned employees).
-  * Deletes via `deleteById(id)`.
+  * Calls `canDeleteWarehouse(id)`. If `canDelete === false`, throws `ConflictException` (409) with specific reason (active inventory, assigned employees, or located router hardware).
+  * Performs safe soft deactivation via `softDeactivate(id)`.
 
 ---
 
@@ -158,14 +163,39 @@ Unit testing conforms strictly to TDD and runs via Vitest:
 
 * **Service Unit Tests (`warehouses.service.spec.ts`)**:
   * 12 comprehensive test cases mocking `RepositoryService.warehouses`.
-  * Verifies unique name collisions, 404 handling, pagination, update collision checks, and guarded deletion.
+  * Verifies unique name collisions, 404 handling, pagination, update collision checks, and guarded soft-deactivation (checking active inventory, staff, and router assets).
 * **Controller Unit Tests (`warehouses.controller.spec.ts`)**:
   * 6 test cases verifying HTTP handler delegation to `WarehousesService`.
+
+* **Integration & E2E Test Suite (`test/warehouses.e2e-spec.ts`)**:
+  * **15 test cases** across 2 testing suites verifying complete RBAC, route parameters, and guarded deactivation:
+
+  #### Suite 1: Authentication & Authorization (RBAC) (9 tests)
+  1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
+  2. `403 Forbidden` — Blocks `TECHNICIAN` from listing distribution warehouses.
+  3. `200 OK` — Allows `WAREHOUSE_STAFF` to list and query warehouses.
+  4. `200 OK` — Allows `CS` (Customer Support) to list warehouses for ticket lookups.
+  5. `403 Forbidden` — Blocks `WAREHOUSE_STAFF` from creating a warehouse.
+  6. `403 Forbidden` — Blocks `CS` from creating a warehouse.
+  7. `201 Created` — Allows `ADMIN` to create a new distribution warehouse.
+  8. `403 Forbidden` — Blocks non-`ADMIN` roles from updating warehouse configurations.
+  9. `403 Forbidden` — Blocks non-`ADMIN` roles from deleting / soft-deactivating warehouses.
+
+  #### Suite 2: Validation & Edge Cases (6 tests)
+  10. `400 Bad Request` — Rejects warehouse creation when mandatory fields (name, coordinates) are missing.
+  11. `400 Bad Request` — Rejects request when warehouse ID route parameter is not a valid UUID.
+  12. `409 Conflict` — Blocks creating a warehouse when name already exists (case/trim collision).
+  13. `404 Not Found` — Returns 404 when querying a non-existent warehouse UUID.
+  14. `409 Conflict` — Blocks deleting/deactivating a warehouse with active inventory or located router assets.
+  15. `204 No Content` — Successfully soft-deactivates an empty warehouse with no active stock or assigned routers.
 
 ### Running Verification Commands:
 ```bash
 # Run all unit tests
 pnpm --filter @alfahd/api test
+
+# Run warehouse E2E integration tests
+pnpm --filter @alfahd/api test:e2e test/warehouses.e2e-spec.ts
 
 # Run strict TypeScript compiler check (0 errors)
 pnpm --filter @alfahd/api typecheck
@@ -173,45 +203,3 @@ pnpm --filter @alfahd/api typecheck
 # Run linter
 pnpm --filter @alfahd/api lint
 ```
-
----
-
-## 7. Stage 2: Handover Guide for Auth & RBAC Integration
-
-When the teammate building `AuthModule` and `UsersModule` delivers the authentication guards, integrate them in two simple steps:
-
-1. **Attach Guards to `WarehousesController`**:
-   ```typescript
-   import { UseGuards } from '@nestjs/common';
-   import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
-   import { Roles } from '../auth/decorators/roles.decorator.js';
-   import { Role } from '@alfahd/types';
-   import { routes } from '../../common/constants/routes.constants.js';
-
-   @UseGuards(JwtAuthGuard, RolesGuard)
-   @Controller(routes.warehouses.root)
-   export class WarehousesController {
-     @Post()
-     @Roles(Role.ADMIN)
-     async create(...) { ... }
-
-     @Get()
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF, Role.CS)
-     async findAll(...) { ... }
-
-     @Get(routes.warehouses.id)
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF, Role.CS)
-     async findOne(...) { ... }
-
-     @Patch(routes.warehouses.id)
-     @Roles(Role.ADMIN)
-     async update(...) { ... }
-
-     @Delete(routes.warehouses.id)
-     @Roles(Role.ADMIN)
-     async remove(...) { ... }
-   }
-   ```
-
-2. **Add RBAC Integration Tests**:
-   * Create `warehouses-rbac.e2e-spec.ts` testing `401 Unauthorized` for unauthenticated requests and `403 Forbidden` for unauthorized roles (e.g. `Role.TECHNICIAN` attempting to delete a warehouse).

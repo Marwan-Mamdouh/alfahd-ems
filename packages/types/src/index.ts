@@ -124,11 +124,32 @@ export const RouterHolderType = toValueMap(ROUTER_HOLDER_TYPES);
 
 export type RouterHolderType = (typeof ROUTER_HOLDER_TYPES)[number];
 
+export const ROUTER_PHYSICAL_CONDITIONS = [
+  'SERVICEABLE',
+  'DAMAGED',
+  'UNDER_REPAIR',
+] as const;
+export const RouterPhysicalCondition = toValueMap(ROUTER_PHYSICAL_CONDITIONS);
+
+export type RouterPhysicalCondition = (typeof ROUTER_PHYSICAL_CONDITIONS)[number];
+
 // ─── IP Address ───────────────────────────────────────────────────────────────
-export const IP_STATUSES = ['AVAILABLE', 'ASSIGNED', 'RESERVED', 'RETIRED'] as const;
+export const IP_STATUSES = ['FREE', 'RESERVED'] as const;
 export const IpStatus = toValueMap(IP_STATUSES);
 
 export type IpStatus = (typeof IP_STATUSES)[number];
+
+export const IP_HISTORY_ACTIONS = [
+  'CREATE',
+  'RESERVE',
+  'RELEASE',
+  'ARCHIVE',
+  'UNARCHIVE',
+  'UPDATE_METADATA',
+] as const;
+export const IpHistoryAction = toValueMap(IP_HISTORY_ACTIONS);
+
+export type IpHistoryAction = (typeof IP_HISTORY_ACTIONS)[number];
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
 export const ATTENDANCE_STATUSES = [
@@ -289,3 +310,139 @@ export interface JobStatusResponseDto {
   downloadUrl?: string | null;
   error?: string | null;
 }
+
+// ─── Router DTOs ──────────────────────────────────────────────────────────────
+export interface RouterDto {
+  id: string;
+  serialNumber: string;
+  productId: string;
+  status: RouterStatus;
+  physicalCondition: RouterPhysicalCondition;
+  warehouseId: string | null;
+  externalLocation: string | null;
+  currentHolderType: RouterHolderType | null;
+  currentHolderId: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RouterAssignmentDto {
+  id: string;
+  routerId: string;
+  holderType: RouterHolderType;
+  warehouseId: string | null;
+  technicianId: string | null;
+  assignedAt: string;
+  releasedAt: string | null;
+  assignedBy: string;
+  notes: string | null;
+}
+
+export interface RouterConditionHistoryDto {
+  id: string;
+  routerId: string;
+  fromCondition: RouterPhysicalCondition;
+  toCondition: RouterPhysicalCondition;
+  fromWarehouseId: string | null;
+  toWarehouseId: string | null;
+  externalLocation: string | null;
+  reason: string;
+  changedBy: string;
+  createdAt: string;
+}
+
+export interface CreateRouterDto {
+  serialNumber: string;
+  productId: string;
+  warehouseId: string;
+  physicalCondition?: RouterPhysicalCondition;
+  isNewReceipt?: boolean; // true = new inbound receipt (+1 quantity), false/undefined = register existing stock (+0)
+  notes?: string;
+}
+
+export interface AssignRouterDto {
+  technicianId: string;
+  notes?: string;
+}
+
+export interface UpdateRouterConditionDto {
+  physicalCondition: RouterPhysicalCondition;
+  warehouseId?: string;
+  externalLocation?: string;
+  reason: string;
+}
+
+export interface TransitionRouterDto {
+  status: RouterStatus;
+  reason?: string;
+  targetWarehouseId?: string;
+  notes?: string;
+}
+
+export interface RouterQueryDto {
+  status?: RouterStatus;
+  physicalCondition?: RouterPhysicalCondition;
+  warehouseId?: string;
+  productId?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+// ─── IP Address DTOs ──────────────────────────────────────────────────────────
+export interface IpAddressDto {
+  id: string;
+  address: string;
+  status: IpStatus;
+  isArchived: boolean;
+  customerId: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateIpDto {
+  address: string;
+  notes?: string;
+}
+
+export interface UpdateIpDto {
+  notes?: string;
+}
+
+export interface IpHistoryDto {
+  id: string;
+  ipId: string;
+  fromStatus: IpStatus;
+  toStatus: IpStatus;
+  action: IpHistoryAction;
+  reason: string | null;
+  actorId: string;
+  createdAt: string;
+}
+
+export interface IpQueryDto {
+  status?: IpStatus;
+  isArchived?: boolean;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface IpImportResultDto {
+  total: number;
+  inserted: number;
+  skipped: number;
+  errors: Array<{
+    row: number;
+    address: string;
+    reason: string;
+  }>;
+}
+
+// ─── Router Inventory Report DTOs ─────────────────────────────────────────────
+export interface RouterReportQueryDto {
+  warehouseId?: string;
+}
+

@@ -78,6 +78,12 @@ describe('Warehouses (e2e)', () => {
         }
         return { canDelete: true };
       },
+      softDeactivate: async (id: string) => {
+        const index = warehouseStore.findIndex((w) => w.id === id);
+        if (index === -1) return undefined;
+        warehouseStore[index].isActive = false;
+        return warehouseStore[index];
+      },
       deleteById: async (id: string) => {
         warehouseStore = warehouseStore.filter((w) => w.id !== id);
       },
