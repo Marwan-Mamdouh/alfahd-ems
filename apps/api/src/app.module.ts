@@ -17,6 +17,8 @@ import { RepositoryModule } from './modules/repository/repository.module.js';
 import { ProductsModule } from './modules/products/products.module.js';
 import { WarehousesModule } from './modules/warehouses/warehouses.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
+import { RoutersModule } from './modules/routers/routers.module.js';
+import { IpModule } from './modules/ip-management/ip.module.js';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { InventoryModule } from './modules/inventory/inventory.module.js';
     ProductsModule,
     WarehousesModule,
     InventoryModule,
+    RoutersModule,
+    IpModule,
     EmailModule,
     RedisModule,
     StorageModule,
