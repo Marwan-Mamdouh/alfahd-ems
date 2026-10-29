@@ -156,6 +156,15 @@ export class WarehousesRepository extends BaseRepository<
     return Number(total);
   }
 
+  async countPhysicallyLocatedRouters(warehouseId: string): Promise<number> {
+    const [{ total }] = await this.db
+      .select({ total: count() })
+      .from(schema.routers)
+      .where(eq(schema.routers.warehouseId, warehouseId));
+
+    return Number(total);
+  }
+
   async canDeleteWarehouse(warehouseId: string): Promise<{ canDelete: boolean; reason?: string }> {
     const activeInventory = await this.countActiveInventory(warehouseId);
     if (activeInventory > 0) {
@@ -173,6 +182,24 @@ export class WarehousesRepository extends BaseRepository<
       };
     }
 
+    const physicallyLocatedRouters = await this.countPhysicallyLocatedRouters(warehouseId);
+    if (physicallyLocatedRouters > 0) {
+      return {
+        canDelete: false,
+        reason: `Cannot deactivate warehouse with ${physicallyLocatedRouters} physically located router(s). Relocate routers first.`,
+      };
+    }
+
     return { canDelete: true };
+  }
+
+  async softDeactivate(id: string): Promise<Warehouse | undefined> {
+    const [updated] = await this.db
+      .update(schema.warehouses)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(schema.warehouses.id, id))
+      .returning();
+
+    return updated ? toWarehouse(updated) : undefined;
   }
 }
