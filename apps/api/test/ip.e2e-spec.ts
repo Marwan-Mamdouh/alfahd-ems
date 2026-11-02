@@ -534,7 +534,6 @@ invalid-ip,Broken row`;
     });
 
     it('processes at least 1,000 rows asynchronously with deduplication and retry safety', async () => {
-      const ipService = app.get(RepositoryService);
       // Generate 1,005 rows
       const rows = ['address,notes'];
       for (let i = 1; i <= 1000; i++) {
@@ -548,7 +547,6 @@ invalid-ip,Broken row`;
       rows.push('192.168.10.10,Already in DB');
 
       const csvContent = rows.join('\n');
-      const ipServiceInstance = app.get(RepositoryService);
 
       // Verify directly on the service's processImportJob
       const ipServiceObj = (app as any).get(

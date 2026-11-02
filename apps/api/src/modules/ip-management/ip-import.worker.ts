@@ -43,4 +43,3 @@ export class IpImportWorker extends WorkerHost implements OnApplicationShutdown 
     return result;
   }
 }
-

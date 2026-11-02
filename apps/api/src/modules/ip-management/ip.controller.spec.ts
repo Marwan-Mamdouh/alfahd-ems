@@ -4,7 +4,7 @@ import { IpController } from './ip.controller.js';
 import { IpService } from './ip.service.js';
 import type { JwtUser } from '../../auth/strategies/jwt.strategy.js';
 import type { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
-import type { IpAddressDto, IpHistoryDto, IpImportResultDto } from '@alfahd/types';
+import type { IpAddressDto, IpHistoryDto } from '@alfahd/types';
 
 describe('IpController', () => {
   let controller: IpController;
@@ -201,10 +201,7 @@ describe('IpController', () => {
 
       const result = await controller.importCsv(mockFile, mockUser);
 
-      expect(mockIpService.enqueueImportCsv).toHaveBeenCalledWith(
-        mockFile.buffer,
-        mockUser.userId,
-      );
+      expect(mockIpService.enqueueImportCsv).toHaveBeenCalledWith(mockFile.buffer, mockUser.userId);
       expect(result).toEqual({ jobId: 'mock-import-job-id' });
     });
 

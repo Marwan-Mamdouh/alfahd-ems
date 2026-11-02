@@ -12,7 +12,8 @@ CREATE TABLE "ip_addresses" (
 	"notes" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "ip_addresses_address_unique" UNIQUE("address")
+	CONSTRAINT "ip_addresses_address_unique" UNIQUE("address"),
+	CONSTRAINT "ip_addresses_ipv4_host_check" CHECK (family("ip_addresses"."address") = 4 AND masklen("ip_addresses"."address") = 32)
 );
 --> statement-breakpoint
 CREATE TABLE "ip_history" (

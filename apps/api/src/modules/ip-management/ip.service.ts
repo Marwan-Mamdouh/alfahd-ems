@@ -274,7 +274,10 @@ export class IpService {
       throw new BadRequestException('CSV file exceeds maximum size limit of 5MB');
     }
 
-    const text = fileBuffer.toString('utf-8').replace(/^\uFEFF/, '').trim();
+    const text = fileBuffer
+      .toString('utf-8')
+      .replace(/^\uFEFF/, '')
+      .trim();
     const lines = text
       .split(/\r?\n/)
       .map((line) => line.trim())
