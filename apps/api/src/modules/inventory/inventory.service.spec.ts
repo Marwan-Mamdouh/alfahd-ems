@@ -78,10 +78,15 @@ describe('InventoryService', () => {
     findById: vi.fn(),
   };
 
+  const mockRoutersRepo = {
+    countByProductId: vi.fn().mockResolvedValue(0),
+  };
+
   const mockRepositoryService = {
     inventory: mockInventoryRepo,
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,
+    routers: mockRoutersRepo,
   };
 
   beforeEach(async () => {
@@ -362,6 +367,98 @@ describe('InventoryService', () => {
       mockInventoryRepo.findMovementById.mockResolvedValue(null);
 
       await expect(service.findMovementById('non-existent-id')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('Protection of serialized SKUs against quantity-only writes', () => {
+    const mockRouterProduct = {
+      id: 'router-prod-id',
+      name: 'Wi-Fi 6 Router',
+      sku: 'RTR-WIFI6-01',
+      category: 'Routers',
+      lowStockThreshold: 5,
+    };
+
+    beforeEach(() => {
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockRouterProduct);
+      mockRoutersRepo.countByProductId.mockResolvedValue(0);
+    });
+
+    it('rejects receiveInbound on serialized SKU with 400 Bad Request', async () => {
+      await expect(
+        service.receiveInbound({
+          warehouseId: mockWarehouseId,
+          productId: 'router-prod-id',
+          quantity: 10,
+          supplierName: 'Huawei',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects issueOutbound on serialized SKU with 400 Bad Request', async () => {
+      await expect(
+        service.issueOutbound({
+          warehouseId: mockWarehouseId,
+          productId: 'router-prod-id',
+          quantity: 2,
+          technicianId: mockTechId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects receiveReturn on serialized SKU with 400 Bad Request', async () => {
+      await expect(
+        service.receiveReturn({
+          warehouseId: mockWarehouseId,
+          productId: 'router-prod-id',
+          quantity: 1,
+          technicianId: mockTechId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects transferStock on serialized SKU with 400 Bad Request', async () => {
+      mockWarehousesRepo.findById.mockResolvedValue(mockDestWarehouse);
+      await expect(
+        service.transferStock({
+          fromWarehouseId: mockWarehouseId,
+          toWarehouseId: mockDestWarehouseId,
+          productId: 'router-prod-id',
+          quantity: 3,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects adjustStock on serialized SKU with 400 Bad Request (preventing zero-stock bypass)', async () => {
+      await expect(
+        service.adjustStock({
+          warehouseId: mockWarehouseId,
+          productId: 'router-prod-id',
+          newQuantity: 0,
+          notes: 'Attempted generic zero stock adjustment',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('identifies serialized SKU by registered router count when category is generic', async () => {
+      const genericProduct = {
+        id: 'generic-hardware-prod',
+        name: 'Enterprise Box',
+        sku: 'BOX-ENT-99',
+        category: 'Hardware',
+      };
+      mockProductsRepo.findById.mockResolvedValue(genericProduct);
+      mockRoutersRepo.countByProductId.mockResolvedValue(5);
+
+      await expect(
+        service.adjustStock({
+          warehouseId: mockWarehouseId,
+          productId: genericProduct.id,
+          newQuantity: 0,
+          notes: 'Trying to zero out box with 5 registered routers',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });
