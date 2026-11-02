@@ -281,6 +281,27 @@ export const routerConditionHistory = pgTable(
   (table) => [index('idx_router_condition_history_router').on(table.routerId)],
 );
 
+export const routerStatusHistory = pgTable(
+  'router_status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    routerId: uuid('router_id')
+      .references(() => routers.id)
+      .notNull(),
+    fromStatus: routerStatusEnum('from_status').notNull(),
+    toStatus: routerStatusEnum('to_status').notNull(),
+    reason: text('reason').notNull(),
+    changedBy: uuid('changed_by')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_router_status_history_router').on(table.routerId),
+    index('idx_router_status_history_changed_by').on(table.changedBy),
+  ],
+);
+
 // ─── Supply Chain: IP Address Management (M2b) ────────────────────────────────
 
 export const ipAddresses = pgTable(
@@ -336,6 +357,9 @@ export type NewRouterAssignment = typeof routerAssignments.$inferInsert;
 
 export type RouterConditionHistory = typeof routerConditionHistory.$inferSelect;
 export type NewRouterConditionHistory = typeof routerConditionHistory.$inferInsert;
+
+export type RouterStatusHistory = typeof routerStatusHistory.$inferSelect;
+export type NewRouterStatusHistory = typeof routerStatusHistory.$inferInsert;
 
 export type IpAddress = typeof ipAddresses.$inferSelect;
 export type NewIpAddress = typeof ipAddresses.$inferInsert;

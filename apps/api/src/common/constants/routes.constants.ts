@@ -28,6 +28,7 @@ export const routes = {
     condition: ':id/condition',
     assignments: ':id/assignments',
     conditionHistory: ':id/condition-history',
+    statusHistory: ':id/status-history',
   },
   ip: {
     root: 'ip-addresses',

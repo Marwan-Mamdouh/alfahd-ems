@@ -18,6 +18,7 @@ import type {
   Router,
   RouterAssignment,
   RouterConditionHistory,
+  RouterStatusHistory,
   WarehouseInventory,
   NewStockMovement,
 } from '../src/database/schema/index.js';
@@ -42,6 +43,7 @@ describe('Routers (e2e)', () => {
   let routerStore: Router[] = [];
   let assignmentStore: RouterAssignment[] = [];
   const conditionHistoryStore: RouterConditionHistory[] = [];
+  const statusHistoryStore: RouterStatusHistory[] = [];
   let stockStore: WarehouseInventory[] = [];
 
   const mockReportsQueue = {
@@ -162,6 +164,22 @@ describe('Routers (e2e)', () => {
       },
       findConditionHistory: async (routerId: string) => {
         return conditionHistoryStore.filter((c) => c.routerId === routerId);
+      },
+      createStatusHistory: async (data: Partial<RouterStatusHistory>) => {
+        const created: RouterStatusHistory = {
+          id: 'status-' + Math.random().toString(36).substring(2, 9),
+          routerId: data.routerId!,
+          fromStatus: data.fromStatus!,
+          toStatus: data.toStatus!,
+          reason: data.reason ?? '',
+          changedBy: data.changedBy!,
+          createdAt: new Date(),
+        };
+        statusHistoryStore.push(created);
+        return created;
+      },
+      findStatusHistory: async (routerId: string) => {
+        return statusHistoryStore.filter((s) => s.routerId === routerId);
       },
       countRegisteredUsableInWarehouse: async (warehouseId: string, productId: string) => {
         return routerStore.filter(
@@ -650,6 +668,48 @@ describe('Routers (e2e)', () => {
   });
 
   describe('Lifecycle State Machine & Whitelist Transitions', () => {
+    it('returns 400 Bad Request when transition reason is missing, empty, or whitespace-only', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      // Missing reason
+      const resMissing = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_ASSIGNED_ID}/transition`)
+        .set(auth)
+        .send({
+          status: 'RETURNED',
+          targetWarehouseId: WAREHOUSE_ACTIVE_ID,
+        })
+        .expect(400);
+
+      expect(resMissing.body.message).toBeDefined();
+
+      // Empty string reason
+      const resEmpty = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_ASSIGNED_ID}/transition`)
+        .set(auth)
+        .send({
+          status: 'RETURNED',
+          targetWarehouseId: WAREHOUSE_ACTIVE_ID,
+          reason: '',
+        })
+        .expect(400);
+
+      expect(resEmpty.body.message).toBeDefined();
+
+      // Whitespace-only reason
+      const resWhitespace = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_ASSIGNED_ID}/transition`)
+        .set(auth)
+        .send({
+          status: 'RETURNED',
+          targetWarehouseId: WAREHOUSE_ACTIVE_ID,
+          reason: '   ',
+        })
+        .expect(400);
+
+      expect(resWhitespace.body.message).toBeDefined();
+    });
+
     it('transitions an ASSIGNED_TO_TECHNICIAN router to RETURNED along the approved whitelist', async () => {
       const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
       const dto = makeTransitionRouterDto({
@@ -672,6 +732,7 @@ describe('Routers (e2e)', () => {
       const dto = makeTransitionRouterDto({
         status: 'INSTALLED_AT_CUSTOMER',
         notes: 'Installed at customer villa 42',
+        reason: 'Customer installation verified',
       });
 
       const res = await request(app.getHttpServer())
@@ -692,6 +753,7 @@ describe('Routers (e2e)', () => {
         status: 'RETURNED',
         targetWarehouseId: WAREHOUSE_ACTIVE_ID,
         notes: 'Uninstalled from customer and returned to hub',
+        reason: 'Customer uninstallation completed',
       });
 
       const res = await request(app.getHttpServer())
@@ -704,7 +766,25 @@ describe('Routers (e2e)', () => {
       expect(res.body.data.warehouseId).toBe(WAREHOUSE_ACTIVE_ID);
     });
 
-    it('returns 400 Bad Request when attempting an illegal transition (RETURNED -> INSTALLED_AT_CUSTOMER)', async () => {
+    it('persists lifecycle transition audit history and retrieves it via GET /routers/:id/status-history', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .get(`/routers/${ROUTER_FOR_INSTALL_ID}/status-history`)
+        .set(auth)
+        .expect(200);
+
+      const history = envelopeData<any[]>(res);
+      expect(Array.isArray(history)).toBe(true);
+      expect(history.length).toBeGreaterThanOrEqual(1);
+      const latest = history[history.length - 1];
+      expect(latest.routerId).toBe(ROUTER_FOR_INSTALL_ID);
+      expect(latest.toStatus).toBe('RETURNED');
+      expect(latest.reason).toBe('Customer uninstallation completed');
+      expect(latest.changedBy).toBeDefined();
+      expect(latest.createdAt).toBeDefined();
+    });
+
+    it('returns 400 Bad Request when attempting an illegal transition even with a valid reason', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
       const dto = makeTransitionRouterDto({
         status: 'INSTALLED_AT_CUSTOMER',

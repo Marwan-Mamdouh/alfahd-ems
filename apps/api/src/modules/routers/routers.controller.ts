@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -25,6 +26,7 @@ import {
   Role,
   type RouterDto,
   type RouterAssignmentDto,
+  type RouterStatusHistoryDto,
   type RouterReportQueryDto,
 } from '@alfahd/types';
 import { routes } from '../../common/constants/routes.constants.js';
@@ -108,6 +110,9 @@ export class RoutersController {
   @ApiOperation({ summary: 'Transition router lifecycle status along the approved whitelist' })
   @ApiParam({ name: 'id', description: 'Router UUID' })
   @ApiOkResponse({ description: 'Router lifecycle status transitioned successfully' })
+  @ApiBadRequestResponse({
+    description: 'Invalid status transition, missing/empty reason, or invalid target warehouse',
+  })
   transition(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: TransitionRouterDto,
@@ -147,5 +152,14 @@ export class RoutersController {
   @ApiOkResponse({ description: 'List of historical physical condition changes' })
   getConditionHistory(@Param('id', ParseUUIDPipe) id: string) {
     return this.routersService.getConditionHistory(id);
+  }
+
+  @Get(routes.routers.statusHistory)
+  @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
+  @ApiOperation({ summary: 'Retrieve lifecycle status transition audit trail of a router' })
+  @ApiParam({ name: 'id', description: 'Router UUID' })
+  @ApiOkResponse({ description: 'List of historical lifecycle status transitions' })
+  getStatusHistory(@Param('id', ParseUUIDPipe) id: string): Promise<RouterStatusHistoryDto[]> {
+    return this.routersService.getStatusHistory(id);
   }
 }

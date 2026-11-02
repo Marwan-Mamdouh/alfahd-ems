@@ -37,6 +37,11 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   * Implemented without premature customer tables or foreign keys (customer details held via assignment notes/metadata).
   * Validates preconditions: requires the router to be `SERVICEABLE` and to possess verified active technician custody. Rejects warehouse targets for customer installations.
   * Returning an installed router (`INSTALLED_AT_CUSTOMER` $\to$ `RETURNED`) cleanly closes customer custody and requires a verified active target warehouse (`targetWarehouseId`).
+* **Required & Audited Manual Lifecycle Transition Reasons (Issue #59 - T09):**
+  * Manual transitions along the approved whitelist strictly require a non-empty, non-whitespace operational reason (`reason: string`). Missing or blank reasons are rejected with `400 Bad Request`.
+  * Forbidden lifecycle transitions remain `400 Bad Request` even when a valid reason is supplied (reasons never bypass the whitelist).
+  * Successful transitions atomically persist the actor (`changedBy`), timestamp (`createdAt`), prior and target lifecycle statuses (`fromStatus`, `toStatus`), and reason in `router_status_history`.
+  * Dedicated endpoint `GET /routers/:id/status-history` retrieves chronological lifecycle audit trails.
 * **Async Inventory Reports:** Administrators can trigger asynchronous Excel workbook exports of router asset inventories, processed through BullMQ on the `reports` queue with ExcelJS.
 
 ---
@@ -128,6 +133,7 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 * `releaseActiveAssignment(routerId, releasedAt, tx?)`: Sets `releasedAt` on the current active assignment.
 * `findAssignmentsByRouter(routerId)`: Full historical custody trail.
 * `createConditionHistory(data, tx?)` / `findConditionHistory(routerId)`: Audit log of hardware condition transitions.
+* `createStatusHistory(data, tx?)` / `findStatusHistory(routerId)`: Audit log of lifecycle status transitions.
 * `getWarehouseRouterCounts(warehouseId)`: Status/condition counts for warehouse deactivation guards and reports.
 
 ---
@@ -152,6 +158,7 @@ Orchestrates business logic and transactional integrity:
   * Sets status to `ASSIGNED_TO_TECHNICIAN`.
   * Decrements warehouse stock (-1 `OUTBOUND_TECHNICIAN`) via atomic SQL delta.
 * **`transition(id, dto: TransitionRouterDto, userId, externalTx?)`**:
+  * Mandatory Operational Reason: Strictly requires a non-empty, non-whitespace operational reason (`reason: string`). Missing or blank reasons are rejected with `400 Bad Request`.
   * Serializes requests via `findByIdForUpdate` and validates transition against `ALLOWED_ROUTER_TRANSITIONS` whitelist:
     * `AVAILABLE` $\rightarrow$ `ASSIGNED_TO_TECHNICIAN` (via assign endpoint).
     * `ASSIGNED_TO_TECHNICIAN` $\rightarrow$ `INSTALLED_AT_CUSTOMER`, `RETURNED`, `DAMAGED`, `LOST`.
@@ -159,6 +166,8 @@ Orchestrates business logic and transactional integrity:
     * `DAMAGED` $\rightarrow$ `UNDER_REPAIR`, `DECOMMISSIONED`.
     * `UNDER_REPAIR` $\rightarrow$ `AVAILABLE`, `DECOMMISSIONED`.
     * Terminal states (`LOST`, `DECOMMISSIONED`): no transitions permitted.
+  * Disallowed transitions return `400 Bad Request` regardless of supplied reason.
+  * Atomically records transition audit history (actor, timestamp, old/new status, reason) in `router_status_history` in the same transaction as state, custody, and stock updates.
 * **`updateCondition(id, dto: UpdateRouterConditionDto, userId, externalTx?)`**:
   * Serializes requests via `findByIdForUpdate`. Rejects modifications to terminal states (`LOST`, `DECOMMISSIONED`).
   * **Explicit Location Resolution (Issue #53):** External placement (`externalLocation`) explicitly clears physical warehouse placement (`warehouseId = null`). Explicit `warehouseId` clears `externalLocation` and validates active warehouse status.
@@ -178,7 +187,7 @@ Orchestrates business logic and transactional integrity:
 
 All routes dynamically consume the centralized route constants manifest (`src/common/constants/routes.constants.ts`):
 * Controller: `@Controller(routes.routers.root)`
-* Routes: `@Post(routes.routers.export)`, `@Get(routes.routers.id)`, `@Post(routes.routers.assign)`, `@Patch(routes.routers.transition)`, `@Patch(routes.routers.condition)`, `@Get(routes.routers.assignments)`, `@Get(routes.routers.conditionHistory)`
+* Routes: `@Post(routes.routers.export)`, `@Get(routes.routers.id)`, `@Post(routes.routers.assign)`, `@Patch(routes.routers.transition)`, `@Patch(routes.routers.condition)`, `@Get(routes.routers.assignments)`, `@Get(routes.routers.conditionHistory)`, `@Get(routes.routers.statusHistory)`
 
 Base Route: `/routers`  
 Guards: `JwtAuthGuard`, `RolesGuard`
@@ -193,6 +202,7 @@ Guards: `JwtAuthGuard`, `RolesGuard`
 | `PATCH` | `/routers/:id/condition` | Update physical condition & audit | `ADMIN`, `WAREHOUSE_STAFF` | `UpdateRouterConditionDto` | `200 OK` (`RouterDto`) | `400`, `404` |
 | `GET` | `/routers/:id/assignments` | Full custody assignment history | `ADMIN`, `WAREHOUSE_STAFF` | None | `200 OK` (`RouterAssignmentDto[]`) | `400`, `404` |
 | `GET` | `/routers/:id/condition-history` | Condition change audit history | `ADMIN`, `WAREHOUSE_STAFF` | None | `200 OK` (`RouterConditionHistoryDto[]`) | `400`, `404` |
+| `GET` | `/routers/:id/status-history` | Lifecycle transition audit history | `ADMIN`, `WAREHOUSE_STAFF` | None | `200 OK` (`RouterStatusHistoryDto[]`) | `400`, `404` |
 | `POST` | `/routers/export` | Enqueue async Excel report job | `ADMIN` | `RouterReportQueryDto` | `200 OK` (`{ jobId }`) | `400`, `403` |
 
 ---

@@ -52,6 +52,16 @@ CREATE TABLE "router_condition_history" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "router_status_history" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"router_id" uuid NOT NULL,
+	"from_status" "router_status" NOT NULL,
+	"to_status" "router_status" NOT NULL,
+	"reason" text NOT NULL,
+	"changed_by" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "routers" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"serial_number" varchar(100) NOT NULL,
@@ -76,6 +86,8 @@ ALTER TABLE "router_condition_history" ADD CONSTRAINT "router_condition_history_
 ALTER TABLE "router_condition_history" ADD CONSTRAINT "router_condition_history_from_warehouse_id_warehouses_id_fk" FOREIGN KEY ("from_warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "router_condition_history" ADD CONSTRAINT "router_condition_history_to_warehouse_id_warehouses_id_fk" FOREIGN KEY ("to_warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "router_condition_history" ADD CONSTRAINT "router_condition_history_changed_by_users_id_fk" FOREIGN KEY ("changed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "router_status_history" ADD CONSTRAINT "router_status_history_router_id_routers_id_fk" FOREIGN KEY ("router_id") REFERENCES "public"."routers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "router_status_history" ADD CONSTRAINT "router_status_history_changed_by_users_id_fk" FOREIGN KEY ("changed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "routers" ADD CONSTRAINT "routers_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "routers" ADD CONSTRAINT "routers_warehouse_id_warehouses_id_fk" FOREIGN KEY ("warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_ip_addresses_status" ON "ip_addresses" USING btree ("status");--> statement-breakpoint
@@ -90,4 +102,6 @@ CREATE INDEX "idx_router_condition_history_router" ON "router_condition_history"
 CREATE INDEX "idx_routers_warehouse" ON "routers" USING btree ("warehouse_id");--> statement-breakpoint
 CREATE INDEX "idx_routers_product" ON "routers" USING btree ("product_id");--> statement-breakpoint
 CREATE INDEX "idx_routers_status" ON "routers" USING btree ("status");--> statement-breakpoint
-CREATE INDEX "idx_routers_physical_condition" ON "routers" USING btree ("physical_condition");
+CREATE INDEX "idx_routers_physical_condition" ON "routers" USING btree ("physical_condition");--> statement-breakpoint
+CREATE INDEX "idx_router_status_history_router" ON "router_status_history" USING btree ("router_id");--> statement-breakpoint
+CREATE INDEX "idx_router_status_history_changed_by" ON "router_status_history" USING btree ("changed_by");

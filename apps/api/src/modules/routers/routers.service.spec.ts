@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { RoutersService } from './routers.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
@@ -58,6 +58,8 @@ describe('RoutersService', () => {
     findAssignmentsByRouter: vi.fn(),
     createConditionHistory: vi.fn(),
     findConditionHistory: vi.fn(),
+    createStatusHistory: vi.fn(),
+    findStatusHistory: vi.fn(),
     findManyWithPagination: vi.fn(),
     getWarehouseRouterCounts: vi.fn(),
     countRegisteredUsableInWarehouse: vi.fn(),
@@ -346,19 +348,65 @@ describe('RoutersService', () => {
   });
 
   describe('transition', () => {
+    it('rejects manual transition if reason is missing, empty, or whitespace-only', async () => {
+      const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
+
+      // Missing reason
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id } as any,
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      // Empty string reason
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id, reason: '' },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      // Whitespace-only reason
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id, reason: '   ' },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockRoutersRepo.updateRouter).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createStatusHistory).not.toHaveBeenCalled();
+    });
+
     it('enforces whitelist and transitions ASSIGNED_TO_TECHNICIAN to RETURNED', async () => {
       const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.updateRouter.mockResolvedValue({ ...assignedRouter, status: 'RETURNED' });
+      mockRoutersRepo.createStatusHistory.mockResolvedValue({});
 
       const result = await service.transition(
         mockRouter.id,
-        { status: 'RETURNED', targetWarehouseId: mockWarehouse.id },
+        { status: 'RETURNED', targetWarehouseId: mockWarehouse.id, reason: 'Returned by tech' },
         'admin-id',
       );
 
       expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
+      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledWith(
+        {
+          routerId: mockRouter.id,
+          fromStatus: 'ASSIGNED_TO_TECHNICIAN',
+          toStatus: 'RETURNED',
+          reason: 'Returned by tech',
+          changedBy: 'admin-id',
+        },
+        expect.anything(),
+      );
       expect(result.status).toBe('RETURNED');
     });
 
@@ -395,10 +443,15 @@ describe('RoutersService', () => {
         status: 'INSTALLED_AT_CUSTOMER',
         warehouseId: null,
       });
+      mockRoutersRepo.createStatusHistory.mockResolvedValue({});
 
       const result = await service.transition(
         mockRouter.id,
-        { status: 'INSTALLED_AT_CUSTOMER', notes: 'Installed at customer villa 42' },
+        {
+          status: 'INSTALLED_AT_CUSTOMER',
+          notes: 'Installed at customer villa 42',
+          reason: 'Customer install completed',
+        },
         'admin-id',
       );
 
@@ -415,6 +468,16 @@ describe('RoutersService', () => {
           technicianId: null,
           assignedBy: 'admin-id',
           notes: 'Installed at customer villa 42',
+        },
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledWith(
+        {
+          routerId: mockRouter.id,
+          fromStatus: 'ASSIGNED_TO_TECHNICIAN',
+          toStatus: 'INSTALLED_AT_CUSTOMER',
+          reason: 'Customer install completed',
+          changedBy: 'admin-id',
         },
         expect.anything(),
       );
@@ -440,7 +503,11 @@ describe('RoutersService', () => {
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(damagedTechRouter);
 
       await expect(
-        service.transition(mockRouter.id, { status: 'INSTALLED_AT_CUSTOMER' }, 'admin-id'),
+        service.transition(
+          mockRouter.id,
+          { status: 'INSTALLED_AT_CUSTOMER', reason: 'Attempted damaged install' },
+          'admin-id',
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
     });
@@ -456,7 +523,11 @@ describe('RoutersService', () => {
       await expect(
         service.transition(
           mockRouter.id,
-          { status: 'INSTALLED_AT_CUSTOMER', targetWarehouseId: mockWarehouse.id },
+          {
+            status: 'INSTALLED_AT_CUSTOMER',
+            targetWarehouseId: mockWarehouse.id,
+            reason: 'Install attempt',
+          },
           'admin-id',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -473,7 +544,11 @@ describe('RoutersService', () => {
       mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
 
       await expect(
-        service.transition(mockRouter.id, { status: 'INSTALLED_AT_CUSTOMER' }, 'admin-id'),
+        service.transition(
+          mockRouter.id,
+          { status: 'INSTALLED_AT_CUSTOMER', reason: 'Customer install' },
+          'admin-id',
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
     });
@@ -499,14 +574,29 @@ describe('RoutersService', () => {
         warehouseId: mockWarehouse.id,
       });
       mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
+      mockRoutersRepo.createStatusHistory.mockResolvedValue({});
 
       const result = await service.transition(
         mockRouter.id,
-        { status: 'RETURNED', targetWarehouseId: mockWarehouse.id },
+        {
+          status: 'RETURNED',
+          targetWarehouseId: mockWarehouse.id,
+          reason: 'Customer cancellation return',
+        },
         'admin-id',
       );
 
       expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
+      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledWith(
+        {
+          routerId: mockRouter.id,
+          fromStatus: 'INSTALLED_AT_CUSTOMER',
+          toStatus: 'RETURNED',
+          reason: 'Customer cancellation return',
+          changedBy: 'admin-id',
+        },
+        expect.anything(),
+      );
       expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
         mockRouter.id,
         expect.objectContaining({
@@ -527,7 +617,11 @@ describe('RoutersService', () => {
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(installedRouter);
 
       await expect(
-        service.transition(mockRouter.id, { status: 'RETURNED' }, 'admin-id'),
+        service.transition(
+          mockRouter.id,
+          { status: 'RETURNED', reason: 'Return from customer' },
+          'admin-id',
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(mockRoutersRepo.releaseActiveAssignment).not.toHaveBeenCalled();
     });
@@ -540,7 +634,11 @@ describe('RoutersService', () => {
       await expect(
         service.transition(
           mockRouter.id,
-          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id },
+          {
+            status: 'RETURNED',
+            targetWarehouseId: mockWarehouse.id,
+            reason: 'Return to warehouse',
+          },
           'admin-id',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -554,18 +652,27 @@ describe('RoutersService', () => {
       await expect(
         service.transition(
           mockRouter.id,
-          { status: 'AVAILABLE', targetWarehouseId: mockWarehouse.id },
+          {
+            status: 'AVAILABLE',
+            targetWarehouseId: mockWarehouse.id,
+            reason: 'Inspected and available',
+          },
           'admin-id',
         ),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('rejects illegal transitions (AVAILABLE -> DAMAGED via transition) with 400 Bad Request', async () => {
+    it('rejects illegal transitions (AVAILABLE -> DAMAGED via transition) with 400 Bad Request even with a reason', async () => {
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
 
       await expect(
-        service.transition(mockRouter.id, { status: 'DAMAGED' }, 'admin-id'),
+        service.transition(
+          mockRouter.id,
+          { status: 'DAMAGED', reason: 'Field failure' },
+          'admin-id',
+        ),
       ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.createStatusHistory).not.toHaveBeenCalled();
     });
 
     it('rejects any transition from terminal status (LOST / DECOMMISSIONED)', async () => {
@@ -575,8 +682,13 @@ describe('RoutersService', () => {
       });
 
       await expect(
-        service.transition(mockRouter.id, { status: 'AVAILABLE' }, 'admin-id'),
+        service.transition(
+          mockRouter.id,
+          { status: 'AVAILABLE', reason: 'Revival attempt' },
+          'admin-id',
+        ),
       ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.createStatusHistory).not.toHaveBeenCalled();
     });
   });
 
@@ -986,6 +1098,47 @@ describe('RoutersService', () => {
         expect.objectContaining({ jobId: expect.any(String) }),
       );
       expect(result.jobId).toBe('job-router-123');
+    });
+  });
+
+  describe('getStatusHistory', () => {
+    it('returns formatted lifecycle status audit history for a valid router', async () => {
+      mockRoutersRepo.findById.mockResolvedValue(mockRouter);
+      const mockHistory = [
+        {
+          id: 'hist-1',
+          routerId: mockRouter.id,
+          fromStatus: 'AVAILABLE' as const,
+          toStatus: 'ASSIGNED_TO_TECHNICIAN' as const,
+          reason: 'Initial assignment to technician',
+          changedBy: 'user-1',
+          createdAt: new Date('2026-11-01T12:00:00.000Z'),
+        },
+      ];
+      mockRoutersRepo.findStatusHistory.mockResolvedValue(mockHistory);
+
+      const result = await service.getStatusHistory(mockRouter.id);
+
+      expect(mockRoutersRepo.findById).toHaveBeenCalledWith(mockRouter.id);
+      expect(mockRoutersRepo.findStatusHistory).toHaveBeenCalledWith(mockRouter.id);
+      expect(result).toEqual([
+        {
+          id: 'hist-1',
+          routerId: mockRouter.id,
+          fromStatus: 'AVAILABLE',
+          toStatus: 'ASSIGNED_TO_TECHNICIAN',
+          reason: 'Initial assignment to technician',
+          changedBy: 'user-1',
+          createdAt: '2026-11-01T12:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('throws NotFoundException when router does not exist', async () => {
+      mockRoutersRepo.findById.mockResolvedValue(null);
+
+      await expect(service.getStatusHistory('non-existent-id')).rejects.toThrow(NotFoundException);
+      expect(mockRoutersRepo.findStatusHistory).not.toHaveBeenCalled();
     });
   });
 });

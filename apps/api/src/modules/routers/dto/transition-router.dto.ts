@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
 import {
   ROUTER_STATUSES,
   type RouterStatus,
@@ -15,12 +16,14 @@ export class TransitionRouterDto implements ITransitionRouterDto {
   @IsNotEmpty()
   status!: RouterStatus;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: 'Mandatory operational reason for manual overrides/transitions',
+    example: 'Hardware damaged during deployment inspection',
   })
-  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  reason?: string;
+  @IsNotEmpty({ message: 'Reason is required and cannot be empty' })
+  reason!: string;
 
   @ApiPropertyOptional({ description: 'Target warehouse ID when returning or moving to warehouse' })
   @IsOptional()

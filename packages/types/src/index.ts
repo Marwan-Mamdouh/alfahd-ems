@@ -360,6 +360,16 @@ export interface RouterConditionHistoryDto {
   createdAt: string;
 }
 
+export interface RouterStatusHistoryDto {
+  id: string;
+  routerId: string;
+  fromStatus: RouterStatus;
+  toStatus: RouterStatus;
+  reason: string;
+  changedBy: string;
+  createdAt: string;
+}
+
 export interface CreateRouterDto {
   serialNumber: string;
   productId: string;
@@ -383,7 +393,7 @@ export interface UpdateRouterConditionDto {
 
 export interface TransitionRouterDto {
   status: RouterStatus;
-  reason?: string;
+  reason: string;
   targetWarehouseId?: string;
   notes?: string;
 }
