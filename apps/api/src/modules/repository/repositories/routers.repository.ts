@@ -290,4 +290,25 @@ export class RoutersRepository extends BaseRepository<
 
     return { usable, damaged, underRepair, total: rows.length };
   }
+
+  async countRegisteredUsableInWarehouse(
+    warehouseId: string,
+    productId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
+      .select({ total: count() })
+      .from(schema.routers)
+      .where(
+        and(
+          eq(schema.routers.warehouseId, warehouseId),
+          eq(schema.routers.productId, productId),
+          eq(schema.routers.status, 'AVAILABLE'),
+          eq(schema.routers.physicalCondition, 'SERVICEABLE'),
+        ),
+      );
+
+    return Number(total);
+  }
 }

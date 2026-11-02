@@ -60,6 +60,7 @@ describe('RoutersService', () => {
     findConditionHistory: vi.fn(),
     findManyWithPagination: vi.fn(),
     getWarehouseRouterCounts: vi.fn(),
+    countRegisteredUsableInWarehouse: vi.fn(),
   };
 
   const mockWarehousesRepo = {
@@ -72,6 +73,7 @@ describe('RoutersService', () => {
 
   const mockInventoryRepo = {
     getStock: vi.fn(),
+    getStockForUpdate: vi.fn(),
     recordMovementInTransaction: vi.fn(),
     recordMovementWithDelta: vi.fn(),
   };
@@ -113,6 +115,8 @@ describe('RoutersService', () => {
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 5 });
+      mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(2);
       mockRoutersRepo.createRouter.mockResolvedValue(mockRouter);
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
 
@@ -136,6 +140,86 @@ describe('RoutersService', () => {
       );
       expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
       expect(result.serialNumber).toBe('SN-RTR-001');
+    });
+
+    it('rejects existing stock registration with ConflictException if warehouse has zero opening stock', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 0 });
+
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-ZERO-STOCK',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: false,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects existing stock registration with ConflictException if registration capacity is exhausted', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 5 });
+      mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(5); // all 5 units already registered
+
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-CAPACITY-EXCEEDED',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: false,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('reconciles a damaged opening unit by recording ADJUSTMENT movement (-1) and condition history', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 5 });
+      mockInventoryRepo.getStock.mockResolvedValue({ quantity: 5 });
+      mockRoutersRepo.createRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'DAMAGED',
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+
+      await service.create(
+        {
+          serialNumber: 'SN-DAMAGED-OPENING',
+          productId: mockProduct.id,
+          warehouseId: mockWarehouse.id,
+          isNewReceipt: false,
+          physicalCondition: 'DAMAGED',
+          notes: 'Box opened and found with broken antenna',
+        },
+        'admin-id',
+      );
+
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          movementType: 'ADJUSTMENT',
+          quantity: 1,
+        }),
+        -1,
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fromCondition: 'SERVICEABLE',
+          toCondition: 'DAMAGED',
+        }),
+        expect.anything(),
+      );
     });
 
     it('receives a new router into warehouse and atomically increments inventory (isNewReceipt=true)', async () => {

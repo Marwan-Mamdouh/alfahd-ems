@@ -33,6 +33,9 @@ describe('Routers (e2e)', () => {
   const ROUTER_1_ID = '55555555-5555-4555-8555-555555555555';
   const ROUTER_ASSIGNED_ID = '66666666-6666-4666-8666-666666666666';
   const NON_EXISTENT_ID = '99999999-9999-4999-8999-999999999999';
+  const ZERO_STOCK_PRODUCT_ID = '00000000-0000-4000-8000-000000000099';
+  const LIMITED_PRODUCT_ID = '11112222-3333-4444-8555-666677778888';
+  const RECONCILE_PRODUCT_ID = '77778888-9999-4444-8888-111122223333';
 
   let routerStore: Router[] = [];
   let assignmentStore: RouterAssignment[] = [];
@@ -158,6 +161,15 @@ describe('Routers (e2e)', () => {
       findConditionHistory: async (routerId: string) => {
         return conditionHistoryStore.filter((c) => c.routerId === routerId);
       },
+      countRegisteredUsableInWarehouse: async (warehouseId: string, productId: string) => {
+        return routerStore.filter(
+          (r) =>
+            r.warehouseId === warehouseId &&
+            r.productId === productId &&
+            r.status === 'AVAILABLE' &&
+            r.physicalCondition === 'SERVICEABLE',
+        ).length;
+      },
     },
     warehouses: {
       findById: async (id: string) => {
@@ -172,7 +184,12 @@ describe('Routers (e2e)', () => {
     },
     products: {
       findById: async (id: string) => {
-        if (id === PRODUCT_ROUTER_ID) {
+        if (
+          id === PRODUCT_ROUTER_ID ||
+          id === ZERO_STOCK_PRODUCT_ID ||
+          id === LIMITED_PRODUCT_ID ||
+          id === RECONCILE_PRODUCT_ID
+        ) {
           return { id, name: 'Standard Router', sku: 'RTR-STD-01', isActive: true };
         }
         return undefined;
@@ -181,6 +198,17 @@ describe('Routers (e2e)', () => {
     },
     inventory: {
       getStock: async (warehouseId: string, productId: string) => {
+        return (
+          stockStore.find((s) => s.warehouseId === warehouseId && s.productId === productId) ?? {
+            id: 'inv-def',
+            warehouseId,
+            productId,
+            quantity: 10,
+            updatedAt: new Date(),
+          }
+        );
+      },
+      getStockForUpdate: async (warehouseId: string, productId: string) => {
         return (
           stockStore.find((s) => s.warehouseId === warehouseId && s.productId === productId) ?? {
             id: 'inv-def',
@@ -433,6 +461,111 @@ describe('Routers (e2e)', () => {
           warehouseId: WAREHOUSE_ACTIVE_ID,
         })
         .expect(400);
+    });
+
+    it('returns 409 Conflict when onboarding existing stock against zero opening stock', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      // Ensure mock inventory returns 0 for this combination
+      stockStore.push({
+        id: 'inv-zero',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: ZERO_STOCK_PRODUCT_ID,
+        quantity: 0,
+        updatedAt: new Date(),
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/routers')
+        .set(auth)
+        .send(
+          makeCreateRouterDto({
+            serialNumber: 'SN-ZERO-STOCK-TEST',
+            productId: ZERO_STOCK_PRODUCT_ID,
+            warehouseId: WAREHOUSE_ACTIVE_ID,
+            isNewReceipt: false,
+          }),
+        )
+        .expect(409);
+
+      expect(res.body.message).toContain('0 recorded stock');
+    });
+
+    it('returns 409 Conflict when onboarding existing stock exceeds eligible capacity', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      // Set quantity to 1
+      stockStore.push({
+        id: 'inv-limited',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: LIMITED_PRODUCT_ID,
+        quantity: 1,
+        updatedAt: new Date(),
+      });
+
+      // Insert 1 router already registered for this product
+      routerStore.push(
+        makeRouter({
+          serialNumber: 'SN-ALREADY-TAKEN',
+          productId: LIMITED_PRODUCT_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'SERVICEABLE',
+        }),
+      );
+
+      // Attempting to register another existing unit must fail with 409
+      const res = await request(app.getHttpServer())
+        .post('/routers')
+        .set(auth)
+        .send(
+          makeCreateRouterDto({
+            serialNumber: 'SN-EXCEED-CAPACITY',
+            productId: LIMITED_PRODUCT_ID,
+            warehouseId: WAREHOUSE_ACTIVE_ID,
+            isNewReceipt: false,
+          }),
+        )
+        .expect(409);
+
+      expect(res.body.message).toContain('already have registered serial numbers');
+    });
+
+    it('reconciles a damaged opening unit by recording ADJUSTMENT movement (-1) without new receipt', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      stockStore.push({
+        id: 'inv-reconcile',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: RECONCILE_PRODUCT_ID,
+        quantity: 5,
+        updatedAt: new Date(),
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/routers')
+        .set(auth)
+        .send(
+          makeCreateRouterDto({
+            serialNumber: 'SN-DAMAGED-RECONCILE',
+            productId: RECONCILE_PRODUCT_ID,
+            warehouseId: WAREHOUSE_ACTIVE_ID,
+            isNewReceipt: false,
+            physicalCondition: 'DAMAGED',
+            notes: 'Damaged opening stock inspection',
+          }),
+        )
+        .expect(201);
+
+      const data = envelopeData<any>(res);
+      expect(data.physicalCondition).toBe('DAMAGED');
+      expect(data.status).toBe('AVAILABLE');
+
+      // Verify stock was adjusted down by 1
+      const updatedStock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === RECONCILE_PRODUCT_ID,
+      );
+      expect(updatedStock?.quantity).toBe(4);
     });
   });
 

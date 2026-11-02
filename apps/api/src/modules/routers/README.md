@@ -17,10 +17,15 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 * **Custody Tracking & Active Assignment Invariant:**
   * Tracks holder type (`WAREHOUSE`, `TECHNICIAN`, `CUSTOMER`), holder ID, and custody interval.
   * Enforces exactly **one** active custody record per router at any given time via a PostgreSQL partial unique index: `CREATE UNIQUE INDEX idx_router_active_assignment ON router_assignments (router_id) WHERE released_at IS NULL`.
-* **Stock Delta Synchronization:**
+* **Stock Delta Synchronization & Atomic Execution:**
   * When receiving new stock (`isNewReceipt: true`), the warehouse consumable inventory is atomically incremented (+1 `INBOUND_SUPPLIER`).
   * When assigned to a technician, warehouse stock is decremented (-1 `OUTBOUND_TECHNICIAN`).
   * When a warehouse unit suffers physical damage, warehouse stock is decremented (-1 `ADJUSTMENT`) while retaining the router asset record.
+  * **Caller-Owned Transactions & Atomic Relative Deltas (Issue #51):** All mutations support an optional caller-owned `externalTx`. Conflicting operations serialize via row-level locks (`findByIdForUpdate`), and inventory changes use atomic relative SQL deltas (`GREATEST(0, quantity + delta)`) rather than unprotected read-modify-write.
+* **Audited Existing-Stock Onboarding Capacity (Issue #52):**
+  * When onboarding existing warehouse stock (`isNewReceipt: false`), registration consumes pre-existing physical inventory without generating an inbound movement.
+  * Enforces capacity: verifies that recorded stock is greater than zero and exceeds currently registered serviceable units in the warehouse (`availableCapacity = currentStock - registeredCount > 0`). If stock is 0 or all stock already has serial numbers assigned, throws `409 Conflict`.
+  * Reconciles damaged opening stock: registering a damaged unit (`isNewReceipt: false`, `DAMAGED`) records a -1 `ADJUSTMENT` movement and writes an explicit reconciliation record in `router_condition_history`.
 * **Async Inventory Reports:** Administrators can trigger asynchronous Excel workbook exports of router asset inventories, processed through BullMQ on the `reports` queue with ExcelJS.
 
 ---
@@ -103,6 +108,8 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 
 ### B. `RoutersRepository` Methods
 * `findBySerialNumber(serialNumber, tx?)`: Fast indexed lookup by trimmed serial number.
+* `findByIdForUpdate(id, tx)`: Row-level pessimistic locking (`FOR UPDATE`) to serialize concurrent assignments and transitions within transactions.
+* `countRegisteredUsableInWarehouse(warehouseId, productId, tx?)`: Counts active serviceable routers currently in warehouse custody to enforce onboarding capacity.
 * `findManyWithPagination(params)`: Filters by status, condition, warehouse, product, serial search with pagination.
 * `createRouter(data, tx?)` / `updateRouter(id, updates, tx?)`: Entity creation and updates.
 * `createAssignment(data, tx?)`: Creates a new custody interval.
@@ -118,28 +125,33 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 
 Orchestrates business logic and transactional integrity:
 
-* **`create(dto: CreateRouterDto, userId)`**:
+* **`create(dto: CreateRouterDto, userId, externalTx?)`**:
+  * Orchestrated inside `externalTx` or a managed transaction.
   * Validates warehouse existence and active status (rejects deactivated hubs).
   * Validates catalog product existence.
   * Verifies unique `serialNumber` (throws `ConflictException` 409).
+  * **Capacity Check (`isNewReceipt: false`):** Locks inventory row via `getStockForUpdate`, ensures recorded stock > 0, and verifies registered serviceable count < recorded stock; throws `409 Conflict` if capacity exhausted.
+  * **Damaged Reconciliation (`isNewReceipt: false`, `DAMAGED`):** Deducts 1 opening unit via `ADJUSTMENT` movement and writes audit log in `router_condition_history`.
   * Opens initial warehouse custody assignment if condition is `SERVICEABLE`.
-  * If `isNewReceipt: true`, atomically increments warehouse inventory (+1 `INBOUND_SUPPLIER`).
-* **`assign(id, dto: AssignRouterDto, userId)`**:
-  * Guard: Router must be `AVAILABLE`, `SERVICEABLE`, and located in a warehouse.
+  * If `isNewReceipt: true`, atomically increments warehouse inventory (+1 `INBOUND_SUPPLIER`) via `recordMovementWithDelta`.
+* **`assign(id, dto: AssignRouterDto, userId, externalTx?)`**:
+  * Serializes competing requests by acquiring a row lock on the router (`findByIdForUpdate`).
+  * Guard: Router must be `AVAILABLE`, `SERVICEABLE`, and located in a warehouse (competing requests fail with `409 Conflict`).
   * Releases previous warehouse custody and opens new `TECHNICIAN` custody record.
   * Sets status to `ASSIGNED_TO_TECHNICIAN`.
-  * Decrements warehouse stock (-1 `OUTBOUND_TECHNICIAN`).
-* **`transition(id, dto: TransitionRouterDto, userId)`**:
-  * Validates transition against `ALLOWED_ROUTER_TRANSITIONS` whitelist:
+  * Decrements warehouse stock (-1 `OUTBOUND_TECHNICIAN`) via atomic SQL delta.
+* **`transition(id, dto: TransitionRouterDto, userId, externalTx?)`**:
+  * Serializes requests via `findByIdForUpdate` and validates transition against `ALLOWED_ROUTER_TRANSITIONS` whitelist:
     * `AVAILABLE` $\rightarrow$ `ASSIGNED_TO_TECHNICIAN` (via assign endpoint).
     * `ASSIGNED_TO_TECHNICIAN` $\rightarrow$ `INSTALLED_AT_CUSTOMER`, `RETURNED`, `DAMAGED`, `LOST`.
     * `RETURNED` $\rightarrow$ `AVAILABLE`, `UNDER_REPAIR`, `DAMAGED`.
     * `DAMAGED` $\rightarrow$ `UNDER_REPAIR`, `DECOMMISSIONED`.
     * `UNDER_REPAIR` $\rightarrow$ `AVAILABLE`, `DECOMMISSIONED`.
     * Terminal states (`LOST`, `DECOMMISSIONED`): no transitions permitted.
-* **`updateCondition(id, dto: UpdateRouterConditionDto, userId)`**:
+* **`updateCondition(id, dto: UpdateRouterConditionDto, userId, externalTx?)`**:
+  * Serializes requests via `findByIdForUpdate`.
   * Records audit trail in `router_condition_history`.
-  * If warehouse damage occurs to an `AVAILABLE` unit: keeps status `AVAILABLE`, releases active custody (empty custody), and decrements usable stock (-1 `ADJUSTMENT`).
+  * If warehouse damage occurs to an `AVAILABLE` unit: keeps status `AVAILABLE`, releases active custody (empty custody), and decrements usable stock (-1 `ADJUSTMENT`) via atomic delta.
 * **`exportRouterReport(query, userId)`**:
   * Dispatches `ROUTER_INVENTORY_REPORT` background job to BullMQ `reports` queue.
 
@@ -171,11 +183,11 @@ Guards: `JwtAuthGuard`, `RolesGuard`
 ## 6. Testing & Quality Assurance
 
 * **Unit Tests**:
-  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (11 tests): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, and BullMQ export job enqueueing.
-  * [`routers.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.controller.spec.ts) (10 tests): Verifies HTTP delegation and DTO validation.
+  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (**17 tests**): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, atomic writes, rollback on injected failure, competing assignment serialization, existing stock capacity limits, and damaged opening unit reconciliation.
+  * [`routers.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.controller.spec.ts) (**10 tests**): Verifies HTTP delegation and DTO validation.
 
 * **Integration & E2E Test Suite**:
-  * [`test/routers.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/routers.e2e-spec.ts) (**20 test cases** across 6 testing suites):
+  * [`test/routers.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/routers.e2e-spec.ts) (**25 test cases** across 7 testing suites):
   
   #### Suite 1: Authentication & RBAC (7 tests)
   1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
@@ -186,26 +198,33 @@ Guards: `JwtAuthGuard`, `RolesGuard`
   6. `403 Forbidden` — Blocks `WAREHOUSE_STAFF` from dispatching router inventory Excel exports.
   7. `200 OK` — Allows `ADMIN` to trigger async router inventory Excel exports with `{ jobId }`.
 
-  #### Suite 2: Router Registration / Inbound (4 tests)
+  #### Suite 2: Router Registration / Inbound & Capacity Limits (7 tests)
   8. `201 Created` — Allows `WAREHOUSE_STAFF` to register a valid router asset.
   9. `409 Conflict` — Rejects router registration when `serialNumber` already exists in database.
   10. `400 Bad Request` — Blocks registration when target warehouse is soft-deactivated (`isActive: false`).
   11. `400 Bad Request` — Blocks registration when mandatory `serialNumber` is omitted.
+  12. `409 Conflict` — Rejects existing-stock onboarding (`isNewReceipt: false`) against zero recorded stock (Issue #52).
+  13. `409 Conflict` — Rejects existing-stock onboarding when registered serials already equal recorded stock capacity (Issue #52).
+  14. `201 Created` — Reconciles damaged opening unit (`isNewReceipt: false`, `DAMAGED`) by applying -1 `ADJUSTMENT` movement (Issue #52).
 
   #### Suite 3: Custody Assignment & Handoff (3 tests)
-  12. `200 OK` — Assigns an `AVAILABLE` router to a technician, sets status to `ASSIGNED_TO_TECHNICIAN`, and records custody interval.
-  13. `409 Conflict` — Blocks assignment when router already has an active open assignment (`releasedAt IS NULL`).
-  14. `200 OK` — Retrieves chronological custody assignment history for an individual router.
+  15. `200 OK` — Assigns an `AVAILABLE` router to a technician, sets status to `ASSIGNED_TO_TECHNICIAN`, and records custody interval.
+  16. `409 Conflict` — Blocks assignment when router already has an active open assignment (`releasedAt IS NULL`).
+  17. `200 OK` — Retrieves chronological custody assignment history for an individual router.
 
   #### Suite 4: Lifecycle State Machine Transitions (2 tests)
-  15. `200 OK` — Transitions router status along the approved transition whitelist (`ASSIGNED_TO_TECHNICIAN` $\to$ `RETURNED`).
-  16. `400 Bad Request` — Rejects illegal lifecycle transitions (`RETURNED` $\to$ `INSTALLED_AT_CUSTOMER`) not defined in the contract whitelist.
+  18. `200 OK` — Transitions router status along the approved transition whitelist (`ASSIGNED_TO_TECHNICIAN` $\to$ `RETURNED`).
+  19. `400 Bad Request` — Rejects illegal lifecycle transitions (`RETURNED` $\to$ `INSTALLED_AT_CUSTOMER`) not defined in the contract whitelist.
 
   #### Suite 5: Physical Condition & Audit History (2 tests)
-  17. `200 OK` — Updates hardware physical condition (`SERVICEABLE` $\to$ `DAMAGED`) with mandatory justification reason.
-  18. `200 OK` — Retrieves condition mutation audit history records for the router.
+  20. `200 OK` — Updates hardware physical condition (`SERVICEABLE` $\to$ `DAMAGED`) with mandatory justification reason.
+  21. `200 OK` — Retrieves condition mutation audit history records for the router.
 
-  #### Suite 6: Edge Cases & Route Guarding (2 tests)
-  19. `404 Not Found` — Returns not found when querying or mutating a non-existent router UUID.
-  20. `400 Bad Request` — Rejects malformed / non-UUID route parameters.
+  #### Suite 6: Atomicity, Concurrency & Rollback Invariants (2 tests)
+  22. `201 Created` — Concurrent receipts preserve both increments on initially missing stock rows without lost updates (Issue #51).
+  23. `200 OK` / `409 Conflict` — Competing assignments cannot both succeed; one succeeds and one receives 409 Conflict (Issue #51).
+
+  #### Suite 7: Edge Cases & Route Guarding (2 tests)
+  24. `404 Not Found` — Returns not found when querying or mutating a non-existent router UUID.
+  25. `400 Bad Request` — Rejects malformed / non-UUID route parameters.
 
