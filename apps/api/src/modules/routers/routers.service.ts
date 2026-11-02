@@ -55,14 +55,6 @@ export class RoutersService {
       throw new ConflictException(`Router with serial number "${trimmedSerial}" already exists`);
     }
 
-    const warehouse = await this.repo.warehouses.findById(dto.warehouseId);
-    if (!warehouse) {
-      throw new NotFoundException(`Warehouse with ID "${dto.warehouseId}" was not found`);
-    }
-    if (!warehouse.isActive) {
-      throw new BadRequestException('Cannot place or register routers in a deactivated warehouse');
-    }
-
     const product = await this.repo.products.findById(dto.productId);
     if (!product) {
       throw new NotFoundException(`Product with ID "${dto.productId}" was not found`);
@@ -71,6 +63,17 @@ export class RoutersService {
     const condition: RouterPhysicalCondition = dto.physicalCondition ?? 'SERVICEABLE';
 
     const run = async (tx: NodePgDatabase<typeof schema>) => {
+      // Lock warehouse row to serialize concurrent placement/deactivation
+      const warehouse = await this.repo.warehouses.findByIdForUpdate(dto.warehouseId, tx);
+      if (!warehouse) {
+        throw new NotFoundException(`Warehouse with ID "${dto.warehouseId}" was not found`);
+      }
+      if (!warehouse.isActive) {
+        throw new BadRequestException(
+          'Cannot place or register routers in a deactivated warehouse',
+        );
+      }
+
       // 1. If registering existing stock (!isNewReceipt), enforce audited registration capacity
       if (!dto.isNewReceipt) {
         // Lock inventory row to serialize concurrent onboarding and prevent over-registration
@@ -247,6 +250,9 @@ export class RoutersService {
 
       const warehouseId = router.warehouseId;
 
+      // Lock warehouse row to serialize against warehouse deactivation
+      await this.repo.warehouses.findByIdForUpdate(warehouseId, tx);
+
       // 3. Release active warehouse custody
       await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
 
@@ -337,6 +343,17 @@ export class RoutersService {
         if (dto.targetWarehouseId) {
           newWarehouseId = dto.targetWarehouseId;
         }
+
+        // Validate and lock destination warehouse
+        if (newWarehouseId) {
+          const targetWh = await this.repo.warehouses.findByIdForUpdate(newWarehouseId, tx);
+          if (!targetWh) {
+            throw new NotFoundException(`Warehouse with ID "${newWarehouseId}" was not found`);
+          }
+          if (!targetWh.isActive) {
+            throw new BadRequestException('Cannot return router to a deactivated warehouse');
+          }
+        }
       } else if (dto.status === 'AVAILABLE') {
         // Returned router inspected and marked AVAILABLE
         if (dto.targetWarehouseId) newWarehouseId = dto.targetWarehouseId;
@@ -344,6 +361,15 @@ export class RoutersService {
           throw new BadRequestException(
             'A target warehouse ID is required when making a router AVAILABLE',
           );
+        }
+
+        // Validate and lock destination warehouse
+        const targetWh = await this.repo.warehouses.findByIdForUpdate(newWarehouseId, tx);
+        if (!targetWh) {
+          throw new NotFoundException(`Warehouse with ID "${newWarehouseId}" was not found`);
+        }
+        if (!targetWh.isActive) {
+          throw new BadRequestException('Cannot place router in a deactivated warehouse');
         }
 
         // Restore warehouse custody
@@ -429,12 +455,17 @@ export class RoutersService {
         newExternalLocation = null;
       }
 
-      if (newWarehouseId && newWarehouseId !== router.warehouseId) {
-        const wh = await this.repo.warehouses.findById(newWarehouseId);
+      // Lock all involved warehouses in deterministic order to prevent deadlocks
+      const warehouseIdsToLock = Array.from(
+        new Set([router.warehouseId, newWarehouseId].filter(Boolean) as string[]),
+      ).sort();
+
+      for (const whId of warehouseIdsToLock) {
+        const wh = await this.repo.warehouses.findByIdForUpdate(whId, tx);
         if (!wh) {
-          throw new NotFoundException(`Warehouse with ID "${newWarehouseId}" was not found`);
+          throw new NotFoundException(`Warehouse with ID "${whId}" was not found`);
         }
-        if (!wh.isActive) {
+        if (whId === newWarehouseId && !wh.isActive) {
           throw new BadRequestException('Cannot place router in a deactivated warehouse');
         }
       }

@@ -26,11 +26,13 @@ describe('InventoryService', () => {
   const mockWarehouse = {
     id: mockWarehouseId,
     name: 'Cairo Main Hub',
+    isActive: true,
   };
 
   const mockDestWarehouse = {
     id: mockDestWarehouseId,
     name: 'Alexandria Branch',
+    isActive: true,
   };
 
   const mockProduct = {
@@ -63,6 +65,7 @@ describe('InventoryService', () => {
 
   const mockInventoryRepo = {
     getStock: vi.fn(),
+    getStockForUpdate: vi.fn(),
     findManyInventory: vi.fn(),
     recordMovementInTransaction: vi.fn(),
     executeTransferInTransaction: vi.fn(),
@@ -72,6 +75,7 @@ describe('InventoryService', () => {
 
   const mockWarehousesRepo = {
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
   };
 
   const mockProductsRepo = {
@@ -83,6 +87,7 @@ describe('InventoryService', () => {
   };
 
   const mockRepositoryService = {
+    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
     inventory: mockInventoryRepo,
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,
@@ -91,6 +96,19 @@ describe('InventoryService', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    mockWarehousesRepo.findById.mockResolvedValue({
+      id: mockWarehouseId,
+      name: 'Main Hub',
+      isActive: true,
+    });
+    mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({
+      id: mockWarehouseId,
+      name: 'Main Hub',
+      isActive: true,
+    });
+    mockInventoryRepo.getStock.mockResolvedValue(mockInventory);
+    mockInventoryRepo.getStockForUpdate.mockResolvedValue(mockInventory);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -149,6 +167,13 @@ describe('InventoryService', () => {
       mockWarehousesRepo.findById.mockResolvedValue(null);
 
       await expect(service.receiveInbound(dto)).rejects.toThrow(NotFoundException);
+      expect(mockInventoryRepo.recordMovementInTransaction).not.toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException if warehouse is deactivated', async () => {
+      mockWarehousesRepo.findById.mockResolvedValue({ ...mockWarehouse, isActive: false });
+
+      await expect(service.receiveInbound(dto)).rejects.toThrow(BadRequestException);
       expect(mockInventoryRepo.recordMovementInTransaction).not.toHaveBeenCalled();
     });
 
@@ -281,6 +306,16 @@ describe('InventoryService', () => {
           toWarehouseId: mockWarehouseId,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if destination warehouse is deactivated', async () => {
+      mockWarehousesRepo.findById
+        .mockResolvedValueOnce(mockWarehouse)
+        .mockResolvedValueOnce({ ...mockDestWarehouse, isActive: false });
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+
+      await expect(service.transferStock(dto)).rejects.toThrow(BadRequestException);
+      expect(mockInventoryRepo.executeTransferInTransaction).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestException if source warehouse has insufficient stock', async () => {

@@ -185,6 +185,18 @@ describe('Routers (e2e)', () => {
         }
         return undefined;
       },
+      findByIdForUpdate: async (id: string) => {
+        if (id === WAREHOUSE_ACTIVE_ID) {
+          return { id, name: 'Main Hub', isActive: true };
+        }
+        if (id === WAREHOUSE_SECONDARY_ID) {
+          return { id, name: 'Secondary Hub', isActive: true };
+        }
+        if (id === WAREHOUSE_INACTIVE_ID) {
+          return { id, name: 'Old Hub', isActive: false };
+        }
+        return undefined;
+      },
     },
     products: {
       findById: async (id: string) => {

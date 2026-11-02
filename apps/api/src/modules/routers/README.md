@@ -26,6 +26,11 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   * When onboarding existing warehouse stock (`isNewReceipt: false`), registration consumes pre-existing physical inventory without generating an inbound movement.
   * Enforces capacity: verifies that recorded stock is greater than zero and exceeds currently registered serviceable units in the warehouse (`availableCapacity = currentStock - registeredCount > 0`). If stock is 0 or all stock already has serial numbers assigned, throws `409 Conflict`.
   * Reconciles damaged opening stock: registering a damaged unit (`isNewReceipt: false`, `DAMAGED`) records a -1 `ADJUSTMENT` movement and writes an explicit reconciliation record in `router_condition_history`.
+* **Warehouse Deactivation Serialization & Placement Invariants (Issue #57 - T07):**
+  * All placement paths (`create`, `transition` to `RETURNED`, `transition` to `AVAILABLE`, and `updateCondition`) validate the target warehouse active status under a pessimistic row lock (`findByIdForUpdate(warehouseId, tx)`).
+  * Inactive target warehouses are strictly rejected with `BadRequestException` (400).
+  * In `updateCondition`, multi-warehouse operations (transfers) lock involved warehouses in deterministic alphabetical order to prevent AB-BA transaction deadlocks.
+  * During warehouse deactivation, active inventory, assigned staff/technicians, physically present routers (including damaged/under-repair devices without active custody), and active custody records strictly block deactivation with `409 Conflict`.
 * **Async Inventory Reports:** Administrators can trigger asynchronous Excel workbook exports of router asset inventories, processed through BullMQ on the `reports` queue with ExcelJS.
 
 ---

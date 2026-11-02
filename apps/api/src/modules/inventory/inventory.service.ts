@@ -6,6 +6,7 @@ import type {
   NewStockMovement,
   Product,
 } from '../../database/schema/index.js';
+import type { Warehouse } from '../warehouses/warehouse.types.js';
 import type {
   InboundStockDto,
   OutboundStockDto,
@@ -23,11 +24,17 @@ const DEFAULT_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
 export class InventoryService {
   constructor(private readonly repo: RepositoryService) {}
 
-  private async ensureWarehouseExists(warehouseId: string): Promise<void> {
+  private async ensureWarehouseExists(warehouseId: string): Promise<Warehouse> {
     const warehouse = await this.repo.warehouses.findById(warehouseId);
     if (!warehouse) {
       throw new NotFoundException(`Warehouse with ID "${warehouseId}" was not found`);
     }
+    if (!warehouse.isActive) {
+      throw new BadRequestException(
+        'Cannot perform inventory operations on a deactivated warehouse',
+      );
+    }
+    return warehouse;
   }
 
   private async ensureProductExists(productId: string): Promise<Product> {

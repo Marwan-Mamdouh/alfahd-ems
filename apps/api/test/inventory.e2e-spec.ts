@@ -29,8 +29,15 @@ describe('Inventory (e2e)', () => {
   let movementsStore: StockMovement[] = [];
 
   const mockRepositoryService = {
+    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
     warehouses: {
       findById: async (id: string) => {
+        if (id === WAREHOUSE_A_ID || id === WAREHOUSE_B_ID) {
+          return { id, name: `Warehouse ${id.substring(0, 4)}`, isActive: true };
+        }
+        return undefined;
+      },
+      findByIdForUpdate: async (id: string) => {
         if (id === WAREHOUSE_A_ID || id === WAREHOUSE_B_ID) {
           return { id, name: `Warehouse ${id.substring(0, 4)}`, isActive: true };
         }
