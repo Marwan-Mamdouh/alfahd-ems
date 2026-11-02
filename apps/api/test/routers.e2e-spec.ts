@@ -52,6 +52,9 @@ describe('Routers (e2e)', () => {
       findById: async (id: string) => {
         return routerStore.find((r) => r.id === id);
       },
+      findByIdForUpdate: async (id: string) => {
+        return routerStore.find((r) => r.id === id);
+      },
       findManyWithPagination: async (params: {
         warehouseId?: string;
         productId?: string;
@@ -188,24 +191,24 @@ describe('Routers (e2e)', () => {
           }
         );
       },
-      recordMovementInTransaction: async (movement: NewStockMovement, newQuantity: number) => {
+      recordMovementWithDelta: async (movement: NewStockMovement, delta: number) => {
         let stock = stockStore.find(
           (s) => s.warehouseId === movement.warehouseId && s.productId === movement.productId,
         );
         if (!stock) {
           stock = {
-            id: 'inv-stock-1',
+            id: 'inv-stock-delta',
             warehouseId: movement.warehouseId,
             productId: movement.productId,
-            quantity: newQuantity,
+            quantity: Math.max(0, delta),
             updatedAt: new Date(),
           };
           stockStore.push(stock);
         } else {
-          stock.quantity = newQuantity;
+          stock.quantity = Math.max(0, stock.quantity + delta);
           stock.updatedAt = new Date();
         }
-        return { id: 'mov-1', ...movement, createdAt: new Date() };
+        return { inventory: stock, movement: { id: 'mov-1', ...movement, createdAt: new Date() } };
       },
     },
   };
@@ -539,6 +542,86 @@ describe('Routers (e2e)', () => {
       expect(Array.isArray(res.body.data)).toBe(true);
       expect(res.body.data.length).toBeGreaterThan(0);
       expect(res.body.data[0].toCondition).toBe('DAMAGED');
+    });
+  });
+
+  describe('Atomicity, Concurrency & Rollback Invariants', () => {
+    it('concurrent receipts preserve both increments on initially missing stock rows', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      const dto1 = makeCreateRouterDto({
+        serialNumber: 'SN-CONCURRENT-001',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+      const dto2 = makeCreateRouterDto({
+        serialNumber: 'SN-CONCURRENT-002',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+
+      const initialStock =
+        stockStore.find(
+          (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+        )?.quantity ?? 0;
+
+      // Execute both receipts concurrently
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto1),
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto2),
+      ]);
+
+      expect(res1.status).toBe(201);
+      expect(res2.status).toBe(201);
+
+      const updatedStock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      )?.quantity;
+
+      expect(updatedStock).toBe(initialStock + 2);
+    });
+
+    it('competing assignments cannot both succeed (one succeeds, one returns 409 Conflict)', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const targetRouterId = '11223344-5566-7788-99aa-bbccddeeff00';
+
+      // Insert a fresh AVAILABLE router into store
+      routerStore.push(
+        makeRouter({
+          id: targetRouterId,
+          serialNumber: 'SN-RACE-ROUTER',
+          productId: PRODUCT_ROUTER_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'SERVICEABLE',
+        }),
+      );
+
+      const assignDto1 = makeAssignRouterDto({
+        technicianId: TECH_USER_ID,
+        notes: 'Assign attempt 1',
+      });
+      const assignDto2 = makeAssignRouterDto({
+        technicianId: TECH_USER_ID,
+        notes: 'Assign attempt 2',
+      });
+
+      // Run competing assignments concurrently
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/routers/${targetRouterId}/assign`)
+          .set(auth)
+          .send(assignDto1),
+        request(app.getHttpServer())
+          .post(`/routers/${targetRouterId}/assign`)
+          .set(auth)
+          .send(assignDto2),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      expect(statuses).toEqual([200, 409]);
     });
   });
 
