@@ -324,6 +324,10 @@ export const ipAddresses = pgTable(
       'ip_addresses_ipv4_host_check',
       sql`family(${table.address}) = 4 AND masklen(${table.address}) = 32`,
     ),
+    check(
+      'ip_addresses_not_archived_reserved_check',
+      sql`NOT (${table.isArchived} = true AND ${table.status} = 'RESERVED')`,
+    ),
   ],
 );
 

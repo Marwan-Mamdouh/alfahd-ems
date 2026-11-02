@@ -10,6 +10,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { isIP } from 'class-validator';
 import type { IpAddressDto, IpHistoryDto, IpImportResultDto } from '@alfahd/types';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema/index.js';
 import { RepositoryService } from '../repository/repository.service.js';
 import type { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
@@ -90,29 +91,50 @@ export class IpService {
     };
   }
 
-  async update(id: string, dto: UpdateIpDto, actorId: string): Promise<IpAddressDto> {
-    const existing = await this.repo.ip.findById(id);
-    if (!existing) {
-      throw new NotFoundException(`IP address with ID "${id}" was not found`);
-    }
+  async update(
+    id: string,
+    dto: UpdateIpDto,
+    actorId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddressDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const existing = await this.repo.ip.findByIdForUpdate(id, tx);
+      if (!existing) {
+        throw new NotFoundException(`IP address with ID "${id}" was not found`);
+      }
 
-    const updated = await this.repo.ip.updateIp(id, { notes: dto.notes });
+      if (dto.notes !== undefined && dto.notes !== existing.notes) {
+        const updated = await this.repo.ip.updateIp(id, { notes: dto.notes }, tx);
 
-    await this.repo.ip.createHistory({
-      ipId: id,
-      fromStatus: existing.status,
-      toStatus: existing.status,
-      action: 'UPDATE_METADATA',
-      reason: 'Updated notes',
-      actorId,
-    });
+        await this.repo.ip.createHistory(
+          {
+            ipId: id,
+            fromStatus: existing.status,
+            toStatus: existing.status,
+            action: 'UPDATE_METADATA',
+            reason: dto.notes ? 'Updated notes' : 'Cleared notes',
+            actorId,
+          },
+          tx,
+        );
 
-    return this.mapToDto(updated!);
+        return this.mapToDto(updated!);
+      }
+
+      return this.mapToDto(existing);
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
-  async reserve(id: string, reason: string | undefined, actorId: string): Promise<IpAddressDto> {
-    return this.repo.transaction(async (tx) => {
-      const existing = await this.repo.ip.findById(id, tx);
+  async reserve(
+    id: string,
+    reason: string | undefined,
+    actorId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddressDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const existing = await this.repo.ip.findByIdForUpdate(id, tx);
       if (!existing) {
         throw new NotFoundException(`IP address with ID "${id}" was not found`);
       }
@@ -140,12 +162,19 @@ export class IpService {
       );
 
       return this.mapToDto(updated!);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
-  async release(id: string, reason: string | undefined, actorId: string): Promise<IpAddressDto> {
-    return this.repo.transaction(async (tx) => {
-      const existing = await this.repo.ip.findById(id, tx);
+  async release(
+    id: string,
+    reason: string | undefined,
+    actorId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddressDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const existing = await this.repo.ip.findByIdForUpdate(id, tx);
       if (!existing) {
         throw new NotFoundException(`IP address with ID "${id}" was not found`);
       }
@@ -176,12 +205,19 @@ export class IpService {
       );
 
       return this.mapToDto(updated!);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
-  async archive(id: string, reason: string | undefined, actorId: string): Promise<IpAddressDto> {
-    return this.repo.transaction(async (tx) => {
-      const existing = await this.repo.ip.findById(id, tx);
+  async archive(
+    id: string,
+    reason: string | undefined,
+    actorId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddressDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const existing = await this.repo.ip.findByIdForUpdate(id, tx);
       if (!existing) {
         throw new NotFoundException(`IP address with ID "${id}" was not found`);
       }
@@ -211,12 +247,19 @@ export class IpService {
       );
 
       return this.mapToDto(updated!);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
-  async unarchive(id: string, reason: string | undefined, actorId: string): Promise<IpAddressDto> {
-    return this.repo.transaction(async (tx) => {
-      const existing = await this.repo.ip.findById(id, tx);
+  async unarchive(
+    id: string,
+    reason: string | undefined,
+    actorId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddressDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const existing = await this.repo.ip.findByIdForUpdate(id, tx);
       if (!existing) {
         throw new NotFoundException(`IP address with ID "${id}" was not found`);
       }
@@ -240,7 +283,9 @@ export class IpService {
       );
 
       return this.mapToDto(updated!);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
   async getHistory(ipId: string): Promise<IpHistoryDto[]> {
