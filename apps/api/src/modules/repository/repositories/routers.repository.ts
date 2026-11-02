@@ -311,4 +311,14 @@ export class RoutersRepository extends BaseRepository<
 
     return Number(total);
   }
+
+  async countByProductId(productId: string, tx?: NodePgDatabase<typeof schema>): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
+      .select({ total: count() })
+      .from(schema.routers)
+      .where(eq(schema.routers.productId, productId));
+
+    return Number(total);
+  }
 }

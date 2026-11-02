@@ -21,6 +21,11 @@ Derived from **SOW Section 2.1.6, Section 4.1, Section 6** and **CRM SRS Section
   * In Milestone M2b (Issues #51 & #52), `RoutersService` integrates with `InventoryRepository` using caller-owned transactions (`tx`).
   * `getStockForUpdate(warehouseId, productId, tx)` acquires pessimistic row locks (`FOR UPDATE`) on inventory balances during router onboarding, assignment, and condition updates.
   * `recordMovementWithDelta(movement, delta, tx)` atomically applies relative stock deltas using SQL `GREATEST(0, warehouse_inventory.quantity + delta)` alongside `stock_movements` ledger inserts within the same transaction. This guarantees asset creation, custody assignments, condition history, and stock movements commit or roll back together atomically.
+* **Protection of Serialized SKUs from Quantity-Only Operations (Issue #56):**
+  * In accordance with `docs/contracts/m2b-supply-implementation.md` (§5.3 line 171), serialized router products are strictly protected from generic quantity-only inventory operations (`receiveInbound`, `issueOutbound`, `receiveReturn`, `transferStock`, and `adjustStock`).
+  * Classification is authoritative: products are identified as serialized via category (`Routers`, `Router`), SKU prefix/naming (`RTR-`), or presence of registered router assets in the database (`countByProductId > 0`).
+  * Generic quantity-only mutations on serialized SKUs throw `400 Bad Request` to prevent inventory balance divergence (e.g. zeroing stock while serialized assets remain active). Serialized inventory is managed exclusively through `RoutersModule`.
+  * Ordinary non-router inventory (cables, connectors, tools) remains 100% compatible.
 * **Database Transactions:** All balance changes and movement records are committed atomically via caller-provided or method-managed PostgreSQL transactions (`db.transaction()`).
 
 ---
@@ -150,12 +155,12 @@ All routes dynamically consume the centralized route constants manifest (`src/co
 Unit testing conforms strictly to TDD and runs via Vitest:
 
 * **Service Unit Tests (`inventory.service.spec.ts`)**:
-  * 15 comprehensive test cases covering inbound receipts, outbound stock checks, insufficient stock guards, technician returns, atomic transfers, same-warehouse rejections, physical adjustments, and audit trail queries.
+  * 21 comprehensive test cases covering inbound receipts, outbound stock checks, insufficient stock guards, technician returns, atomic transfers, same-warehouse rejections, physical adjustments, audit trail queries, and serialized SKU write rejections across all 5 inventory write paths.
 * **Controller Unit Tests (`inventory.controller.spec.ts`)**:
   * 10 test cases verifying route delegation, status codes, and query params forwarding.
 
 * **Integration & E2E Test Suite (`test/inventory.e2e-spec.ts`)**:
-  * **12 test cases** across 3 testing suites verifying complete RBAC, user context binding, and inventory invariants:
+  * **18 test cases** across 4 testing suites verifying complete RBAC, user context binding, inventory invariants, and serialized SKU write protections:
 
   #### Suite 1: Authentication & Authorization (RBAC) (7 tests)
   1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
@@ -169,12 +174,19 @@ Unit testing conforms strictly to TDD and runs via Vitest:
   #### Suite 2: User Context Injection (`@CurrentUser`) (1 test)
   8. `201 Created` — Automatically extracts authenticated user ID from JWT and populates `responsibleUserId` in the audit ledger.
 
-  #### Suite 3: Inventory Validation & Transaction Invariants (4 tests)
+  #### Suite 3: Inventory Validation & Transaction Invariants (5 tests)
   9. `400 Bad Request` — Rejects inbound receipts when quantity is zero or negative ($\le 0$).
   10. `404 Not Found` — Returns 404 when inbound targets a non-existent warehouse UUID.
   11. `400 Bad Request` — Blocks outbound dispatch when requested quantity exceeds current available stock.
   12. `400 Bad Request` — Rejects inter-warehouse transfer when source and destination warehouse are identical.
   13. `200 OK` — Successfully processes inter-warehouse stock transfer atomically between two distinct warehouses.
+
+  #### Suite 4: Serialized SKU Protection from Quantity-Only Operations (5 tests)
+  14. `400 Bad Request` — Rejects quantity-only inbound on serialized router SKU.
+  15. `400 Bad Request` — Rejects quantity-only outbound on serialized router SKU.
+  16. `400 Bad Request` — Rejects quantity-only technician return on serialized router SKU.
+  17. `400 Bad Request` — Rejects quantity-only inter-warehouse transfer on serialized router SKU.
+  18. `400 Bad Request` — Rejects quantity-only physical stock adjustment on serialized router SKU (prevents zero-stock bypass).
 
 ### Running Verification Commands:
 ```bash
