@@ -49,6 +49,7 @@ describe('RoutersService', () => {
   const mockRoutersRepo = {
     findBySerialNumber: vi.fn(),
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
     createRouter: vi.fn(),
     updateRouter: vi.fn(),
     createAssignment: vi.fn(),
@@ -72,6 +73,7 @@ describe('RoutersService', () => {
   const mockInventoryRepo = {
     getStock: vi.fn(),
     recordMovementInTransaction: vi.fn(),
+    recordMovementWithDelta: vi.fn(),
   };
 
   const mockReportsQueue = {
@@ -132,7 +134,7 @@ describe('RoutersService', () => {
         }),
         expect.anything(),
       );
-      expect(mockInventoryRepo.recordMovementInTransaction).not.toHaveBeenCalled();
+      expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
       expect(result.serialNumber).toBe('SN-RTR-001');
     });
 
@@ -154,12 +156,13 @@ describe('RoutersService', () => {
         'admin-id',
       );
 
-      expect(mockInventoryRepo.recordMovementInTransaction).toHaveBeenCalledWith(
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
         expect.objectContaining({
           movementType: 'INBOUND_SUPPLIER',
           quantity: 1,
         }),
-        6,
+        1,
+        expect.anything(),
       );
     });
 
@@ -197,7 +200,7 @@ describe('RoutersService', () => {
 
   describe('assign', () => {
     it('assigns an AVAILABLE serviceable router to a technician and decrements warehouse stock', async () => {
-      mockRoutersRepo.findById.mockResolvedValue(mockRouter);
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue({
         ...mockAssignment,
         releasedAt: new Date(),
@@ -212,7 +215,6 @@ describe('RoutersService', () => {
         status: 'ASSIGNED_TO_TECHNICIAN',
         warehouseId: null,
       });
-      mockInventoryRepo.getStock.mockResolvedValue({ quantity: 10 });
 
       const result = await service.assign(
         mockRouter.id,
@@ -220,6 +222,10 @@ describe('RoutersService', () => {
         'admin-id',
       );
 
+      expect(mockRoutersRepo.findByIdForUpdate).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.anything(),
+      );
       expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
       expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -228,18 +234,19 @@ describe('RoutersService', () => {
         }),
         expect.anything(),
       );
-      expect(mockInventoryRepo.recordMovementInTransaction).toHaveBeenCalledWith(
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
         expect.objectContaining({
           movementType: 'OUTBOUND_TECHNICIAN',
           quantity: 1,
         }),
-        9,
+        -1,
+        expect.anything(),
       );
       expect(result.status).toBe('ASSIGNED_TO_TECHNICIAN');
     });
 
     it('throws ConflictException if router is not AVAILABLE or unserviceable', async () => {
-      mockRoutersRepo.findById.mockResolvedValue({
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
         ...mockRouter,
         status: 'RETURNED',
       });
@@ -253,7 +260,7 @@ describe('RoutersService', () => {
   describe('transition', () => {
     it('enforces whitelist and transitions ASSIGNED_TO_TECHNICIAN to RETURNED', async () => {
       const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
-      mockRoutersRepo.findById.mockResolvedValue(assignedRouter);
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.updateRouter.mockResolvedValue({ ...assignedRouter, status: 'RETURNED' });
 
@@ -268,7 +275,7 @@ describe('RoutersService', () => {
     });
 
     it('rejects illegal transitions (AVAILABLE -> DAMAGED via transition) with 400 Bad Request', async () => {
-      mockRoutersRepo.findById.mockResolvedValue(mockRouter);
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
 
       await expect(
         service.transition(mockRouter.id, { status: 'DAMAGED' }, 'admin-id'),
@@ -276,7 +283,7 @@ describe('RoutersService', () => {
     });
 
     it('rejects any transition from terminal status (LOST / DECOMMISSIONED)', async () => {
-      mockRoutersRepo.findById.mockResolvedValue({
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
         ...mockRouter,
         status: 'DECOMMISSIONED' as const,
       });
@@ -289,10 +296,9 @@ describe('RoutersService', () => {
 
   describe('updateCondition', () => {
     it('handles warehouse damage for AVAILABLE router: keeps status, empties custody, decrements usable stock', async () => {
-      mockRoutersRepo.findById.mockResolvedValue(mockRouter);
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
       mockRoutersRepo.createConditionHistory.mockResolvedValue({});
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
-      mockInventoryRepo.getStock.mockResolvedValue({ quantity: 5 });
       mockRoutersRepo.updateRouter.mockResolvedValue({
         ...mockRouter,
         physicalCondition: 'DAMAGED',
@@ -308,15 +314,103 @@ describe('RoutersService', () => {
       );
 
       expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
-      expect(mockInventoryRepo.recordMovementInTransaction).toHaveBeenCalledWith(
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
         expect.objectContaining({
           movementType: 'ADJUSTMENT',
           quantity: 1,
         }),
-        4,
+        -1,
+        expect.anything(),
       );
       expect(result.status).toBe('AVAILABLE');
       expect(result.physicalCondition).toBe('DAMAGED');
+    });
+  });
+
+  describe('transaction atomicity & caller-owned externalTx', () => {
+    it('executes create entirely within externalTx when provided', async () => {
+      const mockExternalTx = {} as any;
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockRoutersRepo.createRouter.mockResolvedValue(mockRouter);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+
+      await service.create(
+        {
+          serialNumber: 'SN-EXTERNAL-TX',
+          productId: mockProduct.id,
+          warehouseId: mockWarehouse.id,
+          isNewReceipt: true,
+        },
+        'admin-id',
+        mockExternalTx,
+      );
+
+      // Verify repo.transaction was NOT called because externalTx was provided
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createRouter).toHaveBeenCalledWith(expect.anything(), mockExternalTx);
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        1,
+        mockExternalTx,
+      );
+    });
+
+    it('rolls back completely when an injected failure occurs during create', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockRoutersRepo.createRouter.mockResolvedValue(mockRouter);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockInventoryRepo.recordMovementWithDelta.mockRejectedValueOnce(
+        new Error('Injected stock write failure'),
+      );
+
+      // If inventory write fails inside the transaction, the promise rejects and transaction aborts
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-FAIL',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: true,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow('Injected stock write failure');
+    });
+
+    it('executes assign entirely within externalTx when provided', async () => {
+      const mockExternalTx = {} as any;
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue(mockRouter);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+
+      await service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id', mockExternalTx);
+
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.findByIdForUpdate).toHaveBeenCalledWith(mockRouter.id, mockExternalTx);
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.any(Date),
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        -1,
+        mockExternalTx,
+      );
     });
   });
 

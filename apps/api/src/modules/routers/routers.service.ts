@@ -43,10 +43,14 @@ export class RoutersService {
     @InjectQueue('reports') private readonly reportsQueue: Queue,
   ) {}
 
-  async create(dto: CreateRouterDto, responsibleUserId: string): Promise<RouterDto> {
+  async create(
+    dto: CreateRouterDto,
+    responsibleUserId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<RouterDto> {
     const trimmedSerial = dto.serialNumber.trim();
 
-    const existing = await this.repo.routers.findBySerialNumber(trimmedSerial);
+    const existing = await this.repo.routers.findBySerialNumber(trimmedSerial, externalTx);
     if (existing) {
       throw new ConflictException(`Router with serial number "${trimmedSerial}" already exists`);
     }
@@ -66,7 +70,7 @@ export class RoutersService {
 
     const condition: RouterPhysicalCondition = dto.physicalCondition ?? 'SERVICEABLE';
 
-    return this.repo.transaction(async (tx) => {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
       // 1. Insert Router row
       const router = await this.repo.routers.createRouter(
         {
@@ -95,27 +99,25 @@ export class RoutersService {
       }
 
       // 3. Atomically update inventory quantity if marked as a new inbound receipt
-      if (dto.isNewReceipt) {
-        if (condition === 'SERVICEABLE') {
-          const currentStock = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
-          const newQty = (currentStock?.quantity ?? 0) + 1;
-
-          await this.repo.inventory.recordMovementInTransaction(
-            {
-              warehouseId: dto.warehouseId,
-              productId: dto.productId,
-              movementType: 'INBOUND_SUPPLIER',
-              quantity: 1,
-              responsibleUserId,
-              notes: `Router receipt serial ${trimmedSerial}`,
-            },
-            newQty,
-          );
-        }
+      if (dto.isNewReceipt && condition === 'SERVICEABLE') {
+        await this.repo.inventory.recordMovementWithDelta(
+          {
+            warehouseId: dto.warehouseId,
+            productId: dto.productId,
+            movementType: 'INBOUND_SUPPLIER',
+            quantity: 1,
+            responsibleUserId,
+            notes: `Router receipt serial ${trimmedSerial}`,
+          },
+          1,
+          tx,
+        );
       }
 
       return this.mapToDto(router, null);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
   async findById(id: string): Promise<RouterDto> {
@@ -151,30 +153,36 @@ export class RoutersService {
     return { items: dtos, total };
   }
 
-  async assign(id: string, dto: AssignRouterDto, responsibleUserId: string): Promise<RouterDto> {
-    const router = await this.repo.routers.findById(id);
-    if (!router) {
-      throw new NotFoundException(`Router with ID "${id}" was not found`);
-    }
+  async assign(
+    id: string,
+    dto: AssignRouterDto,
+    responsibleUserId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
+  ): Promise<RouterDto> {
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      // 1. Lock router row first to serialize competing assignments
+      const router = await this.repo.routers.findByIdForUpdate(id, tx);
+      if (!router) {
+        throw new NotFoundException(`Router with ID "${id}" was not found`);
+      }
 
-    // Must be usable: AVAILABLE, SERVICEABLE, and in a warehouse
-    if (
-      router.status !== 'AVAILABLE' ||
-      router.physicalCondition !== 'SERVICEABLE' ||
-      !router.warehouseId
-    ) {
-      throw new ConflictException(
-        `Router ${router.serialNumber} is not available for assignment (Status: ${router.status}, Condition: ${router.physicalCondition})`,
-      );
-    }
+      // 2. Validate state inside the protected operation
+      if (
+        router.status !== 'AVAILABLE' ||
+        router.physicalCondition !== 'SERVICEABLE' ||
+        !router.warehouseId
+      ) {
+        throw new ConflictException(
+          `Router ${router.serialNumber} is not available for assignment (Status: ${router.status}, Condition: ${router.physicalCondition})`,
+        );
+      }
 
-    const warehouseId = router.warehouseId;
+      const warehouseId = router.warehouseId;
 
-    return this.repo.transaction(async (tx) => {
-      // 1. Release warehouse custody
+      // 3. Release active warehouse custody
       await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
 
-      // 2. Open technician custody
+      // 4. Open technician custody
       const assignment = await this.repo.routers.createAssignment(
         {
           routerId: id,
@@ -186,7 +194,7 @@ export class RoutersService {
         tx,
       );
 
-      // 3. Update router status
+      // 5. Update router status
       const updatedRouter = await this.repo.routers.updateRouter(
         id,
         {
@@ -197,11 +205,8 @@ export class RoutersService {
         tx,
       );
 
-      // 4. Decrement usable warehouse quantity
-      const currentStock = await this.repo.inventory.getStock(warehouseId, router.productId);
-      const newQty = Math.max(0, (currentStock?.quantity ?? 0) - 1);
-
-      await this.repo.inventory.recordMovementInTransaction(
+      // 6. Decrement usable warehouse quantity with atomic delta
+      await this.repo.inventory.recordMovementWithDelta(
         {
           warehouseId,
           productId: router.productId,
@@ -211,11 +216,14 @@ export class RoutersService {
           responsibleUserId,
           notes: `Router assignment serial ${router.serialNumber}`,
         },
-        newQty,
+        -1,
+        tx,
       );
 
       return this.mapToDto(updatedRouter!, assignment);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
   async transition(
@@ -225,7 +233,7 @@ export class RoutersService {
     externalTx?: NodePgDatabase<typeof schema>,
   ): Promise<RouterDto> {
     const run = async (tx: NodePgDatabase<typeof schema>) => {
-      const router = await this.repo.routers.findById(id, tx);
+      const router = await this.repo.routers.findByIdForUpdate(id, tx);
       if (!router) {
         throw new NotFoundException(`Router with ID "${id}" was not found`);
       }
@@ -284,10 +292,7 @@ export class RoutersService {
 
         // Add back to usable stock if condition is serviceable
         if (router.physicalCondition === 'SERVICEABLE') {
-          const currentStock = await this.repo.inventory.getStock(newWarehouseId, router.productId);
-          const newQty = (currentStock?.quantity ?? 0) + 1;
-
-          await this.repo.inventory.recordMovementInTransaction(
+          await this.repo.inventory.recordMovementWithDelta(
             {
               warehouseId: newWarehouseId,
               productId: router.productId,
@@ -296,7 +301,8 @@ export class RoutersService {
               responsibleUserId,
               notes: `Router returned to inventory: ${router.serialNumber}`,
             },
-            newQty,
+            1,
+            tx,
           );
         }
       }
@@ -322,9 +328,10 @@ export class RoutersService {
     id: string,
     dto: UpdateRouterConditionDto,
     responsibleUserId: string,
+    externalTx?: NodePgDatabase<typeof schema>,
   ): Promise<RouterDto> {
-    return this.repo.transaction(async (tx) => {
-      const router = await this.repo.routers.findById(id, tx);
+    const run = async (tx: NodePgDatabase<typeof schema>) => {
+      const router = await this.repo.routers.findByIdForUpdate(id, tx);
       if (!router) {
         throw new NotFoundException(`Router with ID "${id}" was not found`);
       }
@@ -363,13 +370,7 @@ export class RoutersService {
         await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
 
         if (router.warehouseId) {
-          const currentStock = await this.repo.inventory.getStock(
-            router.warehouseId,
-            router.productId,
-          );
-          const newQty = Math.max(0, (currentStock?.quantity ?? 0) - 1);
-
-          await this.repo.inventory.recordMovementInTransaction(
+          await this.repo.inventory.recordMovementWithDelta(
             {
               warehouseId: router.warehouseId,
               productId: router.productId,
@@ -378,7 +379,8 @@ export class RoutersService {
               responsibleUserId,
               notes: `Router damaged in warehouse: ${router.serialNumber} (${dto.reason})`,
             },
-            newQty,
+            -1,
+            tx,
           );
         }
       }
@@ -398,13 +400,7 @@ export class RoutersService {
             tx,
           );
 
-          const currentStock = await this.repo.inventory.getStock(
-            targetWarehouse,
-            router.productId,
-          );
-          const newQty = (currentStock?.quantity ?? 0) + 1;
-
-          await this.repo.inventory.recordMovementInTransaction(
+          await this.repo.inventory.recordMovementWithDelta(
             {
               warehouseId: targetWarehouse,
               productId: router.productId,
@@ -413,7 +409,8 @@ export class RoutersService {
               responsibleUserId,
               notes: `Router repaired and available: ${router.serialNumber}`,
             },
-            newQty,
+            1,
+            tx,
           );
         }
       }
@@ -430,7 +427,9 @@ export class RoutersService {
 
       const activeCustody = await this.repo.routers.findActiveAssignment(id, tx);
       return this.mapToDto(updated!, activeCustody ?? null);
-    });
+    };
+
+    return externalTx ? run(externalTx) : this.repo.transaction(run);
   }
 
   async getAssignments(routerId: string): Promise<RouterAssignmentDto[]> {

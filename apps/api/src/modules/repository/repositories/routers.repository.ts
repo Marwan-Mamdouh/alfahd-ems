@@ -79,6 +79,17 @@ export class RoutersRepository extends BaseRepository<
     return row ?? null;
   }
 
+  async findByIdForUpdate(id: string, tx: NodePgDatabase<typeof schema>): Promise<Router | null> {
+    const [row] = await tx
+      .select()
+      .from(schema.routers)
+      .where(eq(schema.routers.id, id))
+      .limit(1)
+      .for('update');
+
+    return row ?? null;
+  }
+
   async createRouter(data: NewRouter, tx?: NodePgDatabase<typeof schema>): Promise<Router> {
     const client = this.getClient(tx);
     const [row] = await client.insert(schema.routers).values(data).returning();

@@ -26,7 +26,9 @@ export interface MockRepositoryService {
   };
   inventory: {
     getStock: ReturnType<typeof vi.fn<AnyFn>>;
+    getStockForUpdate: ReturnType<typeof vi.fn<AnyFn>>;
     recordMovementInTransaction: ReturnType<typeof vi.fn<AnyFn>>;
+    recordMovementWithDelta: ReturnType<typeof vi.fn<AnyFn>>;
     executeTransferInTransaction: ReturnType<typeof vi.fn<AnyFn>>;
     findManyInventory: ReturnType<typeof vi.fn<AnyFn>>;
     findManyMovements: ReturnType<typeof vi.fn<AnyFn>>;
@@ -35,6 +37,7 @@ export interface MockRepositoryService {
   routers: {
     findBySerialNumber: ReturnType<typeof vi.fn<AnyFn>>;
     findById: ReturnType<typeof vi.fn<AnyFn>>;
+    findByIdForUpdate: ReturnType<typeof vi.fn<AnyFn>>;
     createRouter: ReturnType<typeof vi.fn<AnyFn>>;
     updateRouter: ReturnType<typeof vi.fn<AnyFn>>;
     createAssignment: ReturnType<typeof vi.fn<AnyFn>>;
@@ -84,7 +87,9 @@ export function createMockRepositoryService(): MockRepositoryService {
     },
     inventory: {
       getStock: vi.fn(),
+      getStockForUpdate: vi.fn(),
       recordMovementInTransaction: vi.fn(),
+      recordMovementWithDelta: vi.fn(),
       executeTransferInTransaction: vi.fn(),
       findManyInventory: vi.fn(),
       findManyMovements: vi.fn(),
@@ -93,6 +98,7 @@ export function createMockRepositoryService(): MockRepositoryService {
     routers: {
       findBySerialNumber: vi.fn(),
       findById: vi.fn(),
+      findByIdForUpdate: vi.fn(),
       createRouter: vi.fn(),
       updateRouter: vi.fn(),
       createAssignment: vi.fn(),
