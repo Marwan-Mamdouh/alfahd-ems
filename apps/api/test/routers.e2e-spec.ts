@@ -33,6 +33,7 @@ describe('Routers (e2e)', () => {
   const TECH_USER_ID = '44444444-4444-4444-8444-444444444444';
   const ROUTER_1_ID = '55555555-5555-4555-8555-555555555555';
   const ROUTER_ASSIGNED_ID = '66666666-6666-4666-8666-666666666666';
+  const ROUTER_FOR_INSTALL_ID = '66667777-6666-4666-8666-666677778888';
   const NON_EXISTENT_ID = '99999999-9999-4999-8999-999999999999';
   const ZERO_STOCK_PRODUCT_ID = '00000000-0000-4000-8000-000000000099';
   const LIMITED_PRODUCT_ID = '11112222-3333-4444-8555-666677778888';
@@ -275,6 +276,14 @@ describe('Routers (e2e)', () => {
         physicalCondition: 'SERVICEABLE',
         warehouseId: null,
       }),
+      makeRouter({
+        id: ROUTER_FOR_INSTALL_ID,
+        serialNumber: 'SN-FOR-INSTALL-003',
+        productId: PRODUCT_ROUTER_ID,
+        status: 'ASSIGNED_TO_TECHNICIAN',
+        physicalCondition: 'SERVICEABLE',
+        warehouseId: null,
+      }),
     ];
 
     assignmentStore = [
@@ -299,6 +308,17 @@ describe('Routers (e2e)', () => {
         assignedAt: new Date(),
         releasedAt: null,
         notes: 'Initial tech assignment',
+      },
+      {
+        id: 'init-assignment-tech-install',
+        routerId: ROUTER_FOR_INSTALL_ID,
+        holderType: 'TECHNICIAN',
+        warehouseId: null,
+        technicianId: TECH_USER_ID,
+        assignedBy: 'admin-seed',
+        assignedAt: new Date(),
+        releasedAt: null,
+        notes: 'Technician assignment for customer install test',
       },
     ];
 
@@ -645,6 +665,43 @@ describe('Routers (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.status).toBe('RETURNED');
+    });
+
+    it('transitions an ASSIGNED_TO_TECHNICIAN router to INSTALLED_AT_CUSTOMER and establishes customer custody', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const dto = makeTransitionRouterDto({
+        status: 'INSTALLED_AT_CUSTOMER',
+        notes: 'Installed at customer villa 42',
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_FOR_INSTALL_ID}/transition`)
+        .set(auth)
+        .send(dto)
+        .expect(200);
+
+      expect(res.body.data.status).toBe('INSTALLED_AT_CUSTOMER');
+      expect(res.body.data.currentHolderType).toBe('CUSTOMER');
+      expect(res.body.data.currentHolderId).toBeNull();
+      expect(res.body.data.warehouseId).toBeNull();
+    });
+
+    it('transitions an INSTALLED_AT_CUSTOMER router to RETURNED with target warehouse', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const dto = makeTransitionRouterDto({
+        status: 'RETURNED',
+        targetWarehouseId: WAREHOUSE_ACTIVE_ID,
+        notes: 'Uninstalled from customer and returned to hub',
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_FOR_INSTALL_ID}/transition`)
+        .set(auth)
+        .send(dto)
+        .expect(200);
+
+      expect(res.body.data.status).toBe('RETURNED');
+      expect(res.body.data.warehouseId).toBe(WAREHOUSE_ACTIVE_ID);
     });
 
     it('returns 400 Bad Request when attempting an illegal transition (RETURNED -> INSTALLED_AT_CUSTOMER)', async () => {
