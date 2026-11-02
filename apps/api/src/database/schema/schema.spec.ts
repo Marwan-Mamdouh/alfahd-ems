@@ -2,7 +2,49 @@ import { describe, expect, it } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ipAddresses } from './index.js';
+import { ipAddresses, routerStatusHistory } from './index.js';
+
+describe('routerStatusHistory schema and database constraints', () => {
+  it('defines the routerStatusHistory table with required audit columns', () => {
+    const config = getTableConfig(routerStatusHistory);
+
+    expect(config.name).toBe('router_status_history');
+    const columnNames = config.columns.map((c) => c.name);
+    expect(columnNames).toContain('id');
+    expect(columnNames).toContain('router_id');
+    expect(columnNames).toContain('from_status');
+    expect(columnNames).toContain('to_status');
+    expect(columnNames).toContain('reason');
+    expect(columnNames).toContain('changed_by');
+    expect(columnNames).toContain('created_at');
+  });
+
+  it('declares router_status_history in migration 0005_m2b_supply_routers_ip.sql', () => {
+    const migrationPath = path.resolve(
+      __dirname,
+      '../../../drizzle/0005_m2b_supply_routers_ip.sql',
+    );
+    const sqlContent = fs.readFileSync(migrationPath, 'utf8');
+
+    expect(sqlContent).toContain('CREATE TABLE "router_status_history"');
+    expect(sqlContent).toContain('"from_status" "router_status" NOT NULL');
+    expect(sqlContent).toContain('"to_status" "router_status" NOT NULL');
+    expect(sqlContent).toContain('"reason" text NOT NULL');
+    expect(sqlContent).toContain('"changed_by" uuid NOT NULL');
+  });
+
+  it('records router_status_history in 0005_snapshot.json', () => {
+    const snapshotPath = path.resolve(__dirname, '../../../drizzle/meta/0005_snapshot.json');
+    const snapshotJson = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+    const statusTable = snapshotJson.tables['public.router_status_history'];
+
+    expect(statusTable).toBeDefined();
+    expect(statusTable.columns.from_status).toBeDefined();
+    expect(statusTable.columns.to_status).toBeDefined();
+    expect(statusTable.columns.reason).toBeDefined();
+    expect(statusTable.columns.changed_by).toBeDefined();
+  });
+});
 
 describe('ipAddresses schema and database constraints', () => {
   it('defines the ip_addresses_ipv4_host_check constraint on ipAddresses table', () => {

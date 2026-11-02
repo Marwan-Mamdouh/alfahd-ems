@@ -10,6 +10,8 @@ import {
   type NewRouterAssignment,
   type RouterConditionHistory,
   type NewRouterConditionHistory,
+  type RouterStatusHistory,
+  type NewRouterStatusHistory,
 } from '../../../database/schema/index.js';
 import { DRIZZLE } from '../../../database/database.module.js';
 import { BaseRepository } from './base.repository.js';
@@ -191,6 +193,27 @@ export class RoutersRepository extends BaseRepository<
       .from(schema.routerConditionHistory)
       .where(eq(schema.routerConditionHistory.routerId, routerId))
       .orderBy(desc(schema.routerConditionHistory.createdAt));
+  }
+
+  async createStatusHistory(
+    data: NewRouterStatusHistory,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<RouterStatusHistory> {
+    const client = this.getClient(tx);
+    const [row] = await client.insert(schema.routerStatusHistory).values(data).returning();
+    return row;
+  }
+
+  async findStatusHistory(
+    routerId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<RouterStatusHistory[]> {
+    const client = this.getClient(tx);
+    return client
+      .select()
+      .from(schema.routerStatusHistory)
+      .where(eq(schema.routerStatusHistory.routerId, routerId))
+      .orderBy(desc(schema.routerStatusHistory.createdAt));
   }
 
   async findManyWithPagination(

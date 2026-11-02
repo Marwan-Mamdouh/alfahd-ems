@@ -14,6 +14,7 @@ import type {
   RouterPhysicalCondition,
   RouterDto,
   RouterAssignmentDto,
+  RouterStatusHistoryDto,
   RouterReportQueryDto,
 } from '@alfahd/types';
 import { RepositoryService } from '../repository/repository.service.js';
@@ -306,6 +307,11 @@ export class RoutersService {
     responsibleUserId: string,
     externalTx?: NodePgDatabase<typeof schema>,
   ): Promise<RouterDto> {
+    if (!dto.reason || typeof dto.reason !== 'string' || dto.reason.trim().length === 0) {
+      throw new BadRequestException('A non-empty reason is required for lifecycle transitions');
+    }
+    const trimmedReason = dto.reason.trim();
+
     const run = async (tx: NodePgDatabase<typeof schema>) => {
       const router = await this.repo.routers.findByIdForUpdate(id, tx);
       if (!router) {
@@ -450,6 +456,18 @@ export class RoutersService {
           status: dto.status,
           warehouseId: newWarehouseId,
           notes: dto.notes ?? router.notes,
+        },
+        tx,
+      );
+
+      // Record lifecycle status transition audit trail atomically
+      await this.repo.routers.createStatusHistory(
+        {
+          routerId: id,
+          fromStatus: router.status,
+          toStatus: dto.status,
+          reason: trimmedReason,
+          changedBy: responsibleUserId,
         },
         tx,
       );
@@ -695,6 +713,23 @@ export class RoutersService {
       fromWarehouseId: h.fromWarehouseId,
       toWarehouseId: h.toWarehouseId,
       externalLocation: h.externalLocation,
+      reason: h.reason,
+      changedBy: h.changedBy,
+      createdAt: h.createdAt.toISOString(),
+    }));
+  }
+
+  async getStatusHistory(routerId: string): Promise<RouterStatusHistoryDto[]> {
+    const router = await this.repo.routers.findById(routerId);
+    if (!router) {
+      throw new NotFoundException(`Router with ID "${routerId}" was not found`);
+    }
+    const history = await this.repo.routers.findStatusHistory(routerId);
+    return history.map((h) => ({
+      id: h.id,
+      routerId: h.routerId,
+      fromStatus: h.fromStatus,
+      toStatus: h.toStatus,
       reason: h.reason,
       changedBy: h.changedBy,
       createdAt: h.createdAt.toISOString(),

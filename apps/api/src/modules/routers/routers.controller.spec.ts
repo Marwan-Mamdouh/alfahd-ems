@@ -14,6 +14,7 @@ import type {
   RouterDto,
   RouterAssignmentDto,
   RouterConditionHistoryDto,
+  RouterStatusHistoryDto,
   RouterReportQueryDto,
 } from '@alfahd/types';
 
@@ -76,6 +77,7 @@ describe('RoutersController', () => {
     updateCondition: vi.fn(),
     getAssignments: vi.fn(),
     getConditionHistory: vi.fn(),
+    getStatusHistory: vi.fn(),
     exportRouterReport: vi.fn(),
   };
 
@@ -221,6 +223,26 @@ describe('RoutersController', () => {
 
       expect(mockRoutersService.getConditionHistory).toHaveBeenCalledWith(mockRouter.id);
       expect(result).toEqual([mockConditionHistory]);
+    });
+  });
+
+  describe('getStatusHistory', () => {
+    it('should call routersService.getStatusHistory', async () => {
+      const mockStatusHistory: RouterStatusHistoryDto = {
+        id: '88888888-8888-8888-8888-888888888888',
+        routerId: mockRouter.id,
+        fromStatus: 'AVAILABLE',
+        toStatus: 'ASSIGNED_TO_TECHNICIAN',
+        reason: 'Technician assignment',
+        changedBy: mockUser.userId,
+        createdAt: '2026-01-04T00:00:00.000Z',
+      };
+      mockRoutersService.getStatusHistory.mockResolvedValue([mockStatusHistory]);
+
+      const result = await controller.getStatusHistory(mockRouter.id);
+
+      expect(mockRoutersService.getStatusHistory).toHaveBeenCalledWith(mockRouter.id);
+      expect(result).toEqual([mockStatusHistory]);
     });
   });
 
