@@ -65,6 +65,7 @@ describe('RoutersService', () => {
 
   const mockWarehousesRepo = {
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
   };
 
   const mockProductsRepo = {
@@ -92,6 +93,9 @@ describe('RoutersService', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+    mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -267,7 +271,7 @@ describe('RoutersService', () => {
 
     it('throws BadRequestException if warehouse is deactivated', async () => {
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
-      mockWarehousesRepo.findById.mockResolvedValue({ ...mockWarehouse, isActive: false });
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({ ...mockWarehouse, isActive: false });
 
       await expect(
         service.create(
@@ -356,6 +360,34 @@ describe('RoutersService', () => {
 
       expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
       expect(result.status).toBe('RETURNED');
+    });
+
+    it('rejects transition to RETURNED if target warehouse is deactivated', async () => {
+      const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({ ...mockWarehouse, isActive: false });
+
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects transition to AVAILABLE if target warehouse is deactivated', async () => {
+      const returnedRouter = { ...mockRouter, status: 'RETURNED' as const };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(returnedRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({ ...mockWarehouse, isActive: false });
+
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'AVAILABLE', targetWarehouseId: mockWarehouse.id },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects illegal transitions (AVAILABLE -> DAMAGED via transition) with 400 Bad Request', async () => {
@@ -659,6 +691,23 @@ describe('RoutersService', () => {
       expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
       expect(result.status).toBe('ASSIGNED_TO_TECHNICIAN');
       expect(result.physicalCondition).toBe('SERVICEABLE');
+    });
+
+    it('rejects updateCondition if target warehouse is deactivated', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({ ...mockWarehouse, isActive: false });
+
+      await expect(
+        service.updateCondition(
+          mockRouter.id,
+          {
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: 'deactivated-wh-id',
+            reason: 'Transfer to regional branch',
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

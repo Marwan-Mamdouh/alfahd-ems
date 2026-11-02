@@ -77,18 +77,21 @@ export class WarehousesService {
   }
 
   async remove(id: string): Promise<void> {
-    const existing = await this.repo.warehouses.findById(id);
-    if (!existing) {
-      throw new NotFoundException(`Warehouse with ID "${id}" was not found`);
-    }
+    return this.repo.transaction(async (tx) => {
+      const existing = await this.repo.warehouses.findByIdForUpdate(id, tx);
+      if (!existing) {
+        throw new NotFoundException(`Warehouse with ID "${id}" was not found`);
+      }
 
-    const { canDelete, reason } = await this.repo.warehouses.canDeleteWarehouse(id);
-    if (!canDelete) {
-      throw new ConflictException(
-        reason ?? 'Cannot deactivate warehouse due to active inventory, staff, or located routers',
-      );
-    }
+      const { canDelete, reason } = await this.repo.warehouses.canDeleteWarehouse(id, tx);
+      if (!canDelete) {
+        throw new ConflictException(
+          reason ??
+            'Cannot deactivate warehouse due to active inventory, staff, or located routers',
+        );
+      }
 
-    await this.repo.warehouses.softDeactivate(id);
+      await this.repo.warehouses.softDeactivate(id, tx);
+    });
   }
 }

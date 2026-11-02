@@ -12,10 +12,14 @@ Derived from **SOW Section 2.1.4, Section 2.1.5**, **CRM SRS Section 5**, and **
 * **Multi-Warehouse Management:** Regional distribution centers holding physical stock with street address, GPS coordinates (`latitude`, `longitude`), and optional manager assignment (`managerId`).
 * **150m GPS Geofence Anchor:** Stores `geofenceRadiusMeters` (defaults to **150m** strictly per SOW Section 2.1.4), used as the spatial anchor for mobile attendance check-in by field technicians.
 * **Name Uniqueness:** Warehouse names are unique across the system (e.g., "Cairo Main Hub", "Alexandria Branch"), trimmed and normalized.
-* **Guarded Soft-Deactivation (M2b):** Per the M2b contract, warehouses are never hard-deleted. Instead, deletion triggers a guarded soft-deactivation (`isActive: false`). Deactivation is strictly blocked if:
-  1. Active consumable inventory stock remains (`warehouse_inventory.quantity > 0`).
-  2. Active employees/technicians are assigned to it (`users.assignedWarehouseId`).
-  3. Routers are physically located at the warehouse (`routers.warehouseId = id`).
+* **Guarded Soft-Deactivation & Transaction Serialization (M2b - T07):** Per the M2b contract, warehouses are never hard-deleted. Instead, deletion triggers a guarded soft-deactivation (`isActive: false`) within a strict database transaction:
+  1. Acquires a pessimistic row-level lock (`findByIdForUpdate(id, tx)` / `SELECT ... FOR UPDATE`) to serialize against all concurrent router placements, returns, receipts, and inventory writes.
+  2. Blocks deactivation with `ConflictException` (409) if:
+     - Active consumable inventory stock remains (`warehouse_inventory.quantity > 0`).
+     - Active staff or technicians are assigned to it (`users.assignedWarehouseId`).
+     - Routers are physically located at the warehouse (`routers.warehouseId = id`), including damaged or under-repair units without active custody.
+     - Active router custody assignments remain (`router_assignments.warehouseId = id AND released_at IS NULL`).
+  3. Every placement path (router registration, return, inspection to AVAILABLE, condition update, and stock inbound/transfer) validates target warehouse active status under a row lock, rejecting inactive warehouses with `BadRequestException` (400).
 
 ---
 
