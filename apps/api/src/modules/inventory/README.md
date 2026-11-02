@@ -17,8 +17,11 @@ Derived from **SOW Section 2.1.6, Section 4.1, Section 6** and **CRM SRS Section
   3. `RETURN_TECHNICIAN`: Unused or retrieved equipment returned from technicians to the warehouse (also triggered when a returned router is re-inspected as available).
   4. `TRANSFER_WAREHOUSE`: Inter-warehouse stock redistribution.
   5. `ADJUSTMENT`: Physical audit count reconciliations with mandatory justification notes (also triggered when an in-warehouse router is marked damaged, decrementing usable stock).
-* **Cross-Module Integration (M2b Routers):** In Milestone M2b, `RoutersService` calls `this.repo.inventory.recordMovementInTransaction` within its transactional boundaries so serialized router movements keep aggregate warehouse balances 100% in sync.
-* **Database Transactions:** All balance changes and movement records are committed atomically via `db.transaction()`.
+* **Cross-Module Integration (M2b Routers & Atomic Writes):**
+  * In Milestone M2b (Issues #51 & #52), `RoutersService` integrates with `InventoryRepository` using caller-owned transactions (`tx`).
+  * `getStockForUpdate(warehouseId, productId, tx)` acquires pessimistic row locks (`FOR UPDATE`) on inventory balances during router onboarding, assignment, and condition updates.
+  * `recordMovementWithDelta(movement, delta, tx)` atomically applies relative stock deltas using SQL `GREATEST(0, warehouse_inventory.quantity + delta)` alongside `stock_movements` ledger inserts within the same transaction. This guarantees asset creation, custody assignments, condition history, and stock movements commit or roll back together atomically.
+* **Database Transactions:** All balance changes and movement records are committed atomically via caller-provided or method-managed PostgreSQL transactions (`db.transaction()`).
 
 ---
 
@@ -100,8 +103,10 @@ export type NewStockMovement = typeof stockMovements.$inferInsert;
 
 ### C. `InventoryRepository` Methods
 * `getStock(warehouseId, productId)`: Fetches current stock row.
+* `getStockForUpdate(warehouseId, productId, tx?)`: Fetches stock row with pessimistic row-level locking (`FOR UPDATE`) inside an active transaction.
 * `findManyInventory(params)`: Returns paginated stock balances joined with product details (SKU, name, category, lowStockThreshold) and warehouse details.
-* `recordMovementInTransaction(movement, newQuantity)`: Atomically upserts `warehouse_inventory` and inserts into `stock_movements`.
+* `recordMovementInTransaction(movement, newQuantity, tx?)`: Atomically upserts `warehouse_inventory` and inserts into `stock_movements`, supporting caller-owned transactions.
+* `recordMovementWithDelta(movement, delta, tx?)`: Atomically modifies `warehouse_inventory` using relative SQL deltas (`GREATEST(0, quantity + delta)`) on conflict, preventing race conditions, and inserts into `stock_movements`.
 * `executeTransferInTransaction(...)`: Atomically deducts from source warehouse, adds to destination warehouse, and records two transfer movements.
 * `findManyMovements(params)`: Queries paginated movement audit logs with filters (`warehouseId`, `productId`, `movementType`, `technicianId`).
 * `findMovementById(id)`: Fetches a single audit transaction record.

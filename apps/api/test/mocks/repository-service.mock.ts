@@ -48,6 +48,7 @@ export interface MockRepositoryService {
     findConditionHistory: ReturnType<typeof vi.fn<AnyFn>>;
     findManyWithPagination: ReturnType<typeof vi.fn<AnyFn>>;
     getWarehouseRouterCounts: ReturnType<typeof vi.fn<AnyFn>>;
+    countRegisteredUsableInWarehouse: ReturnType<typeof vi.fn<AnyFn>>;
   };
   ip: {
     findByAddress: ReturnType<typeof vi.fn<AnyFn>>;
@@ -109,6 +110,7 @@ export function createMockRepositoryService(): MockRepositoryService {
       findConditionHistory: vi.fn(),
       findManyWithPagination: vi.fn(),
       getWarehouseRouterCounts: vi.fn(),
+      countRegisteredUsableInWarehouse: vi.fn(),
     },
     ip: {
       findByAddress: vi.fn(),

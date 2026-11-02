@@ -71,7 +71,39 @@ export class RoutersService {
     const condition: RouterPhysicalCondition = dto.physicalCondition ?? 'SERVICEABLE';
 
     const run = async (tx: NodePgDatabase<typeof schema>) => {
-      // 1. Insert Router row
+      // 1. If registering existing stock (!isNewReceipt), enforce audited registration capacity
+      if (!dto.isNewReceipt) {
+        // Lock inventory row to serialize concurrent onboarding and prevent over-registration
+        const inventory = await this.repo.inventory.getStockForUpdate(
+          dto.warehouseId,
+          dto.productId,
+          tx,
+        );
+        const currentStock = inventory?.quantity ?? 0;
+
+        if (condition === 'SERVICEABLE') {
+          if (currentStock <= 0) {
+            throw new ConflictException(
+              `Cannot onboard router into existing stock: warehouse "${warehouse.name}" has 0 recorded stock for product "${product.name}". Use a new receipt (isNewReceipt: true) to receive new inventory.`,
+            );
+          }
+
+          const registeredCount = await this.repo.routers.countRegisteredUsableInWarehouse(
+            dto.warehouseId,
+            dto.productId,
+            tx,
+          );
+
+          const availableCapacity = currentStock - registeredCount;
+          if (availableCapacity <= 0) {
+            throw new ConflictException(
+              `Cannot onboard router into existing stock: all ${currentStock} recorded units for product "${product.name}" in warehouse "${warehouse.name}" already have registered serial numbers.`,
+            );
+          }
+        }
+      }
+
+      // 2. Insert Router row
       const router = await this.repo.routers.createRouter(
         {
           serialNumber: trimmedSerial,
@@ -84,7 +116,7 @@ export class RoutersService {
         tx,
       );
 
-      // 2. Initial custody row (WAREHOUSE) only if in serviceable warehouse state
+      // 3. Initial custody row (WAREHOUSE) only if in serviceable warehouse state
       if (condition === 'SERVICEABLE') {
         await this.repo.routers.createAssignment(
           {
@@ -92,13 +124,16 @@ export class RoutersService {
             holderType: 'WAREHOUSE',
             warehouseId: dto.warehouseId,
             assignedBy: responsibleUserId,
-            notes: 'Initial warehouse registration',
+            notes: dto.isNewReceipt
+              ? 'New inbound shipment receipt'
+              : 'Existing stock serial onboarding',
           },
           tx,
         );
       }
 
-      // 3. Atomically update inventory quantity if marked as a new inbound receipt
+      // 4. Handle stock delta:
+      // Case A: New inbound receipt of serviceable router -> +1 stock
       if (dto.isNewReceipt && condition === 'SERVICEABLE') {
         await this.repo.inventory.recordMovementWithDelta(
           {
@@ -110,6 +145,39 @@ export class RoutersService {
             notes: `Router receipt serial ${trimmedSerial}`,
           },
           1,
+          tx,
+        );
+      }
+
+      // Case B: Damaged opening unit reconciliation -> -1 stock (with explicit audit evidence)
+      if (!dto.isNewReceipt && condition === 'DAMAGED') {
+        const inventory = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
+        if ((inventory?.quantity ?? 0) > 0) {
+          await this.repo.inventory.recordMovementWithDelta(
+            {
+              warehouseId: dto.warehouseId,
+              productId: dto.productId,
+              movementType: 'ADJUSTMENT',
+              quantity: 1,
+              responsibleUserId,
+              notes: `Explicit reconciliation: opening stock unit registered as DAMAGED (serial: ${trimmedSerial})`,
+            },
+            -1,
+            tx,
+          );
+        }
+
+        await this.repo.routers.createConditionHistory(
+          {
+            routerId: router.id,
+            fromCondition: 'SERVICEABLE',
+            toCondition: condition,
+            fromWarehouseId: dto.warehouseId,
+            toWarehouseId: dto.warehouseId,
+            externalLocation: null,
+            reason: dto.notes ?? 'Initial onboarding inspection identified opening unit as damaged',
+            changedBy: responsibleUserId,
+          },
           tx,
         );
       }
