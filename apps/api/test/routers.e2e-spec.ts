@@ -27,6 +27,7 @@ describe('Routers (e2e)', () => {
   let jwtService: JwtService;
 
   const WAREHOUSE_ACTIVE_ID = '11111111-1111-4111-8111-111111111111';
+  const WAREHOUSE_SECONDARY_ID = '33332222-1111-4444-8888-999900001111';
   const WAREHOUSE_INACTIVE_ID = '22222222-2222-4222-8222-222222222222';
   const PRODUCT_ROUTER_ID = '33333333-3333-4333-8333-333333333333';
   const TECH_USER_ID = '44444444-4444-4444-8444-444444444444';
@@ -175,6 +176,9 @@ describe('Routers (e2e)', () => {
       findById: async (id: string) => {
         if (id === WAREHOUSE_ACTIVE_ID) {
           return { id, name: 'Main Hub', isActive: true };
+        }
+        if (id === WAREHOUSE_SECONDARY_ID) {
+          return { id, name: 'Secondary Hub', isActive: true };
         }
         if (id === WAREHOUSE_INACTIVE_ID) {
           return { id, name: 'Old Hub', isActive: false };
@@ -675,6 +679,233 @@ describe('Routers (e2e)', () => {
       expect(Array.isArray(res.body.data)).toBe(true);
       expect(res.body.data.length).toBeGreaterThan(0);
       expect(res.body.data[0].toCondition).toBe('DAMAGED');
+    });
+
+    it('A-to-B move decrements A, increments B and moves custody once', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const ROUTER_MOVE_ID = '99991111-2222-4333-8444-555566667777';
+
+      // Insert available, serviceable router at WAREHOUSE_ACTIVE_ID
+      routerStore.push(
+        makeRouter({
+          id: ROUTER_MOVE_ID,
+          serialNumber: 'SN-MOVE-A-B',
+          productId: PRODUCT_ROUTER_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'SERVICEABLE',
+        }),
+      );
+
+      // Add custody assignment at WAREHOUSE_ACTIVE_ID
+      assignmentStore.push({
+        id: 'assign-move-init',
+        routerId: ROUTER_MOVE_ID,
+        holderType: 'WAREHOUSE',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        technicianId: null,
+        assignedBy: 'seed-admin',
+        assignedAt: new Date(),
+        releasedAt: null,
+        notes: 'Initial warehouse custody',
+      });
+
+      // Ensure stock exists in both warehouses
+      const stockA = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      ) ?? {
+        id: 'inv-a',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        quantity: 10,
+        updatedAt: new Date(),
+      };
+      if (!stockStore.includes(stockA)) stockStore.push(stockA);
+      const initialQtyA = stockA.quantity;
+
+      let stockB = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_SECONDARY_ID && s.productId === PRODUCT_ROUTER_ID,
+      );
+      if (!stockB) {
+        stockB = {
+          id: 'inv-b',
+          warehouseId: WAREHOUSE_SECONDARY_ID,
+          productId: PRODUCT_ROUTER_ID,
+          quantity: 5,
+          updatedAt: new Date(),
+        };
+        stockStore.push(stockB);
+      }
+      const initialQtyB = stockB.quantity;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_MOVE_ID}/condition`)
+        .set(auth)
+        .send(
+          makeUpdateRouterConditionDto({
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: WAREHOUSE_SECONDARY_ID,
+            reason: 'Inter-warehouse stock rebalance to Secondary Hub',
+          }),
+        )
+        .expect(200);
+
+      // Router now located at Secondary Hub with warehouse custody
+      expect(res.body.data.warehouseId).toBe(WAREHOUSE_SECONDARY_ID);
+      expect(res.body.data.currentHolderType).toBe('WAREHOUSE');
+      expect(res.body.data.currentHolderId).toBe(WAREHOUSE_SECONDARY_ID);
+
+      // Decremented A, incremented B
+      expect(stockA.quantity).toBe(initialQtyA - 1);
+      expect(stockB.quantity).toBe(initialQtyB + 1);
+
+      // Verify active assignment moved
+      const prevAssignment = assignmentStore.find((a) => a.id === 'assign-move-init');
+      expect(prevAssignment?.releasedAt).not.toBeNull();
+      const currentAssignment = assignmentStore.find(
+        (a) => a.routerId === ROUTER_MOVE_ID && a.releasedAt === null,
+      );
+      expect(currentAssignment?.warehouseId).toBe(WAREHOUSE_SECONDARY_ID);
+    });
+
+    it('removes usable contribution and applicable custody when condition changes directly to UNDER_REPAIR', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const ROUTER_REPAIR_ID = '88882222-3333-4444-8555-666677778888';
+
+      routerStore.push(
+        makeRouter({
+          id: ROUTER_REPAIR_ID,
+          serialNumber: 'SN-DIRECT-REPAIR',
+          productId: PRODUCT_ROUTER_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'SERVICEABLE',
+        }),
+      );
+
+      assignmentStore.push({
+        id: 'assign-repair-init',
+        routerId: ROUTER_REPAIR_ID,
+        holderType: 'WAREHOUSE',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        technicianId: null,
+        assignedBy: 'seed-admin',
+        assignedAt: new Date(),
+        releasedAt: null,
+        notes: 'Initial custody',
+      });
+
+      const stock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      )!;
+      const initialStock = stock.quantity;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_REPAIR_ID}/condition`)
+        .set(auth)
+        .send(
+          makeUpdateRouterConditionDto({
+            physicalCondition: 'UNDER_REPAIR',
+            reason: 'Diagnosed with faulty ethernet switch',
+          }),
+        )
+        .expect(200);
+
+      expect(res.body.data.physicalCondition).toBe('UNDER_REPAIR');
+      expect(res.body.data.currentHolderType).toBeNull();
+      expect(res.body.data.currentHolderId).toBeNull();
+
+      // Stock decremented by 1
+      expect(stock.quantity).toBe(initialStock - 1);
+
+      // Active custody released
+      const activeAssignment = assignmentStore.find(
+        (a) => a.routerId === ROUTER_REPAIR_ID && a.releasedAt === null,
+      );
+      expect(activeAssignment).toBeUndefined();
+    });
+
+    it('clears physical warehouse placement while retaining auditable prior location when sent for external repair', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const ROUTER_EXT_ID = '77773333-4444-4555-8666-777788889999';
+
+      routerStore.push(
+        makeRouter({
+          id: ROUTER_EXT_ID,
+          serialNumber: 'SN-EXTERNAL-REPAIR',
+          productId: PRODUCT_ROUTER_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'UNDER_REPAIR',
+        }),
+      );
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_EXT_ID}/condition`)
+        .set(auth)
+        .send(
+          makeUpdateRouterConditionDto({
+            physicalCondition: 'UNDER_REPAIR',
+            externalLocation: 'Apex Circuit Repairs Lab',
+            reason: 'Sending out for component reflow',
+          }),
+        )
+        .expect(200);
+
+      // Physical warehouse placement cleared
+      expect(res.body.data.warehouseId).toBeNull();
+      expect(res.body.data.externalLocation).toBe('Apex Circuit Repairs Lab');
+      expect(res.body.data.currentHolderType).toBeNull();
+
+      // Prior location retained in condition history
+      const history = conditionHistoryStore.filter((c) => c.routerId === ROUTER_EXT_ID);
+      const latestHistory = history[history.length - 1];
+      expect(latestHistory.fromWarehouseId).toBe(WAREHOUSE_ACTIVE_ID);
+      expect(latestHistory.toWarehouseId).toBeNull();
+      expect(latestHistory.externalLocation).toBe('Apex Circuit Repairs Lab');
+    });
+
+    it('restoring serviceability adds stock and restores warehouse custody upon return from repair', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const ROUTER_RETURN_REPAIR_ID = '66664444-5555-4666-8777-888899990000';
+
+      routerStore.push(
+        makeRouter({
+          id: ROUTER_RETURN_REPAIR_ID,
+          serialNumber: 'SN-REPAIRED-RETURN',
+          productId: PRODUCT_ROUTER_ID,
+          warehouseId: null,
+          externalLocation: 'Apex Circuit Repairs Lab',
+          status: 'AVAILABLE',
+          physicalCondition: 'UNDER_REPAIR',
+        }),
+      );
+
+      const stockB = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_SECONDARY_ID && s.productId === PRODUCT_ROUTER_ID,
+      )!;
+      const initialStockB = stockB.quantity;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_RETURN_REPAIR_ID}/condition`)
+        .set(auth)
+        .send(
+          makeUpdateRouterConditionDto({
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: WAREHOUSE_SECONDARY_ID,
+            reason: 'Passed post-repair diagnostic benchmark',
+          }),
+        )
+        .expect(200);
+
+      expect(res.body.data.physicalCondition).toBe('SERVICEABLE');
+      expect(res.body.data.warehouseId).toBe(WAREHOUSE_SECONDARY_ID);
+      expect(res.body.data.externalLocation).toBeNull();
+      expect(res.body.data.currentHolderType).toBe('WAREHOUSE');
+      expect(res.body.data.currentHolderId).toBe(WAREHOUSE_SECONDARY_ID);
+
+      // Added back to usable stock in Secondary Hub
+      expect(stockB.quantity).toBe(initialStockB + 1);
     });
   });
 

@@ -409,6 +409,257 @@ describe('RoutersService', () => {
       expect(result.status).toBe('AVAILABLE');
       expect(result.physicalCondition).toBe('DAMAGED');
     });
+
+    it('A-to-B move decrements A, increments B and moves custody once', async () => {
+      const warehouseBId = '88888888-8888-4888-8888-888888888888';
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'AVAILABLE',
+        physicalCondition: 'SERVICEABLE',
+        warehouseId: mockWarehouse.id,
+      });
+      mockWarehousesRepo.findById.mockResolvedValue({
+        id: warehouseBId,
+        name: 'Hub B',
+        isActive: true,
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue({
+        ...mockAssignment,
+        warehouseId: warehouseBId,
+      });
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        warehouseId: warehouseBId,
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue({
+        ...mockAssignment,
+        warehouseId: warehouseBId,
+      });
+
+      const result = await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'SERVICEABLE',
+          warehouseId: warehouseBId,
+          reason: 'Relocating to Hub B',
+        },
+        'admin-id',
+      );
+
+      // Decrement A (-1)
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: mockWarehouse.id,
+          movementType: 'TRANSFER_WAREHOUSE',
+        }),
+        -1,
+        expect.anything(),
+      );
+
+      // Increment B (+1)
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: warehouseBId,
+          movementType: 'TRANSFER_WAREHOUSE',
+        }),
+        1,
+        expect.anything(),
+      );
+
+      // Released old custody on A, created new custody on B
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalledTimes(1);
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: warehouseBId,
+          holderType: 'WAREHOUSE',
+        }),
+        expect.anything(),
+      );
+
+      expect(result.warehouseId).toBe(warehouseBId);
+      expect(result.currentHolderId).toBe(warehouseBId);
+    });
+
+    it('removes usable contribution and applicable custody when condition changes directly to UNDER_REPAIR', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'AVAILABLE',
+        physicalCondition: 'SERVICEABLE',
+        warehouseId: mockWarehouse.id,
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'UNDER_REPAIR',
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(undefined);
+
+      const result = await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'UNDER_REPAIR',
+          reason: 'Port flapping defect discovered',
+        },
+        'admin-id',
+      );
+
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: mockWarehouse.id,
+          movementType: 'ADJUSTMENT',
+        }),
+        -1,
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
+      expect(result.physicalCondition).toBe('UNDER_REPAIR');
+      expect(result.currentHolderId).toBeNull();
+    });
+
+    it('clears physical warehouse placement and retains auditable prior location when sent for external repair', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'AVAILABLE',
+        physicalCondition: 'UNDER_REPAIR',
+        warehouseId: mockWarehouse.id,
+        externalLocation: null,
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'UNDER_REPAIR',
+        warehouseId: null,
+        externalLocation: 'Apex Router Repairs Inc.',
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(undefined);
+
+      const result = await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'UNDER_REPAIR',
+          externalLocation: 'Apex Router Repairs Inc.',
+          reason: 'Board-level soldering required',
+        },
+        'admin-id',
+      );
+
+      // Condition history recorded prior warehouse and new external location
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fromWarehouseId: mockWarehouse.id,
+          toWarehouseId: null,
+          externalLocation: 'Apex Router Repairs Inc.',
+        }),
+        expect.anything(),
+      );
+
+      // Router record has null warehouseId and externalLocation set
+      expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.objectContaining({
+          warehouseId: null,
+          externalLocation: 'Apex Router Repairs Inc.',
+        }),
+        expect.anything(),
+      );
+
+      expect(result.warehouseId).toBeNull();
+      expect(result.externalLocation).toBe('Apex Router Repairs Inc.');
+    });
+
+    it('restoring serviceability adds stock only when lifecycle is AVAILABLE and location is a warehouse', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'AVAILABLE',
+        physicalCondition: 'UNDER_REPAIR',
+        warehouseId: null,
+        externalLocation: 'Apex Router Repairs Inc.',
+      });
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+      mockRoutersRepo.createAssignment.mockResolvedValue({
+        ...mockAssignment,
+        warehouseId: mockWarehouse.id,
+      });
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'SERVICEABLE',
+        warehouseId: mockWarehouse.id,
+        externalLocation: null,
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue({
+        ...mockAssignment,
+        warehouseId: mockWarehouse.id,
+      });
+
+      const result = await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'SERVICEABLE',
+          warehouseId: mockWarehouse.id,
+          reason: 'Returned from external repair QA passed',
+        },
+        'admin-id',
+      );
+
+      // Increments destination warehouse stock (+1)
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: mockWarehouse.id,
+          movementType: 'ADJUSTMENT',
+        }),
+        1,
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: mockWarehouse.id,
+          holderType: 'WAREHOUSE',
+        }),
+        expect.anything(),
+      );
+      expect(result.warehouseId).toBe(mockWarehouse.id);
+      expect(result.physicalCondition).toBe('SERVICEABLE');
+    });
+
+    it('restoring serviceability does NOT add stock when lifecycle does not permit it (e.g. ASSIGNED_TO_TECHNICIAN)', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN',
+        physicalCondition: 'DAMAGED',
+        warehouseId: null,
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN',
+        physicalCondition: 'SERVICEABLE',
+        warehouseId: null,
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue({
+        ...mockAssignment,
+        holderType: 'TECHNICIAN',
+      });
+
+      const result = await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'SERVICEABLE',
+          reason: 'Field technician replaced faulty power adapter',
+        },
+        'admin-id',
+      );
+
+      // No stock delta applied because lifecycle is not AVAILABLE in warehouse
+      expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+      expect(result.status).toBe('ASSIGNED_TO_TECHNICIAN');
+      expect(result.physicalCondition).toBe('SERVICEABLE');
+    });
   });
 
   describe('transaction atomicity & caller-owned externalTx', () => {
