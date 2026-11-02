@@ -309,6 +309,14 @@ export interface JobStatusResponseDto {
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   downloadUrl?: string | null;
   error?: string | null;
+  inserted?: number;
+  skipped?: number;
+  errors?: Array<{
+    row: number;
+    address: string;
+    reason: string;
+  }>;
+  result?: IpImportResultDto | null;
 }
 
 // ─── Router DTOs ──────────────────────────────────────────────────────────────

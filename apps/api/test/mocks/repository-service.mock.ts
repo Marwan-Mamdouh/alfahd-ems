@@ -54,6 +54,7 @@ export interface MockRepositoryService {
     findByAddress: ReturnType<typeof vi.fn<AnyFn>>;
     findById: ReturnType<typeof vi.fn<AnyFn>>;
     createIp: ReturnType<typeof vi.fn<AnyFn>>;
+    createIpOnConflictDoNothing: ReturnType<typeof vi.fn<AnyFn>>;
     updateIp: ReturnType<typeof vi.fn<AnyFn>>;
     createHistory: ReturnType<typeof vi.fn<AnyFn>>;
     findHistoryByIp: ReturnType<typeof vi.fn<AnyFn>>;
@@ -116,6 +117,7 @@ export function createMockRepositoryService(): MockRepositoryService {
       findByAddress: vi.fn(),
       findById: vi.fn(),
       createIp: vi.fn(),
+      createIpOnConflictDoNothing: vi.fn(),
       updateIp: vi.fn(),
       createHistory: vi.fn(),
       findHistoryByIp: vi.fn(),

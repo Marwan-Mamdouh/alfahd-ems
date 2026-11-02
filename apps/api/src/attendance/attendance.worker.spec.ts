@@ -260,4 +260,14 @@ describe('AttendanceReportWorker', () => {
       'check_in_at',
     ]);
   });
+
+  it('throws an error and refuses to process IP_CSV_IMPORT jobs (cannot silently consume imports as reports)', async () => {
+    const job = {
+      data: { type: 'IP_CSV_IMPORT', csvContent: 'address\n10.0.0.1' },
+    } as any;
+
+    await expect(worker.process(job)).rejects.toThrow(
+      'Unsupported report job type: IP_CSV_IMPORT',
+    );
+  });
 });
