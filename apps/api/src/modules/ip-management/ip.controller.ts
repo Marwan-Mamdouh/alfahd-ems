@@ -4,6 +4,8 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
+  Optional,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -15,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiAcceptedResponse,
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
@@ -24,7 +27,13 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { Role, type IpAddressDto, type IpHistoryDto, type IpImportResultDto } from '@alfahd/types';
+import {
+  Role,
+  type IpAddressDto,
+  type IpHistoryDto,
+  type IpImportResultDto,
+  type JobStatusResponseDto,
+} from '@alfahd/types';
 import { routes } from '../../common/constants/routes.constants.js';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../auth/guards/roles.guard.js';
@@ -32,6 +41,7 @@ import { Roles } from '../../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../auth/strategies/jwt.strategy.js';
 import { IpService } from './ip.service.js';
+import { JobsService } from '../../jobs/jobs.service.js';
 import { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
 
 @ApiTags('IP Management')
@@ -39,7 +49,10 @@ import { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
 @Controller(routes.ip.root)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class IpController {
-  constructor(private readonly ipService: IpService) {}
+  constructor(
+    private readonly ipService: IpService,
+    @Optional() private readonly jobsService?: JobsService,
+  ) {}
 
   @Post()
   @Roles(Role.ADMIN)
@@ -145,10 +158,10 @@ export class IpController {
   }
 
   @Post(routes.ip.import)
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   @Roles(Role.ADMIN)
   @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({ summary: 'Bulk import IPv4 addresses from CSV' })
+  @ApiOperation({ summary: 'Bulk import IPv4 addresses from CSV (asynchronous)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -157,17 +170,31 @@ export class IpController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'CSV file with address,notes headers',
+          description: 'CSV file with address,notes headers (at least 1,000 rows supported)',
         },
       },
     },
   })
-  @ApiOkResponse({ description: 'Import outcome summary' })
+  @ApiAcceptedResponse({ description: 'Import job enqueued successfully' })
   async importCsv(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: JwtUser,
-  ): Promise<IpImportResultDto> {
-    const content = file?.buffer ? file.buffer.toString('utf-8') : '';
-    return this.ipService.importCsv(content, user.userId);
+  ): Promise<{ jobId: string }> {
+    return this.ipService.enqueueImportCsv(file?.buffer, user.userId);
+  }
+
+  @Get('import/:id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Poll status and outcome of an IP CSV import job' })
+  @ApiParam({ name: 'id', description: 'Job ID' })
+  @ApiOkResponse({ description: 'Import job status and outcome' })
+  async getImportStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+  ): Promise<JobStatusResponseDto> {
+    if (!this.jobsService) {
+      throw new NotFoundException('JobsService is not available');
+    }
+    return this.jobsService.getJobStatus(id, user);
   }
 }

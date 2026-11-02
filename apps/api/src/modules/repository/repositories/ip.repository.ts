@@ -70,6 +70,19 @@ export class IpRepository extends BaseRepository<
     return row;
   }
 
+  async createIpOnConflictDoNothing(
+    data: NewIpAddress,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddress | undefined> {
+    const client = this.getClient(tx);
+    const [row] = await client
+      .insert(schema.ipAddresses)
+      .values(data)
+      .onConflictDoNothing({ target: schema.ipAddresses.address })
+      .returning();
+    return row;
+  }
+
   async updateIp(
     id: string,
     data: Partial<NewIpAddress>,

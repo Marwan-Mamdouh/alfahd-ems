@@ -1,9 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { isIP } from 'class-validator';
 import type { IpAddressDto, IpHistoryDto, IpImportResultDto } from '@alfahd/types';
 import * as schema from '../../database/schema/index.js';
@@ -12,7 +16,10 @@ import type { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
 
 @Injectable()
 export class IpService {
-  constructor(private readonly repo: RepositoryService) {}
+  constructor(
+    private readonly repo: RepositoryService,
+    @Optional() @InjectQueue('ip-imports') private readonly ipImportsQueue?: Queue,
+  ) {}
 
   async create(dto: CreateIpDto, actorId: string): Promise<IpAddressDto> {
     const trimmedAddress = dto.address.trim();
@@ -255,8 +262,66 @@ export class IpService {
     }));
   }
 
-  async importCsv(csvContent: string, actorId: string): Promise<IpImportResultDto> {
-    const lines = csvContent
+  async enqueueImportCsv(
+    fileBuffer: Buffer | undefined,
+    actorId: string,
+  ): Promise<{ jobId: string }> {
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('A non-empty CSV file is required');
+    }
+
+    if (fileBuffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('CSV file exceeds maximum size limit of 5MB');
+    }
+
+    const text = fileBuffer.toString('utf-8').replace(/^\uFEFF/, '').trim();
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (lines.length <= 1) {
+      throw new BadRequestException('CSV must contain a header and at least one data row');
+    }
+
+    if (lines.length - 1 > 5000) {
+      throw new BadRequestException('CSV exceeds maximum limit of 5,000 rows');
+    }
+
+    const headerLine = lines[0].toLowerCase();
+    const headers = headerLine.split(',').map((h) => h.trim().replace(/^["']|["']$/g, ''));
+    if (!headers.includes('address')) {
+      throw new BadRequestException('CSV must contain an "address" column header');
+    }
+
+    if (!this.ipImportsQueue) {
+      throw new BadRequestException('Import queue is not configured');
+    }
+
+    const job = await this.ipImportsQueue.add(
+      'ip-csv-import',
+      {
+        type: 'IP_CSV_IMPORT',
+        csvContent: text,
+        requestedBy: actorId,
+      },
+      {
+        jobId: randomUUID(),
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+      },
+    );
+
+    return { jobId: String(job.id) };
+  }
+
+  async processImportJob(
+    csvContent: string,
+    actorId: string,
+    jobId: string,
+  ): Promise<IpImportResultDto> {
+    const clean = csvContent.replace(/^\uFEFF/, '');
+    const lines = clean
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
@@ -318,13 +383,23 @@ export class IpService {
       // Check if already in DB
       const existing = await this.repo.ip.findByAddress(rawAddress);
       if (existing) {
-        result.skipped += 1;
+        // Retry-safe bookkeeping: check if created by THIS SAME JOB in an earlier attempt
+        const history = await this.repo.ip.findHistoryByIp(existing.id);
+        const isFromSameJob = history.some(
+          (h) => h.action === 'CREATE' && h.reason?.includes(`job:${jobId}`),
+        );
+
+        if (isFromSameJob) {
+          result.inserted += 1;
+        } else {
+          result.skipped += 1;
+        }
         continue;
       }
 
       try {
         await this.repo.transaction(async (tx) => {
-          const created = await this.repo.ip.createIp(
+          const created = await this.repo.ip.createIpOnConflictDoNothing(
             {
               address: rawAddress,
               status: 'FREE',
@@ -334,20 +409,26 @@ export class IpService {
             tx,
           );
 
+          if (!created) {
+            // Concurrent duplicate insertion conflict handled safely by ON CONFLICT DO NOTHING
+            result.skipped += 1;
+            return;
+          }
+
           await this.repo.ip.createHistory(
             {
               ipId: created.id,
               fromStatus: 'FREE',
               toStatus: 'FREE',
               action: 'CREATE',
-              reason: 'Bulk CSV import',
+              reason: `Bulk CSV import (job:${jobId})`,
               actorId,
             },
             tx,
           );
-        });
 
-        result.inserted += 1;
+          result.inserted += 1;
+        });
       } catch (err: any) {
         result.errors.push({
           row: rowNum,
@@ -358,6 +439,10 @@ export class IpService {
     }
 
     return result;
+  }
+
+  async importCsv(csvContent: string, actorId: string): Promise<IpImportResultDto> {
+    return this.processImportJob(csvContent, actorId, 'sync-import');
   }
 
   private mapToDto(ip: schema.IpAddress): IpAddressDto {

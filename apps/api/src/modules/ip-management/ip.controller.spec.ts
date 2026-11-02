@@ -49,6 +49,7 @@ describe('IpController', () => {
     unarchive: vi.fn(),
     getHistory: vi.fn(),
     importCsv: vi.fn(),
+    enqueueImportCsv: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -196,36 +197,24 @@ describe('IpController', () => {
         buffer: Buffer.from('address,notes\n10.0.0.1,Test\n'),
       } as Express.Multer.File;
 
-      const mockResult: IpImportResultDto = {
-        total: 1,
-        inserted: 1,
-        skipped: 0,
-        errors: [],
-      };
-      mockIpService.importCsv.mockResolvedValue(mockResult);
+      mockIpService.enqueueImportCsv.mockResolvedValue({ jobId: 'mock-import-job-id' });
 
       const result = await controller.importCsv(mockFile, mockUser);
 
-      expect(mockIpService.importCsv).toHaveBeenCalledWith(
-        'address,notes\n10.0.0.1,Test\n',
+      expect(mockIpService.enqueueImportCsv).toHaveBeenCalledWith(
+        mockFile.buffer,
         mockUser.userId,
       );
-      expect(result).toEqual(mockResult);
+      expect(result).toEqual({ jobId: 'mock-import-job-id' });
     });
 
-    it('should handle undefined file gracefully', async () => {
-      const mockResult: IpImportResultDto = {
-        total: 0,
-        inserted: 0,
-        skipped: 0,
-        errors: [],
-      };
-      mockIpService.importCsv.mockResolvedValue(mockResult);
+    it('should pass undefined buffer to enqueueImportCsv when file is missing', async () => {
+      mockIpService.enqueueImportCsv.mockResolvedValue({ jobId: 'mock-import-job-id' });
 
       const result = await controller.importCsv(undefined as any, mockUser);
 
-      expect(mockIpService.importCsv).toHaveBeenCalledWith('', mockUser.userId);
-      expect(result).toEqual(mockResult);
+      expect(mockIpService.enqueueImportCsv).toHaveBeenCalledWith(undefined, mockUser.userId);
+      expect(result).toEqual({ jobId: 'mock-import-job-id' });
     });
   });
 });

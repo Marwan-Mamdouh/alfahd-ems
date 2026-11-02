@@ -23,10 +23,13 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 - **Immutable Mutation Audit Ledger (`ip_history`):**
   - Every mutation automatically records an entry in `ip_history` tracking `fromStatus`, `toStatus`, `action`, `reason`, `actorId`, and timestamp.
   - Supported actions: `CREATE`, `RESERVE`, `RELEASE`, `ARCHIVE`, `UNARCHIVE`, `UPDATE_METADATA`.
-- **Duplicate-Tolerant CSV Bulk Import:**
-  - Administrators can upload CSV files containing `address,notes` columns.
-  - Parser skips intra-file duplicate rows and already-existing database entries without failing the batch.
-  - Returns an execution summary: `{ total, inserted, skipped, errors }`.
+- **Asynchronous, Bounded, Retry-Safe CSV Bulk Import:**
+  - Administrators upload CSV files (`multipart/form-data`) containing `address,notes` columns.
+  - Enqueues jobs to dedicated BullMQ queue (`ip-imports`) with bounded limits (max 5 MB file size, max 5,000 rows).
+  - Responds immediately with `202 Accepted` containing `{ jobId }`.
+  - Processed asynchronously by `IpImportWorker` with deduplication across file rows, existing database records, and concurrent conflicts (`onConflictDoNothing`).
+  - Retry-safe idempotency tracking ensures job retries preserve accurate counts of `inserted` vs `skipped` without duplicate history or failed transactions.
+  - Polling endpoint `GET /ip-addresses/import/:id` provides status and result metrics (`{ inserted, skipped, errors }`) scoped to ADMIN and requester.
 
 ---
 
@@ -135,11 +138,21 @@ Orchestrates business logic and transactional integrity:
   - Updates metadata notes and logs `UPDATE_METADATA` history.
 - **`getHistory(ipId)`**:
   - Returns formatted audit timeline.
-- **`importCsv(csvContent, actorId)`**:
-  - Validates presence of `address` column header.
-  - Skips duplicate rows in the CSV and IPs already present in the database.
-  - Records line-by-line format error summaries without aborting the batch.
+- **`enqueueImportCsv(fileBuffer, actorId)`**:
+  - Enforces 5 MB file size limit and non-empty CSV checks.
+  - Enforces 5,000 max row bounds and mandatory `address` header validation.
+  - Enqueues background job to the `ip-imports` BullMQ queue.
+  - Returns `{ jobId }`.
+- **`processImportJob(csvContent, actorId, jobId)`**:
+  - Validates individual IPv4 host format (rejects CIDR ranges and IPv6).
+  - Skips duplicate rows in the CSV and IPs already present in the database without aborting valid rows.
+  - Handles concurrent duplicate races safely via `onConflictDoNothing`.
+  - Records line-by-line format error summaries with 1-based CSV row numbers.
+  - Idempotent and retry-safe: inspects history for existing entries created under the same `jobId` so retries preserve outcomes.
   - Commits valid addresses with `CREATE` history records.
+- **`getImportJobStatus(jobId, user)`**:
+  - Scoped polling: accessible by `ADMIN` or the original requester.
+  - Retrieves BullMQ job state (`waiting`, `active`, `completed`, `failed`) and returns `{ id, status, inserted, skipped, errors, result }`.
 
 ---
 
@@ -148,34 +161,35 @@ Orchestrates business logic and transactional integrity:
 All routes dynamically consume the centralized route constants manifest (`src/common/constants/routes.constants.ts`):
 
 - Controller: `@Controller(routes.ip.root)`
-- Routes: `@Get(routes.ip.id)`, `@Patch(routes.ip.id)`, `@Post(routes.ip.reserve)`, `@Post(routes.ip.release)`, `@Post(routes.ip.archive)`, `@Post(routes.ip.unarchive)`, `@Get(routes.ip.history)`, `@Post(routes.ip.import)`
+- Routes: `@Get(routes.ip.id)`, `@Patch(routes.ip.id)`, `@Post(routes.ip.reserve)`, `@Post(routes.ip.release)`, `@Post(routes.ip.archive)`, `@Post(routes.ip.unarchive)`, `@Get(routes.ip.history)`, `@Post(routes.ip.import)`, `@Get(routes.ip.importStatus)`
 
 Base Route: `/ip-addresses`  
 Guards: `JwtAuthGuard`, `RolesGuard`
 
-| HTTP Method | Route                         | Description                                 | Allowed Roles         | Request Body / Query           | Success Response               | Errors              |
-| :---------- | :---------------------------- | :------------------------------------------ | :-------------------- | :----------------------------- | :----------------------------- | :------------------ |
-| `POST`      | `/ip-addresses`               | Register an individual IPv4 address         | `ADMIN`               | `CreateIpDto`                  | `201 Created` (`IpAddressDto`) | `400`, `409`        |
-| `GET`       | `/ip-addresses`               | List IP addresses with filters & pagination | `ADMIN`, `TECHNICIAN` | `IpQueryDto`                   | `200 OK` (`{ items, total }`)  | `400`               |
-| `GET`       | `/ip-addresses/:id`           | Get details of an IP address                | `ADMIN`, `TECHNICIAN` | None                           | `200 OK` (`IpAddressDto`)      | `400`, `404`        |
-| `PATCH`     | `/ip-addresses/:id`           | Update metadata notes                       | `ADMIN`               | `UpdateIpDto`                  | `200 OK` (`IpAddressDto`)      | `400`, `404`        |
-| `POST`      | `/ip-addresses/:id/reserve`   | Mark FREE IP as RESERVED                    | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)      | `400`, `404`, `409` |
-| `POST`      | `/ip-addresses/:id/release`   | Release RESERVED IP back to FREE            | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)      | `400`, `404`, `409` |
-| `POST`      | `/ip-addresses/:id/archive`   | Archive FREE IP from allocation             | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)      | `400`, `404`, `409` |
-| `POST`      | `/ip-addresses/:id/unarchive` | Unarchive IP back to active pool            | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)      | `400`, `404`        |
-| `GET`       | `/ip-addresses/:id/history`   | Get full mutation audit history             | `ADMIN`               | None                           | `200 OK` (`IpHistoryDto[]`)    | `400`, `404`        |
-| `POST`      | `/ip-addresses/import`        | Bulk import addresses from CSV file         | `ADMIN`               | `multipart/form-data` (`file`) | `200 OK` (`IpImportResultDto`) | `400`, `403`        |
+| HTTP Method | Route                         | Description                                 | Allowed Roles         | Request Body / Query           | Success Response                        | Errors                     |
+| :---------- | :---------------------------- | :------------------------------------------ | :-------------------- | :----------------------------- | :-------------------------------------- | :------------------------- |
+| `POST`      | `/ip-addresses`               | Register an individual IPv4 address         | `ADMIN`               | `CreateIpDto`                  | `201 Created` (`IpAddressDto`)          | `400`, `409`               |
+| `GET`       | `/ip-addresses`               | List IP addresses with filters & pagination | `ADMIN`, `TECHNICIAN` | `IpQueryDto`                   | `200 OK` (`{ items, total }`)           | `400`                      |
+| `GET`       | `/ip-addresses/:id`           | Get details of an IP address                | `ADMIN`, `TECHNICIAN` | None                           | `200 OK` (`IpAddressDto`)               | `400`, `404`               |
+| `PATCH`     | `/ip-addresses/:id`           | Update metadata notes                       | `ADMIN`               | `UpdateIpDto`                  | `200 OK` (`IpAddressDto`)               | `400`, `404`               |
+| `POST`      | `/ip-addresses/:id/reserve`   | Mark FREE IP as RESERVED                    | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)               | `400`, `404`, `409`        |
+| `POST`      | `/ip-addresses/:id/release`   | Release RESERVED IP back to FREE            | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)               | `400`, `404`, `409`        |
+| `POST`      | `/ip-addresses/:id/archive`   | Archive FREE IP from allocation             | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)               | `400`, `404`, `409`        |
+| `POST`      | `/ip-addresses/:id/unarchive` | Unarchive IP back to active pool            | `ADMIN`               | `{ reason?: string }`          | `200 OK` (`IpAddressDto`)               | `400`, `404`               |
+| `GET`       | `/ip-addresses/:id/history`   | Get full mutation audit history             | `ADMIN`               | None                           | `200 OK` (`IpHistoryDto[]`)             | `400`, `404`               |
+| `POST`      | `/ip-addresses/import`        | Bulk import addresses from CSV file         | `ADMIN`               | `multipart/form-data` (`file`) | `202 Accepted` (`{ jobId }`)            | `400`, `403`               |
+| `GET`       | `/ip-addresses/import/:id`    | Poll status of CSV import background job    | `ADMIN`, Requester    | None                           | `200 OK` (`JobStatusResponseDto`)       | `403`, `404`               |
 
 ---
 
 ## 6. Testing & Quality Assurance
 
 - **Unit Tests**:
-  - [`ip.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/ip-management/ip.service.spec.ts) (25 tests): Validates host address constraints (CIDR/IPv6 rejection), duplicate handling, reservation/release transitions, archival guards, and CSV row-level error parsing.
-  - [`ip.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/ip-management/ip.controller.spec.ts) (12 tests): Verifies HTTP delegation, role guards, and multipart file buffer extraction.
+  - [`ip.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/ip-management/ip.service.spec.ts) (27 tests): Validates host address constraints (CIDR/IPv6 rejection), duplicate handling, reservation/release transitions, archival guards, async queue dispatch, and CSV row-level error parsing & retry-safe bookkeeping.
+  - [`ip.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/ip-management/ip.controller.spec.ts) (12 tests): Verifies HTTP delegation, role guards, multipart file buffer extraction, and job polling.
 
 - **Integration & E2E Test Suite**:
-  - [`test/ip.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/ip.e2e-spec.ts) (**25 test cases** across 7 testing suites):
+  - [`test/ip.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/ip.e2e-spec.ts) (**28 test cases** across 7 testing suites):
 
   #### Suite 1: Authentication & RBAC (7 tests)
   1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
@@ -208,10 +222,13 @@ Guards: `JwtAuthGuard`, `RolesGuard`
   20. `200 OK` — Updates IP metadata notes without mutating its allocation state.
   21. `200 OK` — Retrieves chronological mutation audit history records for an IP address.
 
-  #### Suite 6: CSV Bulk Import (2 tests)
+  #### Suite 6: CSV Bulk Import (5 tests)
   22. `403 Forbidden` — Blocks non-ADMIN roles (`TECHNICIAN`) from uploading CSV import batches.
-  23. `200 OK` — Parses multipart CSV file, commits valid host addresses, skips intra-file duplicates and existing records, and returns execution summary.
+  23. `202 Accepted` — Enqueues CSV import and returns `{ jobId }` without blocking.
+  24. `400 Bad Request` — Rejects CSV exceeding 5,000 rows.
+  25. `200 OK` — Allows authorized admin to poll import status and results (`GET /ip-addresses/import/:id`).
+  26. `403 Forbidden` — Blocks unauthorized users from polling another user's import job.
 
   #### Suite 7: Edge Cases & Route Guarding (2 tests)
-  24. `404 Not Found` — Returns not found when accessing a non-existent IP UUID.
-  25. `400 Bad Request` — Rejects malformed / non-UUID route parameters.
+  27. `404 Not Found` — Returns not found when accessing a non-existent IP UUID.
+  28. `400 Bad Request` — Rejects malformed / non-UUID route parameters.

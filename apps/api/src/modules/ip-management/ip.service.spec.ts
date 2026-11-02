@@ -35,6 +35,7 @@ describe('IpService', () => {
     findById: vi.fn(),
     findManyWithPagination: vi.fn(),
     createIp: vi.fn(),
+    createIpOnConflictDoNothing: vi.fn(),
     updateIp: vi.fn(),
     createHistory: vi.fn(),
     findHistoryByIp: vi.fn(),
@@ -392,7 +393,8 @@ not-an-ip,Invalid IP
         if (addr === '10.0.0.2') return { id: 'existing', address: '10.0.0.2' };
         return undefined;
       });
-      mockIpRepo.createIp.mockResolvedValue({ id: 'new-id' });
+      mockIpRepo.findHistoryByIp.mockResolvedValue([]);
+      mockIpRepo.createIpOnConflictDoNothing.mockResolvedValue({ id: 'new-id' });
       mockIpRepo.createHistory.mockResolvedValue({});
 
       const outcome = await service.importCsv(csv, 'admin-id');
@@ -406,6 +408,58 @@ not-an-ip,Invalid IP
         address: 'not-an-ip',
         reason: 'Invalid IPv4 host address format (no CIDR or IPv6 allowed)',
       });
+    });
+
+    it('preserves completed outcomes upon job retry without re-inserting or misreporting as skips', async () => {
+      const jobId = 'retry-test-job-42';
+      const csv = `address,notes
+192.168.1.10,Inserted on first attempt
+192.168.1.20,Inserted on retry`;
+
+      mockIpRepo.findByAddress.mockImplementation(async (addr: string) => {
+        if (addr === '192.168.1.10') return { id: 'ip-first-attempt', address: '192.168.1.10' };
+        return undefined;
+      });
+      mockIpRepo.findHistoryByIp.mockImplementation(async (ipId: string) => {
+        if (ipId === 'ip-first-attempt') {
+          return [
+            {
+              id: 'h-1',
+              ipId,
+              action: 'CREATE',
+              reason: `Bulk CSV import (job:${jobId})`,
+            },
+          ];
+        }
+        return [];
+      });
+      mockIpRepo.createIpOnConflictDoNothing.mockResolvedValue({ id: 'ip-second-attempt' });
+      mockIpRepo.createHistory.mockResolvedValue({});
+
+      const outcome = await service.processImportJob(csv, 'admin-id', jobId);
+
+      expect(outcome.total).toBe(2);
+      expect(outcome.inserted).toBe(2); // Both count as inserted!
+      expect(outcome.skipped).toBe(0);
+      expect(outcome.errors).toHaveLength(0);
+      // createIpOnConflictDoNothing should only have been called for row 2, NOT for row 1
+      expect(mockIpRepo.createIpOnConflictDoNothing).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles concurrent duplicate insert without aborting transaction', async () => {
+      const csv = `address,notes
+192.168.1.99,Concurrent collision`;
+
+      mockIpRepo.findByAddress.mockResolvedValue(undefined);
+      // Simulate ON CONFLICT DO NOTHING returning undefined
+      mockIpRepo.createIpOnConflictDoNothing.mockResolvedValue(undefined);
+
+      const outcome = await service.processImportJob(csv, 'admin-id', 'concurrent-job');
+
+      expect(outcome.total).toBe(1);
+      expect(outcome.inserted).toBe(0);
+      expect(outcome.skipped).toBe(1); // Treated safely as a skip
+      expect(outcome.errors).toHaveLength(0);
     });
   });
 });

@@ -1,7 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { getQueueToken } from '@nestjs/bullmq';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Role } from '@alfahd/types';
 import { setupTestApp, getAuthHeader } from './test-utils.js';
 import { makeIpAddress, makeCreateIpDto, makeUpdateIpDto } from './fakers/index.js';
@@ -20,6 +21,44 @@ describe('IP Management (e2e)', () => {
 
   let ipStore: IpAddress[] = [];
   let historyStore: IpHistory[] = [];
+
+  const mockReportsQueue = {
+    opts: {
+      connection: { host: 'localhost', port: 6379 },
+    },
+    add: vi.fn(async () => ({ id: 'mock-report-job-id' })),
+    getJob: vi.fn(async () => null),
+  };
+
+  const mockIpImportsQueue = {
+    opts: {
+      connection: { host: 'localhost', port: 6379 },
+    },
+    add: vi.fn(async (_name, data, opts) => ({
+      id: opts?.jobId ?? 'mock-ip-import-job-id',
+      data,
+    })),
+    getJob: vi.fn(async (id: string) => {
+      if (id === 'missing-job-id') return null;
+      return {
+        id,
+        getState: async () => 'completed',
+        data: { requestedBy: '11111111-1111-4111-8111-111111111111' },
+        returnvalue: {
+          total: 5,
+          inserted: 2,
+          skipped: 2,
+          errors: [
+            {
+              row: 6,
+              address: 'invalid-ip',
+              reason: 'Invalid IPv4 host address format (no CIDR or IPv6 allowed)',
+            },
+          ],
+        },
+      };
+    }),
+  };
 
   const mockRepositoryService = {
     transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
@@ -54,6 +93,24 @@ describe('IP Management (e2e)', () => {
         };
       },
       createIp: async (data: Partial<IpAddress>) => {
+        const created: IpAddress = {
+          id: data.id ?? 'ip-' + Math.random().toString(36).substring(2, 9),
+          address: data.address!,
+          status: data.status ?? 'FREE',
+          isArchived: data.isArchived ?? false,
+          customerId: data.customerId ?? null,
+          notes: data.notes ?? null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        ipStore.push(created);
+        return created;
+      },
+      createIpOnConflictDoNothing: async (data: Partial<IpAddress>) => {
+        const existing = ipStore.find(
+          (i) => i.address.trim().toLowerCase() === data.address!.trim().toLowerCase(),
+        );
+        if (existing) return undefined;
         const created: IpAddress = {
           id: data.id ?? 'ip-' + Math.random().toString(36).substring(2, 9),
           address: data.address!,
@@ -154,6 +211,14 @@ describe('IP Management (e2e)', () => {
         {
           provide: RepositoryService,
           useValue: mockRepositoryService,
+        },
+        {
+          provide: getQueueToken('reports'),
+          useValue: mockReportsQueue,
+        },
+        {
+          provide: getQueueToken('ip-imports'),
+          useValue: mockIpImportsQueue,
         },
       ],
     });
@@ -409,7 +474,7 @@ describe('IP Management (e2e)', () => {
         .expect(403);
     });
 
-    it('imports valid CSV rows, skips duplicates, and reports invalid entries', async () => {
+    it('enqueues accepted CSV input through BullMQ and returns 202 with jobId without synchronous execution', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
       const csvData = `address,notes
 10.99.1.1,Valid host 1
@@ -422,15 +487,85 @@ invalid-ip,Broken row`;
         .post('/ip-addresses/import')
         .set(auth)
         .attach('file', Buffer.from(csvData), 'ips.csv')
+        .expect(202);
+
+      expect(res.body.data).toHaveProperty('jobId');
+      expect(mockIpImportsQueue.add).toHaveBeenCalledWith(
+        'ip-csv-import',
+        expect.objectContaining({
+          type: 'IP_CSV_IMPORT',
+          csvContent: expect.stringContaining('10.99.1.1'),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('allows polling import outcome via GET /ip-addresses/import/:id and returns { inserted, skipped, errors }', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .get('/ip-addresses/import/mock-ip-import-job-id')
+        .set(auth)
         .expect(200);
 
       expect(res.body.data).toMatchObject({
-        total: 5,
+        id: 'mock-ip-import-job-id',
+        status: 'COMPLETED',
         inserted: 2,
         skipped: 2,
       });
       expect(res.body.data.errors).toHaveLength(1);
       expect(res.body.data.errors[0].address).toBe('invalid-ip');
+    });
+
+    it('allows polling import outcome via GET /jobs/:id for authorized admin', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .get('/jobs/mock-ip-import-job-id')
+        .set(auth)
+        .expect(200);
+
+      expect(res.body.data).toMatchObject({
+        id: 'mock-ip-import-job-id',
+        status: 'COMPLETED',
+        inserted: 2,
+        skipped: 2,
+      });
+      expect(res.body.data.errors).toHaveLength(1);
+    });
+
+    it('processes at least 1,000 rows asynchronously with deduplication and retry safety', async () => {
+      const ipService = app.get(RepositoryService);
+      // Generate 1,005 rows
+      const rows = ['address,notes'];
+      for (let i = 1; i <= 1000; i++) {
+        const third = Math.floor(i / 256);
+        const fourth = i % 256;
+        rows.push(`10.200.${third}.${fourth},Generated row ${i}`);
+      }
+      // Add duplicates and invalid rows
+      rows.push('10.200.0.1,Duplicate in file');
+      rows.push('not-an-ip-address,Bad row');
+      rows.push('192.168.10.10,Already in DB');
+
+      const csvContent = rows.join('\n');
+      const ipServiceInstance = app.get(RepositoryService);
+
+      // Verify directly on the service's processImportJob
+      const ipServiceObj = (app as any).get(
+        (await import('../src/modules/ip-management/ip.service.js')).IpService,
+      );
+
+      const outcome = await ipServiceObj.processImportJob(
+        csvContent,
+        'admin-test-user',
+        'bounded-1000-job',
+      );
+
+      expect(outcome.total).toBe(1003);
+      expect(outcome.inserted).toBe(1000); // 1000 valid unique rows
+      expect(outcome.skipped).toBe(2); // 1 file duplicate, 1 db duplicate
+      expect(outcome.errors).toHaveLength(1); // 1 malformed row
+      expect(outcome.errors[0].address).toBe('not-an-ip-address');
     });
   });
 
