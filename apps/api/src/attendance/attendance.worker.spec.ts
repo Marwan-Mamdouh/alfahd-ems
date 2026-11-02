@@ -266,8 +266,6 @@ describe('AttendanceReportWorker', () => {
       data: { type: 'IP_CSV_IMPORT', csvContent: 'address\n10.0.0.1' },
     } as any;
 
-    await expect(worker.process(job)).rejects.toThrow(
-      'Unsupported report job type: IP_CSV_IMPORT',
-    );
+    await expect(worker.process(job)).rejects.toThrow('Unsupported report job type: IP_CSV_IMPORT');
   });
 });

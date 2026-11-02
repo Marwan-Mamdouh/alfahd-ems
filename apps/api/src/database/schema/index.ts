@@ -299,6 +299,10 @@ export const ipAddresses = pgTable(
   (table) => [
     index('idx_ip_addresses_status').on(table.status),
     index('idx_ip_addresses_is_archived').on(table.isArchived),
+    check(
+      'ip_addresses_ipv4_host_check',
+      sql`family(${table.address}) = 4 AND masklen(${table.address}) = 32`,
+    ),
   ],
 );
 

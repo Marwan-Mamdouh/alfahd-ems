@@ -1,5 +1,5 @@
 {
-  "id": "c3d48359-9952-43d1-b5c8-0740cedf578b",
+  "id": "3fe2a36d-9d94-4bec-9c40-7e6e71ace77d",
   "prevId": "564e338b-e602-41c4-a09a-92a51e3593a9",
   "version": "7",
   "dialect": "postgresql",
@@ -269,7 +269,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "ip_addresses_ipv4_host_check": {
+          "name": "ip_addresses_ipv4_host_check",
+          "value": "family(\"ip_addresses\".\"address\") = 4 AND masklen(\"ip_addresses\".\"address\") = 32"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.ip_history": {

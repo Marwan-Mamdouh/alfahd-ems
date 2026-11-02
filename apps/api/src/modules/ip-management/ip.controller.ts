@@ -31,7 +31,6 @@ import {
   Role,
   type IpAddressDto,
   type IpHistoryDto,
-  type IpImportResultDto,
   type JobStatusResponseDto,
 } from '@alfahd/types';
 import { routes } from '../../common/constants/routes.constants.js';
