@@ -337,8 +337,51 @@ export class RoutersService {
       ) {
         // Custody is closed and remains empty
         await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
+      } else if (dto.status === 'INSTALLED_AT_CUSTOMER') {
+        if (dto.targetWarehouseId) {
+          throw new BadRequestException(
+            'Cannot target a warehouse when installing a router at a customer location',
+          );
+        }
+
+        if (router.physicalCondition !== 'SERVICEABLE') {
+          throw new BadRequestException(
+            `Cannot install router with physical condition "${router.physicalCondition}" at customer. Router must be SERVICEABLE`,
+          );
+        }
+
+        const activeCustody = await this.repo.routers.findActiveAssignment(id, tx);
+        if (!activeCustody || activeCustody.holderType !== 'TECHNICIAN') {
+          throw new BadRequestException(
+            'Cannot install at customer: router has no active technician custody to transfer',
+          );
+        }
+
+        // 1. Close technician custody
+        await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
+
+        // 2. Open approved customer custody atomically without premature customer tables or FKs
+        await this.repo.routers.createAssignment(
+          {
+            routerId: id,
+            holderType: 'CUSTOMER',
+            warehouseId: null,
+            technicianId: null,
+            assignedBy: responsibleUserId,
+            notes: dto.notes ?? dto.reason ?? 'Installed at customer location',
+          },
+          tx,
+        );
+
+        newWarehouseId = null;
       } else if (dto.status === 'RETURNED') {
-        // Close technician custody
+        if (router.status === 'INSTALLED_AT_CUSTOMER' && !dto.targetWarehouseId) {
+          throw new BadRequestException(
+            'A target warehouse ID is required when returning a router from customer installation',
+          );
+        }
+
+        // Close technician or customer custody
         await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
         if (dto.targetWarehouseId) {
           newWarehouseId = dto.targetWarehouseId;

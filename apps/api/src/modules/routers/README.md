@@ -31,6 +31,12 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   * Inactive target warehouses are strictly rejected with `BadRequestException` (400).
   * In `updateCondition`, multi-warehouse operations (transfers) lock involved warehouses in deterministic alphabetical order to prevent AB-BA transaction deadlocks.
   * During warehouse deactivation, active inventory, assigned staff/technicians, physically present routers (including damaged/under-repair devices without active custody), and active custody records strictly block deactivation with `409 Conflict`.
+* **Customer Installation Custody Handoff (Issue #58 - T08):**
+  * Transitions from `ASSIGNED_TO_TECHNICIAN` to `INSTALLED_AT_CUSTOMER` atomically close the technician's active custody assignment and create the approved customer custody assignment (`holderType: 'CUSTOMER'`) in the same database transaction.
+  * Eliminates contradictory state where a technician remains the active custody holder of a deployed customer unit.
+  * Implemented without premature customer tables or foreign keys (customer details held via assignment notes/metadata).
+  * Validates preconditions: requires the router to be `SERVICEABLE` and to possess verified active technician custody. Rejects warehouse targets for customer installations.
+  * Returning an installed router (`INSTALLED_AT_CUSTOMER` $\to$ `RETURNED`) cleanly closes customer custody and requires a verified active target warehouse (`targetWarehouseId`).
 * **Async Inventory Reports:** Administrators can trigger asynchronous Excel workbook exports of router asset inventories, processed through BullMQ on the `reports` queue with ExcelJS.
 
 ---

@@ -362,6 +362,176 @@ describe('RoutersService', () => {
       expect(result.status).toBe('RETURNED');
     });
 
+    it('transitions ASSIGNED_TO_TECHNICIAN to INSTALLED_AT_CUSTOMER: closes technician custody and opens CUSTOMER custody atomically', async () => {
+      const assignedRouter = {
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN' as const,
+        physicalCondition: 'SERVICEABLE' as const,
+        warehouseId: null,
+      };
+      const techAssignment = {
+        ...mockAssignment,
+        holderType: 'TECHNICIAN' as const,
+        technicianId: 'tech-123',
+        releasedAt: null,
+      };
+      const customerAssignment = {
+        ...mockAssignment,
+        id: 'cust-assign-uuid',
+        holderType: 'CUSTOMER' as const,
+        technicianId: null,
+        warehouseId: null,
+        notes: 'Installed at customer villa 42',
+      };
+
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
+      mockRoutersRepo.findActiveAssignment
+        .mockResolvedValueOnce(techAssignment) // for initial check
+        .mockResolvedValueOnce(customerAssignment); // for mapToDto
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(techAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue(customerAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...assignedRouter,
+        status: 'INSTALLED_AT_CUSTOMER',
+        warehouseId: null,
+      });
+
+      const result = await service.transition(
+        mockRouter.id,
+        { status: 'INSTALLED_AT_CUSTOMER', notes: 'Installed at customer villa 42' },
+        'admin-id',
+      );
+
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.any(Date),
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        {
+          routerId: mockRouter.id,
+          holderType: 'CUSTOMER',
+          warehouseId: null,
+          technicianId: null,
+          assignedBy: 'admin-id',
+          notes: 'Installed at customer villa 42',
+        },
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.objectContaining({
+          status: 'INSTALLED_AT_CUSTOMER',
+          warehouseId: null,
+        }),
+        expect.anything(),
+      );
+      expect(result.status).toBe('INSTALLED_AT_CUSTOMER');
+      expect(result.currentHolderType).toBe('CUSTOMER');
+      expect(result.currentHolderId).toBeNull();
+    });
+
+    it('rejects transition to INSTALLED_AT_CUSTOMER when router physicalCondition is not SERVICEABLE', async () => {
+      const damagedTechRouter = {
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN' as const,
+        physicalCondition: 'DAMAGED' as const,
+      };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(damagedTechRouter);
+
+      await expect(
+        service.transition(mockRouter.id, { status: 'INSTALLED_AT_CUSTOMER' }, 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects transition to INSTALLED_AT_CUSTOMER when targetWarehouseId is provided', async () => {
+      const assignedRouter = {
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN' as const,
+        physicalCondition: 'SERVICEABLE' as const,
+      };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
+
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'INSTALLED_AT_CUSTOMER', targetWarehouseId: mockWarehouse.id },
+          'admin-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects transition to INSTALLED_AT_CUSTOMER when router lacks active technician custody', async () => {
+      const assignedRouter = {
+        ...mockRouter,
+        status: 'ASSIGNED_TO_TECHNICIAN' as const,
+        physicalCondition: 'SERVICEABLE' as const,
+      };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
+
+      await expect(
+        service.transition(mockRouter.id, { status: 'INSTALLED_AT_CUSTOMER' }, 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+    });
+
+    it('transitions INSTALLED_AT_CUSTOMER to RETURNED: closes customer custody and requires targetWarehouseId', async () => {
+      const installedRouter = {
+        ...mockRouter,
+        status: 'INSTALLED_AT_CUSTOMER' as const,
+        warehouseId: null,
+      };
+      const customerCustody = {
+        ...mockAssignment,
+        holderType: 'CUSTOMER' as const,
+        technicianId: null,
+        warehouseId: null,
+      };
+
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(installedRouter);
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(customerCustody);
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...installedRouter,
+        status: 'RETURNED',
+        warehouseId: mockWarehouse.id,
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
+
+      const result = await service.transition(
+        mockRouter.id,
+        { status: 'RETURNED', targetWarehouseId: mockWarehouse.id },
+        'admin-id',
+      );
+
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalled();
+      expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.objectContaining({
+          status: 'RETURNED',
+          warehouseId: mockWarehouse.id,
+        }),
+        expect.anything(),
+      );
+      expect(result.status).toBe('RETURNED');
+    });
+
+    it('rejects transition from INSTALLED_AT_CUSTOMER to RETURNED when targetWarehouseId is omitted', async () => {
+      const installedRouter = {
+        ...mockRouter,
+        status: 'INSTALLED_AT_CUSTOMER' as const,
+        warehouseId: null,
+      };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(installedRouter);
+
+      await expect(
+        service.transition(mockRouter.id, { status: 'RETURNED' }, 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRoutersRepo.releaseActiveAssignment).not.toHaveBeenCalled();
+    });
+
     it('rejects transition to RETURNED if target warehouse is deactivated', async () => {
       const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
