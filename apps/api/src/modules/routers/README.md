@@ -149,9 +149,15 @@ Orchestrates business logic and transactional integrity:
     * `UNDER_REPAIR` $\rightarrow$ `AVAILABLE`, `DECOMMISSIONED`.
     * Terminal states (`LOST`, `DECOMMISSIONED`): no transitions permitted.
 * **`updateCondition(id, dto: UpdateRouterConditionDto, userId, externalTx?)`**:
-  * Serializes requests via `findByIdForUpdate`.
-  * Records audit trail in `router_condition_history`.
-  * If warehouse damage occurs to an `AVAILABLE` unit: keeps status `AVAILABLE`, releases active custody (empty custody), and decrements usable stock (-1 `ADJUSTMENT`) via atomic delta.
+  * Serializes requests via `findByIdForUpdate`. Rejects modifications to terminal states (`LOST`, `DECOMMISSIONED`).
+  * **Explicit Location Resolution (Issue #53):** External placement (`externalLocation`) explicitly clears physical warehouse placement (`warehouseId = null`). Explicit `warehouseId` clears `externalLocation` and validates active warehouse status.
+  * **State-Derived Usable Contribution & Atomic Deltas (Issue #53):**
+    * Calculates before/after usable contribution: contributes exactly 1 unit to warehouse $W$ iff lifecycle is `AVAILABLE`, condition is `SERVICEABLE`, and physical placement is $W$.
+    * **Inter-Warehouse Move ($A \to B$):** Atomically decrements $A$ (-1 `TRANSFER_WAREHOUSE`), increments $B$ (+1 `TRANSFER_WAREHOUSE`), closes custody on $A$, and opens custody on $B$.
+    * **Damaged / Under Repair ($W \to \emptyset$):** Both `DAMAGED` and `UNDER_REPAIR` remove usable contribution (-1 `ADJUSTMENT`) and close active custody (empty custody).
+    * **External Repair ($\to$ external):** Clears physical warehouse placement while preserving prior warehouse in `router_condition_history` (`fromWarehouseId: A`, `toWarehouseId: null`).
+    * **Restoring Serviceability ($\emptyset \to W$):** Increments destination warehouse stock (+1 `ADJUSTMENT`) and restores warehouse custody only when lifecycle is `AVAILABLE` and located in a warehouse.
+  * Logs comprehensive condition and location transition history in `router_condition_history`.
 * **`exportRouterReport(query, userId)`**:
   * Dispatches `ROUTER_INVENTORY_REPORT` background job to BullMQ `reports` queue.
 
@@ -183,11 +189,11 @@ Guards: `JwtAuthGuard`, `RolesGuard`
 ## 6. Testing & Quality Assurance
 
 * **Unit Tests**:
-  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (**17 tests**): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, atomic writes, rollback on injected failure, competing assignment serialization, existing stock capacity limits, and damaged opening unit reconciliation.
+  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (**22 tests**): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, atomic writes, rollback on injected failure, competing assignment serialization, existing stock capacity limits, damaged opening unit reconciliation, A-to-B inter-warehouse moves, direct UNDER_REPAIR stock/custody removals, external repair clearing, and conditional serviceability restoration.
   * [`routers.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.controller.spec.ts) (**10 tests**): Verifies HTTP delegation and DTO validation.
 
 * **Integration & E2E Test Suite**:
-  * [`test/routers.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/routers.e2e-spec.ts) (**25 test cases** across 7 testing suites):
+  * [`test/routers.e2e-spec.ts`](file:///e:/alfahd-ems/apps/api/test/routers.e2e-spec.ts) (**29 test cases** across 7 testing suites):
   
   #### Suite 1: Authentication & RBAC (7 tests)
   1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
@@ -216,15 +222,19 @@ Guards: `JwtAuthGuard`, `RolesGuard`
   18. `200 OK` — Transitions router status along the approved transition whitelist (`ASSIGNED_TO_TECHNICIAN` $\to$ `RETURNED`).
   19. `400 Bad Request` — Rejects illegal lifecycle transitions (`RETURNED` $\to$ `INSTALLED_AT_CUSTOMER`) not defined in the contract whitelist.
 
-  #### Suite 5: Physical Condition & Audit History (2 tests)
+  #### Suite 5: Physical Condition, Location Updates & Warehouse Stock Deltas (6 tests)
   20. `200 OK` — Updates hardware physical condition (`SERVICEABLE` $\to$ `DAMAGED`) with mandatory justification reason.
   21. `200 OK` — Retrieves condition mutation audit history records for the router.
+  22. `200 OK` — A-to-B move decrements A (-1), increments B (+1), and moves warehouse custody once (Issue #53).
+  23. `200 OK` — Removing usable contribution directly to `UNDER_REPAIR` decrements stock and clears custody (Issue #53).
+  24. `200 OK` — Sending to external repair clears physical warehouse placement while retaining prior warehouse location in audit trail (Issue #53).
+  25. `200 OK` — Restoring serviceability upon return adds stock and creates warehouse custody at destination warehouse (Issue #53).
 
   #### Suite 6: Atomicity, Concurrency & Rollback Invariants (2 tests)
-  22. `201 Created` — Concurrent receipts preserve both increments on initially missing stock rows without lost updates (Issue #51).
-  23. `200 OK` / `409 Conflict` — Competing assignments cannot both succeed; one succeeds and one receives 409 Conflict (Issue #51).
+  26. `201 Created` — Concurrent receipts preserve both increments on initially missing stock rows without lost updates (Issue #51).
+  27. `200 OK` / `409 Conflict` — Competing assignments cannot both succeed; one succeeds and one receives 409 Conflict (Issue #51).
 
   #### Suite 7: Edge Cases & Route Guarding (2 tests)
-  24. `404 Not Found` — Returns not found when querying or mutating a non-existent router UUID.
-  25. `400 Bad Request` — Rejects malformed / non-UUID route parameters.
+  28. `404 Not Found` — Returns not found when querying or mutating a non-existent router UUID.
+  29. `400 Bad Request` — Rejects malformed / non-UUID route parameters.
 

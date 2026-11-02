@@ -404,82 +404,170 @@ export class RoutersService {
         throw new NotFoundException(`Router with ID "${id}" was not found`);
       }
 
-      const wasUsable =
+      if (router.status === 'LOST' || router.status === 'DECOMMISSIONED') {
+        throw new BadRequestException(
+          `Cannot update condition or location of a router with terminal status "${router.status}"`,
+        );
+      }
+
+      // Explicit location resolution:
+      // 1. External placement clears warehouse placement.
+      // 2. Explicit warehouse target moves router to that warehouse and clears externalLocation.
+      // 3. Otherwise, retain existing placement.
+      let newWarehouseId: string | null = router.warehouseId;
+      let newExternalLocation: string | null = router.externalLocation;
+
+      if (
+        dto.externalLocation !== undefined &&
+        dto.externalLocation !== null &&
+        dto.externalLocation.trim() !== ''
+      ) {
+        newWarehouseId = null;
+        newExternalLocation = dto.externalLocation.trim();
+      } else if (dto.warehouseId !== undefined) {
+        newWarehouseId = dto.warehouseId;
+        newExternalLocation = null;
+      }
+
+      if (newWarehouseId && newWarehouseId !== router.warehouseId) {
+        const wh = await this.repo.warehouses.findById(newWarehouseId);
+        if (!wh) {
+          throw new NotFoundException(`Warehouse with ID "${newWarehouseId}" was not found`);
+        }
+        if (!wh.isActive) {
+          throw new BadRequestException('Cannot place router in a deactivated warehouse');
+        }
+      }
+
+      // Usable contribution rule (Contract §5.1):
+      // A serialized router contributes exactly one usable unit to warehouse W iff:
+      // 1. Lifecycle is AVAILABLE
+      // 2. Physical condition is SERVICEABLE
+      // 3. Physical location is warehouse W
+      // All other states contribute zero.
+      const oldUsableWarehouseId: string | null =
         router.status === 'AVAILABLE' &&
         router.physicalCondition === 'SERVICEABLE' &&
-        Boolean(router.warehouseId);
+        Boolean(router.warehouseId)
+          ? router.warehouseId
+          : null;
 
-      const willBeUsable =
+      const newUsableWarehouseId: string | null =
         router.status === 'AVAILABLE' &&
         dto.physicalCondition === 'SERVICEABLE' &&
-        Boolean(dto.warehouseId ?? router.warehouseId);
+        Boolean(newWarehouseId)
+          ? newWarehouseId
+          : null;
 
-      // Record condition history
+      // Record condition and location audit history
       await this.repo.routers.createConditionHistory(
         {
           routerId: id,
           fromCondition: router.physicalCondition,
           toCondition: dto.physicalCondition,
           fromWarehouseId: router.warehouseId,
-          toWarehouseId: dto.warehouseId ?? router.warehouseId,
-          externalLocation: dto.externalLocation ?? null,
+          toWarehouseId: newWarehouseId,
+          externalLocation: newExternalLocation,
           reason: dto.reason,
           changedBy: responsibleUserId,
         },
         tx,
       );
 
-      // If warehouse damage occurred to an AVAILABLE router:
-      // - Keep lifecycle AVAILABLE
-      // - Close active custody (custody becomes empty)
-      // - Keep physical warehouse location
-      // - Decrement usable stock
-      if (wasUsable && !willBeUsable && dto.physicalCondition === 'DAMAGED') {
-        await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
-
-        if (router.warehouseId) {
+      // Apply deltas and custody changes atomically based on usable contribution transition
+      if (oldUsableWarehouseId !== newUsableWarehouseId) {
+        // Case 1: Inter-warehouse move between eligible warehouses (A -> B)
+        if (oldUsableWarehouseId && newUsableWarehouseId) {
+          // Decrement source warehouse stock
           await this.repo.inventory.recordMovementWithDelta(
             {
-              warehouseId: router.warehouseId,
+              warehouseId: oldUsableWarehouseId,
               productId: router.productId,
-              movementType: 'ADJUSTMENT',
+              movementType: 'TRANSFER_WAREHOUSE',
               quantity: 1,
               responsibleUserId,
-              notes: `Router damaged in warehouse: ${router.serialNumber} (${dto.reason})`,
+              notes: `Inter-warehouse transfer: ${router.serialNumber} (${dto.reason})`,
             },
             -1,
             tx,
           );
-        }
-      }
 
-      // If repaired and restored to SERVICEABLE in warehouse:
-      if (!wasUsable && willBeUsable) {
-        const targetWarehouse = dto.warehouseId ?? router.warehouseId;
-        if (targetWarehouse) {
-          await this.repo.routers.createAssignment(
-            {
-              routerId: id,
-              holderType: 'WAREHOUSE',
-              warehouseId: targetWarehouse,
-              assignedBy: responsibleUserId,
-              notes: 'Restored to warehouse custody after repair',
-            },
-            tx,
-          );
-
+          // Increment destination warehouse stock
           await this.repo.inventory.recordMovementWithDelta(
             {
-              warehouseId: targetWarehouse,
+              warehouseId: newUsableWarehouseId,
               productId: router.productId,
-              movementType: 'ADJUSTMENT',
+              movementType: 'TRANSFER_WAREHOUSE',
               quantity: 1,
               responsibleUserId,
-              notes: `Router repaired and available: ${router.serialNumber}`,
+              notes: `Inter-warehouse transfer: ${router.serialNumber} (${dto.reason})`,
             },
             1,
             tx,
           );
+
+          // Move custody once: release old warehouse assignment, open new warehouse assignment
+          await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
+          await this.repo.routers.createAssignment(
+            {
+              routerId: id,
+              holderType: 'WAREHOUSE',
+              warehouseId: newUsableWarehouseId,
+              assignedBy: responsibleUserId,
+              notes: dto.reason ?? 'Transferred to warehouse custody',
+            },
+            tx,
+          );
+        }
+        // Case 2: Usable contribution removed (SERVICEABLE -> DAMAGED or UNDER_REPAIR, or sent external)
+        else if (oldUsableWarehouseId && !newUsableWarehouseId) {
+          await this.repo.inventory.recordMovementWithDelta(
+            {
+              warehouseId: oldUsableWarehouseId,
+              productId: router.productId,
+              movementType: 'ADJUSTMENT',
+              quantity: 1,
+              responsibleUserId,
+              notes: `Router no longer usable (${dto.physicalCondition}): ${router.serialNumber} (${dto.reason})`,
+            },
+            -1,
+            tx,
+          );
+
+          // Close active custody; custody becomes empty
+          await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
+        }
+        // Case 3: Restoring serviceability into warehouse stock (DAMAGED / UNDER_REPAIR -> SERVICEABLE)
+        else if (!oldUsableWarehouseId && newUsableWarehouseId) {
+          await this.repo.inventory.recordMovementWithDelta(
+            {
+              warehouseId: newUsableWarehouseId,
+              productId: router.productId,
+              movementType: 'ADJUSTMENT',
+              quantity: 1,
+              responsibleUserId,
+              notes: `Router restored to serviceable stock: ${router.serialNumber} (${dto.reason})`,
+            },
+            1,
+            tx,
+          );
+
+          // Restore warehouse custody
+          await this.repo.routers.createAssignment(
+            {
+              routerId: id,
+              holderType: 'WAREHOUSE',
+              warehouseId: newUsableWarehouseId,
+              assignedBy: responsibleUserId,
+              notes: dto.reason ?? 'Restored to warehouse custody',
+            },
+            tx,
+          );
+        }
+      } else {
+        // If neither was usable, but router is sent to external repair, ensure active custody is closed
+        if (!newUsableWarehouseId && dto.externalLocation) {
+          await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
         }
       }
 
@@ -487,8 +575,8 @@ export class RoutersService {
         id,
         {
           physicalCondition: dto.physicalCondition,
-          warehouseId: dto.warehouseId ?? router.warehouseId,
-          externalLocation: dto.externalLocation ?? router.externalLocation,
+          warehouseId: newWarehouseId,
+          externalLocation: newExternalLocation,
         },
         tx,
       );
