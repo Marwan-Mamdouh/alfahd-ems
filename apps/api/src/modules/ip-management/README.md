@@ -16,6 +16,12 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   - **`FREE`**: Available for customer assignment or manual reservation.
   - **`RESERVED`**: In use or set aside for VIP/infrastructure needs.
   - _(Note: Customer CRUD and ticket allocations are intentionally deferred to M3a/M4 per the implementation contract)._
+- **Concurrency & Pessimistic Row Locking (T10):**
+  - All mutating lifecycle methods (`reserve`, `release`, `archive`, `unarchive`, `update`) execute inside database transactions and acquire exclusive pessimistic row locks via `findByIdForUpdate(id, tx)` (`SELECT ... FOR UPDATE`).
+  - Concurrent mutations are serialized: competing reservations yield exactly one winner (200 OK) and one conflict (409 Conflict), writing exactly one history entry.
+  - Concurrent reserve vs archive operations are serialized; winning reservation blocks archival (409 Conflict), while winning archival blocks reservation (400 Bad Request).
+  - PostgreSQL database check constraint `ip_addresses_not_archived_reserved_check` (`CHECK (NOT (is_archived = true AND status = 'RESERVED'))`) guarantees at the storage engine level that an IP can never simultaneously be archived and reserved.
+  - Idempotent retries (`archive` when already archived, `unarchive` when already active, `update` when notes unchanged) return the current state without emitting duplicate audit history rows.
 - **Soft Decommissioning (`isArchived`):**
   - Addresses can be decommissioned from circulation by setting `isArchived: true`.
   - _Invariant:_ A `RESERVED` IP cannot be archived directly (must be released back to `FREE` first).
@@ -105,6 +111,8 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
 ### B. `IpRepository` Methods
 
 - `findByAddress(address, tx?)`: Case-insensitive trimmed IP lookup.
+- `findById(id, tx?)`: Retrieves single IP address by primary key.
+- `findByIdForUpdate(id, tx)`: Acquires an exclusive row lock (`SELECT ... FOR UPDATE`) within transaction `tx` for serialized mutations.
 - `findManyWithPagination(params)`: Filters by status, `isArchived`, address search, and pagination.
 - `createIp(data, tx?)` / `updateIp(id, updates, tx?)`: Drizzle entity insertion and modification.
 - `createHistory(data, tx?)`: Appends mutation audit row to `ip_history`.

@@ -47,15 +47,20 @@ describe('routerStatusHistory schema and database constraints', () => {
 });
 
 describe('ipAddresses schema and database constraints', () => {
-  it('defines the ip_addresses_ipv4_host_check constraint on ipAddresses table', () => {
+  it('defines the ip_addresses_ipv4_host_check and ip_addresses_not_archived_reserved_check constraints on ipAddresses table', () => {
     const config = getTableConfig(ipAddresses);
 
     expect(config.checks).toBeDefined();
     const hostCheck = config.checks.find((c) => c.name === 'ip_addresses_ipv4_host_check');
     expect(hostCheck).toBeDefined();
+
+    const notArchivedReservedCheck = config.checks.find(
+      (c) => c.name === 'ip_addresses_not_archived_reserved_check',
+    );
+    expect(notArchivedReservedCheck).toBeDefined();
   });
 
-  it('enforces IPv4 host-only INET values in migration 0005_m2b_supply_routers_ip.sql', () => {
+  it('enforces IPv4 host-only INET values and no archived RESERVED in migration 0005_m2b_supply_routers_ip.sql', () => {
     const migrationPath = path.resolve(
       __dirname,
       '../../../drizzle/0005_m2b_supply_routers_ip.sql',
@@ -66,9 +71,12 @@ describe('ipAddresses schema and database constraints', () => {
       'CONSTRAINT "ip_addresses_ipv4_host_check" CHECK (family("ip_addresses"."address") = 4 AND masklen("ip_addresses"."address") = 32)',
     );
     expect(sqlContent).toContain('CONSTRAINT "ip_addresses_address_unique" UNIQUE("address")');
+    expect(sqlContent).toContain(
+      'CONSTRAINT "ip_addresses_not_archived_reserved_check" CHECK (NOT ("ip_addresses"."is_archived" = true AND "ip_addresses"."status" = \'RESERVED\'))',
+    );
   });
 
-  it('records ip_addresses_ipv4_host_check in 0005_snapshot.json', () => {
+  it('records ip_addresses_ipv4_host_check and ip_addresses_not_archived_reserved_check in 0005_snapshot.json', () => {
     const snapshotPath = path.resolve(__dirname, '../../../drizzle/meta/0005_snapshot.json');
     const snapshotJson = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
     const ipTable = snapshotJson.tables['public.ip_addresses'];
@@ -78,6 +86,10 @@ describe('ipAddresses schema and database constraints', () => {
     expect(ipTable.checkConstraints.ip_addresses_ipv4_host_check).toBeDefined();
     expect(ipTable.checkConstraints.ip_addresses_ipv4_host_check.value).toBe(
       'family("ip_addresses"."address") = 4 AND masklen("ip_addresses"."address") = 32',
+    );
+    expect(ipTable.checkConstraints.ip_addresses_not_archived_reserved_check).toBeDefined();
+    expect(ipTable.checkConstraints.ip_addresses_not_archived_reserved_check.value).toBe(
+      'NOT ("ip_addresses"."is_archived" = true AND "ip_addresses"."status" = \'RESERVED\')',
     );
   });
 });

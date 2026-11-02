@@ -64,6 +64,20 @@ export class IpRepository extends BaseRepository<
     return row ?? null;
   }
 
+  async findByIdForUpdate(
+    id: string,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<IpAddress | null> {
+    const [row] = await tx
+      .select()
+      .from(schema.ipAddresses)
+      .where(eq(schema.ipAddresses.id, id))
+      .limit(1)
+      .for('update');
+
+    return row ?? null;
+  }
+
   async createIp(data: NewIpAddress, tx?: NodePgDatabase<typeof schema>): Promise<IpAddress> {
     const client = this.getClient(tx);
     const [row] = await client.insert(schema.ipAddresses).values(data).returning();

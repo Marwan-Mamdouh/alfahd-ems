@@ -60,14 +60,72 @@ describe('IP Management (e2e)', () => {
     }),
   };
 
+  interface LockQueueItem {
+    txId: number;
+    resolve: () => void;
+  }
+  const rowLocks = new Map<string, LockQueueItem[]>();
+
+  const acquireLock = async (id: string, txId: number) => {
+    let queue = rowLocks.get(id);
+    if (!queue) {
+      queue = [];
+      rowLocks.set(id, queue);
+    }
+    if (queue.length > 0 && queue[0].txId === txId) {
+      return;
+    }
+    const isFirst = queue.length === 0;
+    let grantLock!: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      grantLock = resolve;
+    });
+    queue.push({ txId, resolve: grantLock });
+    if (isFirst) {
+      grantLock();
+    }
+    await lockPromise;
+  };
+
+  const releaseLocksForTx = (txId: number) => {
+    for (const [id, queue] of rowLocks.entries()) {
+      const idx = queue.findIndex((item) => item.txId === txId);
+      if (idx !== -1) {
+        queue.splice(idx, 1);
+        if (queue.length > 0) {
+          queue[0].resolve();
+        } else {
+          rowLocks.delete(id);
+        }
+      }
+    }
+  };
+
+  let nextTxId = 1;
+
   const mockRepositoryService = {
-    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
+    transaction: async (cb: (tx: any) => Promise<any>) => {
+      const txId = nextTxId++;
+      const tx = { txId };
+      try {
+        return await cb(tx);
+      } finally {
+        releaseLocksForTx(txId);
+      }
+    },
     ip: {
       findByAddress: async (address: string) => {
         return ipStore.find((i) => i.address.trim().toLowerCase() === address.trim().toLowerCase());
       },
       findById: async (id: string) => {
         return ipStore.find((i) => i.id === id);
+      },
+      findByIdForUpdate: async (id: string, tx?: any) => {
+        if (tx?.txId) {
+          await acquireLock(id, tx.txId);
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+        return ipStore.find((i) => i.id === id) ?? null;
       },
       findManyWithPagination: async (params: {
         status?: string;
@@ -127,11 +185,15 @@ describe('IP Management (e2e)', () => {
       updateIp: async (id: string, updates: Partial<IpAddress>) => {
         const idx = ipStore.findIndex((i) => i.id === id);
         if (idx === -1) return undefined;
-        ipStore[idx] = {
+        const candidate = {
           ...ipStore[idx],
           ...updates,
           updatedAt: new Date(),
         };
+        if (candidate.isArchived && candidate.status === 'RESERVED') {
+          throw new Error('violates check constraint ip_addresses_not_archived_reserved_check');
+        }
+        ipStore[idx] = candidate;
         return ipStore[idx];
       },
       createHistory: async (data: Partial<IpHistory>) => {
@@ -564,6 +626,184 @@ invalid-ip,Broken row`;
       expect(outcome.skipped).toBe(2); // 1 file duplicate, 1 db duplicate
       expect(outcome.errors).toHaveLength(1); // 1 malformed row
       expect(outcome.errors[0].address).toBe('not-an-ip-address');
+    });
+  });
+
+  describe('Concurrency & Serialization Invariants (T10)', () => {
+    it('serializes competing reservations: exactly one succeeds with 200, one fails with 409, and records single history', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const testIp = makeIpAddress({
+        id: '44444444-4444-4444-8444-444444444441',
+        address: '172.20.1.1',
+        status: 'FREE',
+        isArchived: false,
+      });
+      ipStore.push(testIp);
+
+      const [resA, resB] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/reserve`)
+          .set(auth)
+          .send({ reason: 'Reservation request A' }),
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/reserve`)
+          .set(auth)
+          .send({ reason: 'Reservation request B' }),
+      ]);
+
+      const statuses = [resA.status, resB.status].sort();
+      expect(statuses).toEqual([200, 409]);
+
+      const reserveHistory = historyStore.filter(
+        (h) => h.ipId === testIp.id && h.action === 'RESERVE',
+      );
+      expect(reserveHistory).toHaveLength(1);
+
+      const finalIp = ipStore.find((i) => i.id === testIp.id)!;
+      expect(finalIp.status).toBe('RESERVED');
+      expect(finalIp.isArchived).toBe(false);
+    });
+
+    it('serializes concurrent reserve and archive: prevents archived RESERVED state', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const testIp = makeIpAddress({
+        id: '44444444-4444-4444-8444-444444444442',
+        address: '172.20.1.2',
+        status: 'FREE',
+        isArchived: false,
+      });
+      ipStore.push(testIp);
+
+      const [resReserve, resArchive] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/reserve`)
+          .set(auth)
+          .send({ reason: 'Concurrent reserve' }),
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/archive`)
+          .set(auth)
+          .send({ reason: 'Concurrent archive' }),
+      ]);
+
+      const statuses = [resReserve.status, resArchive.status];
+      // One must succeed (200), and the loser must be rejected (409 or 400)
+      expect(statuses).toContain(200);
+      expect(statuses.some((s) => s === 409 || s === 400)).toBe(true);
+
+      const finalIp = ipStore.find((i) => i.id === testIp.id)!;
+      // Invariant: MUST NOT be both archived and RESERVED
+      expect(finalIp.isArchived && finalIp.status === 'RESERVED').toBe(false);
+
+      if (resReserve.status === 200) {
+        // Reserve won: IP is RESERVED, not archived; archive got 409 Conflict
+        expect(resArchive.status).toBe(409);
+        expect(finalIp.status).toBe('RESERVED');
+        expect(finalIp.isArchived).toBe(false);
+      } else {
+        // Archive won: IP is FREE, archived; reserve got 400 Bad Request
+        expect(resReserve.status).toBe(400);
+        expect(finalIp.status).toBe('FREE');
+        expect(finalIp.isArchived).toBe(true);
+      }
+    });
+
+    it('handles concurrent idempotent archive calls without duplicate history', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const testIp = makeIpAddress({
+        id: '44444444-4444-4444-8444-444444444443',
+        address: '172.20.1.3',
+        status: 'FREE',
+        isArchived: false,
+      });
+      ipStore.push(testIp);
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/archive`)
+          .set(auth)
+          .send({ reason: 'Archive attempt 1' }),
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/archive`)
+          .set(auth)
+          .send({ reason: 'Archive attempt 2' }),
+      ]);
+
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+
+      const archiveHistory = historyStore.filter(
+        (h) => h.ipId === testIp.id && h.action === 'ARCHIVE',
+      );
+      expect(archiveHistory).toHaveLength(1);
+
+      const finalIp = ipStore.find((i) => i.id === testIp.id)!;
+      expect(finalIp.isArchived).toBe(true);
+    });
+
+    it('handles concurrent idempotent unarchive calls without duplicate history', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const testIp = makeIpAddress({
+        id: '44444444-4444-4444-8444-444444444444',
+        address: '172.20.1.4',
+        status: 'FREE',
+        isArchived: true,
+      });
+      ipStore.push(testIp);
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/unarchive`)
+          .set(auth)
+          .send({ reason: 'Unarchive attempt 1' }),
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/unarchive`)
+          .set(auth)
+          .send({ reason: 'Unarchive attempt 2' }),
+      ]);
+
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+
+      const unarchiveHistory = historyStore.filter(
+        (h) => h.ipId === testIp.id && h.action === 'UNARCHIVE',
+      );
+      expect(unarchiveHistory).toHaveLength(1);
+
+      const finalIp = ipStore.find((i) => i.id === testIp.id)!;
+      expect(finalIp.isArchived).toBe(false);
+    });
+
+    it('serializes competing releases: exactly one succeeds, one gets 409 Conflict, and records single history', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const testIp = makeIpAddress({
+        id: '44444444-4444-4444-8444-444444444445',
+        address: '172.20.1.5',
+        status: 'RESERVED',
+        isArchived: false,
+      });
+      ipStore.push(testIp);
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/release`)
+          .set(auth)
+          .send({ reason: 'Release attempt 1' }),
+        request(app.getHttpServer())
+          .post(`/ip-addresses/${testIp.id}/release`)
+          .set(auth)
+          .send({ reason: 'Release attempt 2' }),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      expect(statuses).toEqual([200, 409]);
+
+      const releaseHistory = historyStore.filter(
+        (h) => h.ipId === testIp.id && h.action === 'RELEASE',
+      );
+      expect(releaseHistory).toHaveLength(1);
+
+      const finalIp = ipStore.find((i) => i.id === testIp.id)!;
+      expect(finalIp.status).toBe('FREE');
     });
   });
 

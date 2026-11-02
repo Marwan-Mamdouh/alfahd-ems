@@ -273,6 +273,10 @@
         "ip_addresses_ipv4_host_check": {
           "name": "ip_addresses_ipv4_host_check",
           "value": "family(\"ip_addresses\".\"address\") = 4 AND masklen(\"ip_addresses\".\"address\") = 32"
+        },
+        "ip_addresses_not_archived_reserved_check": {
+          "name": "ip_addresses_not_archived_reserved_check",
+          "value": "NOT (\"ip_addresses\".\"is_archived\" = true AND \"ip_addresses\".\"status\" = 'RESERVED')"
         }
       },
       "isRLSEnabled": false

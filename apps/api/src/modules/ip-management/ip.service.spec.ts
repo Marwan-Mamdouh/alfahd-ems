@@ -33,6 +33,7 @@ describe('IpService', () => {
   const mockIpRepo = {
     findByAddress: vi.fn(),
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
     findManyWithPagination: vi.fn(),
     createIp: vi.fn(),
     createIpOnConflictDoNothing: vi.fn(),
@@ -48,6 +49,7 @@ describe('IpService', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockIpRepo.findByIdForUpdate.mockImplementation((id: string) => mockIpRepo.findById(id));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -170,12 +172,17 @@ describe('IpService', () => {
 
       const result = await service.update(mockIp.id, { notes: 'Updated notes' }, 'admin-id');
 
-      expect(mockIpRepo.updateIp).toHaveBeenCalledWith(mockIp.id, { notes: 'Updated notes' });
+      expect(mockIpRepo.updateIp).toHaveBeenCalledWith(
+        mockIp.id,
+        { notes: 'Updated notes' },
+        expect.anything(),
+      );
       expect(mockIpRepo.createHistory).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'UPDATE_METADATA',
           actorId: 'admin-id',
         }),
+        expect.anything(),
       );
       expect(result.notes).toBe('Updated notes');
     });
@@ -187,9 +194,34 @@ describe('IpService', () => {
         service.update('non-existent-id', { notes: 'test' }, 'admin-id'),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('is idempotent and creates no history when notes are unchanged', async () => {
+      mockIpRepo.findById.mockResolvedValue(mockIp);
+
+      const result = await service.update(
+        mockIp.id,
+        { notes: mockIp.notes ?? undefined },
+        'admin-id',
+      );
+
+      expect(mockIpRepo.updateIp).not.toHaveBeenCalled();
+      expect(mockIpRepo.createHistory).not.toHaveBeenCalled();
+      expect(result.notes).toBe(mockIp.notes);
+    });
   });
 
   describe('reserve', () => {
+    it('locks the row via findByIdForUpdate inside a transaction', async () => {
+      mockIpRepo.findById.mockResolvedValue(mockIp);
+      mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, status: 'RESERVED' });
+      mockIpRepo.createHistory.mockResolvedValue(mockHistory);
+
+      await service.reserve(mockIp.id, 'Reserved for VIP', 'admin-id');
+
+      expect(mockRepositoryService.transaction).toHaveBeenCalled();
+      expect(mockIpRepo.findByIdForUpdate).toHaveBeenCalledWith(mockIp.id, expect.anything());
+    });
+
     it('marks a FREE IP as RESERVED and records history', async () => {
       mockIpRepo.findById.mockResolvedValue(mockIp);
       mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, status: 'RESERVED' });
@@ -301,12 +333,13 @@ describe('IpService', () => {
       );
     });
 
-    it('is idempotent when IP is already archived', async () => {
+    it('is idempotent when IP is already archived and creates no duplicate history', async () => {
       mockIpRepo.findById.mockResolvedValue({ ...mockIp, isArchived: true });
 
       const result = await service.archive(mockIp.id, 'Reason', 'admin-id');
 
       expect(mockIpRepo.updateIp).not.toHaveBeenCalled();
+      expect(mockIpRepo.createHistory).not.toHaveBeenCalled();
       expect(result.isArchived).toBe(true);
     });
   });
@@ -334,12 +367,13 @@ describe('IpService', () => {
       expect(result.isArchived).toBe(false);
     });
 
-    it('is idempotent when IP is not archived', async () => {
+    it('is idempotent when IP is not archived and creates no duplicate history', async () => {
       mockIpRepo.findById.mockResolvedValue(mockIp);
 
       const result = await service.unarchive(mockIp.id, 'Reason', 'admin-id');
 
       expect(mockIpRepo.updateIp).not.toHaveBeenCalled();
+      expect(mockIpRepo.createHistory).not.toHaveBeenCalled();
       expect(result.isArchived).toBe(false);
     });
   });
