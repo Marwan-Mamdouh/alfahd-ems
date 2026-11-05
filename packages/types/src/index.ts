@@ -436,6 +436,8 @@ export interface IpHistoryDto {
   toStatus: IpStatus;
   action: IpHistoryAction;
   reason: string | null;
+  metadataBefore?: Record<string, unknown> | null;
+  metadataAfter?: Record<string, unknown> | null;
   actorId: string;
   createdAt: string;
 }

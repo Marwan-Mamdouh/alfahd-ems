@@ -24,6 +24,8 @@ export function makeIpHistory(overrides: Partial<IpHistory> = {}): IpHistory {
     toStatus: 'RESERVED',
     action: 'RESERVE',
     reason: 'Manual reservation',
+    metadataBefore: null,
+    metadataAfter: null,
     actorId: faker.string.uuid(),
     createdAt: faker.date.recent(),
     ...overrides,

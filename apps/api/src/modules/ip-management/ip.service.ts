@@ -55,6 +55,8 @@ export class IpService {
           toStatus: 'FREE',
           action: 'CREATE',
           reason: 'Initial creation',
+          metadataBefore: null,
+          metadataAfter: { notes: created.notes },
           actorId,
         },
         tx,
@@ -103,8 +105,21 @@ export class IpService {
         throw new NotFoundException(`IP address with ID "${id}" was not found`);
       }
 
-      if (dto.notes !== undefined && dto.notes !== existing.notes) {
-        const updated = await this.repo.ip.updateIp(id, { notes: dto.notes }, tx);
+      const normalizedDtoNotes = dto.notes !== undefined ? dto.notes.trim() || null : undefined;
+      const normalizedExistingNotes =
+        existing.notes !== null ? existing.notes.trim() || null : null;
+
+      if (normalizedDtoNotes !== undefined && normalizedDtoNotes !== normalizedExistingNotes) {
+        const updated = await this.repo.ip.updateIp(id, { notes: normalizedDtoNotes }, tx);
+
+        let reason: string;
+        if (existing.notes === null) {
+          reason = `Set notes to "${normalizedDtoNotes}"`;
+        } else if (normalizedDtoNotes === null) {
+          reason = `Cleared notes (was "${existing.notes}")`;
+        } else {
+          reason = `Updated notes from "${existing.notes}" to "${normalizedDtoNotes}"`;
+        }
 
         await this.repo.ip.createHistory(
           {
@@ -112,7 +127,9 @@ export class IpService {
             fromStatus: existing.status,
             toStatus: existing.status,
             action: 'UPDATE_METADATA',
-            reason: dto.notes ? 'Updated notes' : 'Cleared notes',
+            reason,
+            metadataBefore: { notes: existing.notes },
+            metadataAfter: { notes: normalizedDtoNotes },
             actorId,
           },
           tx,
@@ -302,6 +319,8 @@ export class IpService {
       toStatus: h.toStatus,
       action: h.action,
       reason: h.reason,
+      metadataBefore: (h.metadataBefore as Record<string, unknown> | null) ?? null,
+      metadataAfter: (h.metadataAfter as Record<string, unknown> | null) ?? null,
       actorId: h.actorId,
       createdAt: h.createdAt.toISOString(),
     }));
@@ -470,6 +489,8 @@ export class IpService {
               toStatus: 'FREE',
               action: 'CREATE',
               reason: `Bulk CSV import (job:${jobId})`,
+              metadataBefore: null,
+              metadataAfter: { notes: created.notes },
               actorId,
             },
             tx,

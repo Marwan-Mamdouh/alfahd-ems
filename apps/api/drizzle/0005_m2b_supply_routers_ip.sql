@@ -24,6 +24,8 @@ CREATE TABLE "ip_history" (
 	"to_status" "ip_status" NOT NULL,
 	"action" "ip_history_action" NOT NULL,
 	"reason" text,
+	"metadata_before" jsonb,
+	"metadata_after" jsonb,
 	"actor_id" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );

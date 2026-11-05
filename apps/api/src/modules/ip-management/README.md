@@ -26,9 +26,12 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   - Addresses can be decommissioned from circulation by setting `isArchived: true`.
   - _Invariant:_ A `RESERVED` IP cannot be archived directly (must be released back to `FREE` first).
   - _Invariant:_ An archived IP cannot be reserved.
-- **Immutable Mutation Audit Ledger (`ip_history`):**
-  - Every mutation automatically records an entry in `ip_history` tracking `fromStatus`, `toStatus`, `action`, `reason`, `actorId`, and timestamp.
+- **Immutable Reconstructable Mutation Audit Ledger (`ip_history`, T11):**
+  - Every mutation automatically records an entry in `ip_history` tracking `fromStatus`, `toStatus`, `action`, `reason`, `metadataBefore`, `metadataAfter`, `actorId`, and timestamp.
   - Supported actions: `CREATE`, `RESERVE`, `RELEASE`, `ARCHIVE`, `UNARCHIVE`, `UPDATE_METADATA`.
+  - Reconstructable metadata edits: `UPDATE_METADATA` records structured before-and-after snapshots (`metadataBefore: { notes: old }`, `metadataAfter: { notes: new }`) and explicit diff descriptions in `reason` (e.g. `Updated notes from "old" to "new"` or `Cleared notes (was "old")`).
+  - Atomic shared transaction: Metadata updates and audit writes share a single database transaction. If the audit insertion fails, the entire update rolls back.
+  - Idempotency: Unchanged metadata submissions do not execute updates or fabricate false audit events.
 - **Asynchronous, Bounded, Retry-Safe CSV Bulk Import:**
   - Administrators upload CSV files (`multipart/form-data`) containing `address,notes` columns.
   - Enqueues jobs to dedicated BullMQ queue (`ip-imports`) with bounded limits (max 5 MB file size, max 5,000 rows).

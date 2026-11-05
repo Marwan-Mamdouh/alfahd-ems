@@ -103,12 +103,35 @@ describe('IP Management (e2e)', () => {
 
   let nextTxId = 1;
 
+  interface MockTx {
+    txId: number;
+    modifiedIps: Map<string, IpAddress | undefined>;
+    createdHistoryIds: Set<string>;
+  }
+
   const mockRepositoryService = {
     transaction: async (cb: (tx: any) => Promise<any>) => {
       const txId = nextTxId++;
-      const tx = { txId };
+      const tx: MockTx = {
+        txId,
+        modifiedIps: new Map(),
+        createdHistoryIds: new Set(),
+      };
       try {
         return await cb(tx);
+      } catch (err) {
+        for (const [id, original] of tx.modifiedIps.entries()) {
+          const idx = ipStore.findIndex((i) => i.id === id);
+          if (idx !== -1) {
+            if (original) {
+              ipStore[idx] = original;
+            } else {
+              ipStore.splice(idx, 1);
+            }
+          }
+        }
+        historyStore = historyStore.filter((h) => !tx.createdHistoryIds.has(h.id));
+        throw err;
       } finally {
         releaseLocksForTx(txId);
       }
@@ -182,9 +205,12 @@ describe('IP Management (e2e)', () => {
         ipStore.push(created);
         return created;
       },
-      updateIp: async (id: string, updates: Partial<IpAddress>) => {
+      updateIp: async (id: string, updates: Partial<IpAddress>, tx?: any) => {
         const idx = ipStore.findIndex((i) => i.id === id);
         if (idx === -1) return undefined;
+        if (tx && tx.modifiedIps && !tx.modifiedIps.has(id)) {
+          tx.modifiedIps.set(id, { ...ipStore[idx] });
+        }
         const candidate = {
           ...ipStore[idx],
           ...updates,
@@ -196,7 +222,7 @@ describe('IP Management (e2e)', () => {
         ipStore[idx] = candidate;
         return ipStore[idx];
       },
-      createHistory: async (data: Partial<IpHistory>) => {
+      createHistory: async (data: Partial<IpHistory>, tx?: any) => {
         const created: IpHistory = {
           id: 'hist-' + Math.random().toString(36).substring(2, 9),
           ipId: data.ipId!,
@@ -204,10 +230,15 @@ describe('IP Management (e2e)', () => {
           toStatus: data.toStatus!,
           action: data.action!,
           reason: data.reason ?? null,
+          metadataBefore: data.metadataBefore ?? null,
+          metadataAfter: data.metadataAfter ?? null,
           actorId: data.actorId!,
           createdAt: new Date(),
         };
         historyStore.push(created);
+        if (tx && tx.createdHistoryIds) {
+          tx.createdHistoryIds.add(created.id);
+        }
         return created;
       },
       findHistoryByIp: async (ipId: string) => {
@@ -253,6 +284,8 @@ describe('IP Management (e2e)', () => {
         toStatus: 'FREE',
         action: 'CREATE',
         reason: 'Initial seed',
+        metadataBefore: null,
+        metadataAfter: null,
         actorId: 'admin-seed',
         createdAt: new Date(),
       },
@@ -263,6 +296,8 @@ describe('IP Management (e2e)', () => {
         toStatus: 'RESERVED',
         action: 'RESERVE',
         reason: 'Reserved for gateway',
+        metadataBefore: null,
+        metadataAfter: null,
         actorId: 'admin-seed',
         createdAt: new Date(),
       },
@@ -500,7 +535,7 @@ describe('IP Management (e2e)', () => {
   });
 
   describe('Metadata Update & History Audit', () => {
-    it('updates IP metadata notes', async () => {
+    it('updates IP metadata notes and persists reconstructable audit snapshots and diff reason', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
       const dto = makeUpdateIpDto({ notes: 'Updated notes via test' });
 
@@ -511,6 +546,98 @@ describe('IP Management (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.notes).toBe('Updated notes via test');
+
+      const histRes = await request(app.getHttpServer())
+        .get(`/ip-addresses/${IP_FREE_ID}/history`)
+        .set(auth)
+        .expect(200);
+
+      const updateHistory = histRes.body.data.find((h: any) => h.action === 'UPDATE_METADATA');
+      expect(updateHistory).toBeDefined();
+      expect(updateHistory.metadataBefore).toEqual({ notes: 'Free pool host' });
+      expect(updateHistory.metadataAfter).toEqual({ notes: 'Updated notes via test' });
+      expect(updateHistory.reason).toBe(
+        'Updated notes from "Free pool host" to "Updated notes via test"',
+      );
+    });
+
+    it('does not fabricate a change event when notes are unchanged', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+
+      const beforeRes = await request(app.getHttpServer())
+        .get(`/ip-addresses/${IP_FREE_ID}/history`)
+        .set(auth)
+        .expect(200);
+      const countBefore = beforeRes.body.data.length;
+
+      // Submit identical notes
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/ip-addresses/${IP_FREE_ID}`)
+        .set(auth)
+        .send({ notes: 'Updated notes via test' })
+        .expect(200);
+
+      expect(patchRes.body.data.notes).toBe('Updated notes via test');
+
+      const afterRes = await request(app.getHttpServer())
+        .get(`/ip-addresses/${IP_FREE_ID}/history`)
+        .set(auth)
+        .expect(200);
+      expect(afterRes.body.data.length).toBe(countBefore);
+    });
+
+    it('clears notes and records reconstructable transition to null', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/ip-addresses/${IP_FREE_ID}`)
+        .set(auth)
+        .send({ notes: '' })
+        .expect(200);
+
+      expect(patchRes.body.data.notes).toBeNull();
+
+      const histRes = await request(app.getHttpServer())
+        .get(`/ip-addresses/${IP_FREE_ID}/history`)
+        .set(auth)
+        .expect(200);
+
+      const clearHistory = histRes.body.data.find(
+        (h: any) =>
+          h.action === 'UPDATE_METADATA' &&
+          h.metadataBefore?.notes === 'Updated notes via test' &&
+          h.metadataAfter?.notes === null,
+      );
+      expect(clearHistory).toBeDefined();
+      expect(clearHistory.reason).toBe('Cleared notes (was "Updated notes via test")');
+    });
+
+    it('injected audit failure in transaction rolls back metadata update', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const originalCreateHistory = mockRepositoryService.ip.createHistory;
+
+      // Inject failure on createHistory
+      mockRepositoryService.ip.createHistory = async () => {
+        throw new Error('Injected audit ledger write failure');
+      };
+
+      try {
+        await request(app.getHttpServer())
+          .patch(`/ip-addresses/${IP_FREE_ID}`)
+          .set(auth)
+          .send({ notes: 'Should be rolled back' })
+          .expect(500);
+
+        // Verify that IP in database remained unmodified (rolled back to null)
+        const checkRes = await request(app.getHttpServer())
+          .get(`/ip-addresses/${IP_FREE_ID}`)
+          .set(auth)
+          .expect(200);
+
+        expect(checkRes.body.data.notes).toBeNull();
+      } finally {
+        mockRepositoryService.ip.createHistory = originalCreateHistory;
+      }
     });
 
     it('retrieves full mutation history for an IP address', async () => {
