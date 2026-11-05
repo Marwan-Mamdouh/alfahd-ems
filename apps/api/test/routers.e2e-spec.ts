@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { getQueueToken } from '@nestjs/bullmq';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import ExcelJS from 'exceljs';
 import { Role } from '@alfahd/types';
 import { setupTestApp, getAuthHeader } from './test-utils.js';
 import {
@@ -14,6 +15,9 @@ import {
 } from './fakers/index.js';
 import { envelopeData } from './utils/supertest.util.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
+import { StorageService } from '../src/storage/storage.interface.js';
+import { FakeStorageService } from '../src/storage/fake-storage.service.js';
+import { AttendanceReportWorker } from '../src/attendance/attendance.worker.js';
 import type {
   Router,
   RouterAssignment,
@@ -46,8 +50,33 @@ describe('Routers (e2e)', () => {
   const statusHistoryStore: RouterStatusHistory[] = [];
   let stockStore: WarehouseInventory[] = [];
 
+  const fakeStorage = new FakeStorageService();
+  let latestReportJobResult: any = null;
+
   const mockReportsQueue = {
-    add: vi.fn(async () => ({ id: 'mock-report-job-id' })),
+    add: vi.fn(async (_name: string, data: any) => ({
+      id: 'mock-report-job-id',
+      data,
+    })),
+    getJob: vi.fn(async (id: string) => {
+      if (id === 'mock-report-job-id') {
+        return {
+          id,
+          data: {
+            requestedBy: '11111111-1111-4111-8111-111111111111', // ADMIN's sub in test-utils
+            type: 'ROUTER_INVENTORY_REPORT',
+          },
+          getState: async () => 'completed',
+          returnvalue: latestReportJobResult ?? {
+            downloadUrl: 'https://fake-storage.local/reports/mock_report.xlsx',
+            totalRows: 1,
+            completedAt: new Date().toISOString(),
+          },
+          failedReason: null,
+        };
+      }
+      return null;
+    }),
   };
 
   const mockRepositoryService = {
@@ -360,6 +389,10 @@ describe('Routers (e2e)', () => {
           provide: getQueueToken('reports'),
           useValue: mockReportsQueue,
         },
+        {
+          provide: StorageService,
+          useValue: fakeStorage,
+        },
       ],
     });
 
@@ -443,6 +476,234 @@ describe('Routers (e2e)', () => {
 
       expect(res.body.data).toHaveProperty('jobId');
       expect(mockReportsQueue.add).toHaveBeenCalled();
+    });
+
+    it('enforces requester/admin-scoped job access on GET /jobs/:id', async () => {
+      // 1. ADMIN (or job requester) can read the job status and downloadUrl
+      const adminAuth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .get('/jobs/mock-report-job-id')
+        .set(adminAuth)
+        .expect(200);
+
+      expect(res.body.data.id).toBe('mock-report-job-id');
+      expect(res.body.data.status).toBe('COMPLETED');
+      expect(res.body.data.downloadUrl).toContain('.xlsx');
+
+      // 2. Non-admin user who did not create the job is rejected with 404 Not Found (scoped access)
+      const foreignUserAuth = getAuthHeader(
+        jwtService,
+        Role.TECHNICIAN,
+        '99999999-8888-7777-6666-555544443333',
+      );
+      await request(app.getHttpServer())
+        .get('/jobs/mock-report-job-id')
+        .set(foreignUserAuth)
+        .expect(404);
+    });
+
+    it('verifies actual generated Excel bytes downloadable through configured storage with multi-sheet summary and custody separation', async () => {
+      // Build a realistic dataset to test report generation
+      const mockWarehouses = [
+        { id: WAREHOUSE_ACTIVE_ID, name: 'Main Hub', isActive: true },
+        { id: WAREHOUSE_SECONDARY_ID, name: 'Secondary Hub (Empty)', isActive: true },
+      ];
+
+      const mockRouters = [
+        {
+          router: {
+            id: ROUTER_1_ID,
+            serialNumber: 'SN-AVAILABLE-001',
+            productId: PRODUCT_ROUTER_ID,
+            status: 'AVAILABLE',
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: WAREHOUSE_ACTIVE_ID,
+            externalLocation: null,
+            notes: '=HYPERLINK("http://evil.com")',
+          },
+          product: {
+            name: 'Standard Router',
+            sku: 'RTR-STD-01',
+            model: 'STD-1',
+          },
+          physicalWarehouse: {
+            id: WAREHOUSE_ACTIVE_ID,
+            name: 'Main Hub',
+          },
+          custody: {
+            id: 'assign-1',
+            holderType: 'WAREHOUSE',
+            assignedAt: new Date('2026-10-01T08:00:00Z'),
+          },
+          custodyWarehouse: {
+            id: WAREHOUSE_ACTIVE_ID,
+            name: 'Main Hub',
+          },
+          custodyTechnician: null,
+        },
+        {
+          router: {
+            id: ROUTER_ASSIGNED_ID,
+            serialNumber: 'SN-ASSIGNED-002',
+            productId: PRODUCT_ROUTER_ID,
+            status: 'ASSIGNED_TO_TECHNICIAN',
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: null,
+            externalLocation: null,
+            notes: 'Field unit',
+          },
+          product: {
+            name: 'Standard Router',
+            sku: 'RTR-STD-01',
+            model: 'STD-1',
+          },
+          physicalWarehouse: null,
+          custody: {
+            id: 'assign-2',
+            holderType: 'TECHNICIAN',
+            assignedAt: new Date('2026-10-05T09:00:00Z'),
+          },
+          custodyWarehouse: null,
+          custodyTechnician: {
+            id: TECH_USER_ID,
+            name: 'Tarek Field Tech',
+            email: 'tarek@alfahd.local',
+          },
+        },
+      ];
+
+      let callCount = 0;
+      const dbMock: any = {
+        select: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              from: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                  orderBy: vi.fn().mockResolvedValue(mockWarehouses),
+                }),
+              }),
+            };
+          }
+          return {
+            from: vi.fn().mockReturnValue({
+              innerJoin: vi.fn().mockReturnValue({
+                leftJoin: vi.fn().mockReturnValue({
+                  leftJoin: vi.fn().mockReturnValue({
+                    leftJoin: vi.fn().mockReturnValue({
+                      leftJoin: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                          orderBy: vi.fn().mockResolvedValue(mockRouters),
+                        }),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }),
+      };
+
+      const worker = new AttendanceReportWorker(dbMock, fakeStorage);
+      const jobResult = await worker.process({
+        data: {
+          type: 'ROUTER_INVENTORY_REPORT',
+          params: {},
+        },
+      } as any);
+
+      expect(jobResult.downloadUrl).toBeDefined();
+      expect(jobResult.totalRows).toBe(2);
+
+      // Verify file is stored in fakeStorage and can be downloaded/read as Excel
+      const publicId = jobResult.downloadUrl.replace('https://fake-storage.local/', '');
+      const storedFile = fakeStorage.getFile(publicId);
+      expect(storedFile).toBeDefined();
+      expect(storedFile!.mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+
+      // Verify Excel structure and data integrity
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(storedFile!.buffer as any);
+
+      // Sheet 1: Warehouse Summary
+      const summarySheet = workbook.getWorksheet('Warehouse Summary');
+      expect(summarySheet).toBeDefined();
+
+      // Row 2: Main Hub (populated)
+      const mainHubRow = summarySheet!.getRow(2);
+      expect(mainHubRow.getCell(1).value).toBe('Main Hub');
+      expect(mainHubRow.getCell(2).value).toBe('ACTIVE');
+      expect(mainHubRow.getCell(3).value).toBe(1); // Total Physical Devices
+      expect(mainHubRow.getCell(4).value).toBe(1); // Usable Stock (AVAILABLE + SERVICEABLE)
+      expect(mainHubRow.getCell(5).value).toBe(1); // Condition: SERVICEABLE
+      expect(mainHubRow.getCell(6).value).toBe(0); // Condition: DAMAGED
+      expect(mainHubRow.getCell(8).value).toBe(1); // Lifecycle: AVAILABLE
+      expect(mainHubRow.getCell(15).value).toBe(1); // Custody: WAREHOUSE
+
+      // Row 3: Secondary Hub (empty warehouse with clean 0 counts)
+      const secondaryHubRow = summarySheet!.getRow(3);
+      expect(secondaryHubRow.getCell(1).value).toBe('Secondary Hub (Empty)');
+      expect(secondaryHubRow.getCell(2).value).toBe('ACTIVE');
+      expect(secondaryHubRow.getCell(3).value).toBe(0); // Total Physical Devices: 0
+      expect(secondaryHubRow.getCell(4).value).toBe(0); // Usable Stock: 0
+      expect(secondaryHubRow.getCell(5).value).toBe(0);
+      expect(secondaryHubRow.getCell(6).value).toBe(0);
+
+      // Sheet 2: Router Inventory Details
+      const detailsSheet = workbook.getWorksheet('Router Inventory Details');
+      expect(detailsSheet).toBeDefined();
+
+      // Row 2: Physical warehouse router
+      const rtr1Row = detailsSheet!.getRow(2);
+      expect(rtr1Row.getCell(1).value).toBe('SN-AVAILABLE-001');
+      expect(rtr1Row.getCell(7).value).toBe('YES (+1)');
+      expect(rtr1Row.getCell(8).value).toBe('WAREHOUSE'); // Physical Location Type
+      expect(rtr1Row.getCell(9).value).toBe('Main Hub'); // Physical Warehouse
+      expect(rtr1Row.getCell(10).value).toBe('-'); // External Location
+      expect(rtr1Row.getCell(11).value).toBe('WAREHOUSE'); // Current Custody Type
+      expect(rtr1Row.getCell(12).value).toBe('Main Hub'); // Current Custody Holder
+      // Formula injection payload was sanitized
+      expect(rtr1Row.getCell(14).value).toBe('\'=HYPERLINK("http://evil.com")');
+
+      // Row 3: Router assigned to technician (physical warehouse is null, custody is technician)
+      const rtr2Row = detailsSheet!.getRow(3);
+      expect(rtr2Row.getCell(1).value).toBe('SN-ASSIGNED-002');
+      expect(rtr2Row.getCell(7).value).toBe('NO (0)');
+      expect(rtr2Row.getCell(8).value).toBe('EXTERNAL'); // Physical Location Type
+      expect(rtr2Row.getCell(9).value).toBe('-'); // Physical Warehouse
+      expect(rtr2Row.getCell(11).value).toBe('TECHNICIAN'); // Current Custody Type
+      expect(rtr2Row.getCell(12).value).toBe('Tarek Field Tech (tarek@alfahd.local)');
+
+      // Link latest report result into mockReportsQueue for polling test
+      latestReportJobResult = jobResult;
+    });
+
+    it('retains backward compatibility with ATTENDANCE_SUMMARY reports', async () => {
+      const dbMock: any = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            innerJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          }),
+        }),
+      };
+
+      const worker = new AttendanceReportWorker(dbMock, fakeStorage);
+      const jobResult = await worker.process({
+        data: {
+          type: 'ATTENDANCE_SUMMARY',
+          params: {},
+        },
+      } as any);
+
+      expect(jobResult.downloadUrl).toBeDefined();
+      expect(jobResult.totalRows).toBe(0);
     });
   });
 
