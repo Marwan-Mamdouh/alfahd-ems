@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ipAddresses, routerStatusHistory } from './index.js';
+import { ipAddresses, ipHistory, routerStatusHistory } from './index.js';
 
 describe('routerStatusHistory schema and database constraints', () => {
   it('defines the routerStatusHistory table with required audit columns', () => {
@@ -91,5 +91,47 @@ describe('ipAddresses schema and database constraints', () => {
     expect(ipTable.checkConstraints.ip_addresses_not_archived_reserved_check.value).toBe(
       'NOT ("ip_addresses"."is_archived" = true AND "ip_addresses"."status" = \'RESERVED\')',
     );
+  });
+});
+
+describe('ipHistory schema and audit columns', () => {
+  it('defines the ipHistory table with metadata_before and metadata_after columns', () => {
+    const config = getTableConfig(ipHistory);
+    expect(config.name).toBe('ip_history');
+    const columnNames = config.columns.map((c) => c.name);
+    expect(columnNames).toContain('id');
+    expect(columnNames).toContain('ip_id');
+    expect(columnNames).toContain('from_status');
+    expect(columnNames).toContain('to_status');
+    expect(columnNames).toContain('action');
+    expect(columnNames).toContain('reason');
+    expect(columnNames).toContain('metadata_before');
+    expect(columnNames).toContain('metadata_after');
+    expect(columnNames).toContain('actor_id');
+    expect(columnNames).toContain('created_at');
+  });
+
+  it('declares metadata_before and metadata_after in migration 0005_m2b_supply_routers_ip.sql', () => {
+    const migrationPath = path.resolve(
+      __dirname,
+      '../../../drizzle/0005_m2b_supply_routers_ip.sql',
+    );
+    const sqlContent = fs.readFileSync(migrationPath, 'utf8');
+
+    expect(sqlContent).toContain('CREATE TABLE "ip_history"');
+    expect(sqlContent).toContain('"metadata_before" jsonb');
+    expect(sqlContent).toContain('"metadata_after" jsonb');
+  });
+
+  it('records metadata_before and metadata_after in 0005_snapshot.json', () => {
+    const snapshotPath = path.resolve(__dirname, '../../../drizzle/meta/0005_snapshot.json');
+    const snapshotJson = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+    const historyTable = snapshotJson.tables['public.ip_history'];
+
+    expect(historyTable).toBeDefined();
+    expect(historyTable.columns.metadata_before).toBeDefined();
+    expect(historyTable.columns.metadata_before.type).toBe('jsonb');
+    expect(historyTable.columns.metadata_after).toBeDefined();
+    expect(historyTable.columns.metadata_after.type).toBe('jsonb');
   });
 });

@@ -6,6 +6,7 @@ import {
   index,
   inet,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -342,6 +343,8 @@ export const ipHistory = pgTable(
     toStatus: ipStatusEnum('to_status').notNull(),
     action: ipHistoryActionEnum('action').notNull(),
     reason: text('reason'),
+    metadataBefore: jsonb('metadata_before').$type<Record<string, unknown> | null>(),
+    metadataAfter: jsonb('metadata_after').$type<Record<string, unknown> | null>(),
     actorId: uuid('actor_id')
       .references(() => users.id)
       .notNull(),

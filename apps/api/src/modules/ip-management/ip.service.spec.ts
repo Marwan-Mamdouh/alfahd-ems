@@ -26,6 +26,8 @@ describe('IpService', () => {
     toStatus: 'FREE',
     action: 'CREATE',
     reason: 'Initial creation',
+    metadataBefore: null,
+    metadataAfter: null,
     actorId: 'admin-id',
     createdAt: new Date('2026-01-01T00:00:00Z'),
   };
@@ -165,7 +167,7 @@ describe('IpService', () => {
   });
 
   describe('update', () => {
-    it('updates notes and logs UPDATE_METADATA history', async () => {
+    it('updates notes and logs reconstructable UPDATE_METADATA history with before/after snapshots', async () => {
       mockIpRepo.findById.mockResolvedValue(mockIp);
       mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, notes: 'Updated notes' });
       mockIpRepo.createHistory.mockResolvedValue(mockHistory);
@@ -180,11 +182,78 @@ describe('IpService', () => {
       expect(mockIpRepo.createHistory).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'UPDATE_METADATA',
+          reason: 'Updated notes from "Static gateway IP" to "Updated notes"',
+          metadataBefore: { notes: 'Static gateway IP' },
+          metadataAfter: { notes: 'Updated notes' },
           actorId: 'admin-id',
         }),
         expect.anything(),
       );
       expect(result.notes).toBe('Updated notes');
+    });
+
+    it('clearing notes captures transition from old notes to null in metadataAfter and reason', async () => {
+      mockIpRepo.findById.mockResolvedValue(mockIp);
+      mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, notes: null });
+      mockIpRepo.createHistory.mockResolvedValue(mockHistory);
+
+      const result = await service.update(mockIp.id, { notes: '' }, 'admin-id');
+
+      expect(mockIpRepo.updateIp).toHaveBeenCalledWith(
+        mockIp.id,
+        { notes: null },
+        expect.anything(),
+      );
+      expect(mockIpRepo.createHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'UPDATE_METADATA',
+          reason: 'Cleared notes (was "Static gateway IP")',
+          metadataBefore: { notes: 'Static gateway IP' },
+          metadataAfter: { notes: null },
+          actorId: 'admin-id',
+        }),
+        expect.anything(),
+      );
+      expect(result.notes).toBeNull();
+    });
+
+    it('setting notes when previously null captures Set notes reason and metadata', async () => {
+      mockIpRepo.findById.mockResolvedValue({ ...mockIp, notes: null });
+      mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, notes: 'Initial note' });
+      mockIpRepo.createHistory.mockResolvedValue(mockHistory);
+
+      const result = await service.update(mockIp.id, { notes: 'Initial note' }, 'admin-id');
+
+      expect(mockIpRepo.updateIp).toHaveBeenCalledWith(
+        mockIp.id,
+        { notes: 'Initial note' },
+        expect.anything(),
+      );
+      expect(mockIpRepo.createHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'UPDATE_METADATA',
+          reason: 'Set notes to "Initial note"',
+          metadataBefore: { notes: null },
+          metadataAfter: { notes: 'Initial note' },
+          actorId: 'admin-id',
+        }),
+        expect.anything(),
+      );
+      expect(result.notes).toBe('Initial note');
+    });
+
+    it('metadata update and audit share one transaction and rolls back if audit fails', async () => {
+      mockIpRepo.findById.mockResolvedValue(mockIp);
+      mockIpRepo.updateIp.mockResolvedValue({ ...mockIp, notes: 'Updated notes' });
+      mockIpRepo.createHistory.mockRejectedValue(new Error('Injected audit DB failure'));
+
+      await expect(
+        service.update(mockIp.id, { notes: 'Updated notes' }, 'admin-id'),
+      ).rejects.toThrow('Injected audit DB failure');
+
+      expect(mockRepositoryService.transaction).toHaveBeenCalled();
+      expect(mockIpRepo.updateIp).toHaveBeenCalled();
+      expect(mockIpRepo.createHistory).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when updating non-existent IP', async () => {
@@ -203,6 +272,16 @@ describe('IpService', () => {
         { notes: mockIp.notes ?? undefined },
         'admin-id',
       );
+
+      expect(mockIpRepo.updateIp).not.toHaveBeenCalled();
+      expect(mockIpRepo.createHistory).not.toHaveBeenCalled();
+      expect(result.notes).toBe(mockIp.notes);
+    });
+
+    it('is idempotent and creates no history when notes are whitespace-equivalent', async () => {
+      mockIpRepo.findById.mockResolvedValue(mockIp);
+
+      const result = await service.update(mockIp.id, { notes: `  ${mockIp.notes}  ` }, 'admin-id');
 
       expect(mockIpRepo.updateIp).not.toHaveBeenCalled();
       expect(mockIpRepo.createHistory).not.toHaveBeenCalled();

@@ -325,6 +325,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "metadata_before": {
+          "name": "metadata_before",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata_after": {
+          "name": "metadata_after",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "actor_id": {
           "name": "actor_id",
           "type": "uuid",
