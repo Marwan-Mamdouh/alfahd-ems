@@ -10,7 +10,7 @@
 
 Derived from **SOW Section 2.1.6** and **CRM SRS Section 6 (Page 2)**:
 * **Item Catalog:** Manages non-serialized consumables, cables, splitters, connectors, adapters, and tools (e.g., Drop Cable 1-Core, Fast Connector SC/UPC, Optical Splitter 1:8).
-* **Isolation from Routers:** Routers are serialized hardware tracked by unique `serialNumber` with a strict state machine in `RoutersModule`. They are intentionally **not** in this catalog.
+* **Product Model Reference for Routers (M2b):** While individual router units are tracked by their unique hardware `serialNumber` and state machine in `RoutersModule`, each physical router links to its catalog definition in `products` via `routers.productId`, ensuring aggregate warehouse counts reflect physical stock.
 * **Low-Stock Alerting:** Tracks a per-product `lowStockThreshold` (defaults to `10`). When the aggregated physical inventory across all warehouses drops below this threshold, the item is flagged with `isLowStock: true` for web dashboard alerts.
 * **Guarded Deletion:** Products cannot be deleted if active warehouse stock exists or historical movements reference them in the audit ledger.
 
@@ -166,10 +166,34 @@ Unit testing conforms strictly to TDD and runs via Vitest:
 * **Controller Unit Tests (`products.controller.spec.ts`)**:
   * 6 test cases verifying HTTP handler delegation to `ProductsService`.
 
+* **Integration & E2E Test Suite (`test/products.e2e-spec.ts`)**:
+  * **13 test cases** across 2 testing suites verifying complete RBAC, route parameters, and deletion guards:
+
+  #### Suite 1: Authentication & Authorization (RBAC) (8 tests)
+  1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
+  2. `200 OK` — Allows `TECHNICIAN` to view products catalog.
+  3. `200 OK` — Allows `CS` (Customer Support) to read product details by ID.
+  4. `403 Forbidden` — Blocks `CS` from creating catalog products.
+  5. `403 Forbidden` — Blocks `TECHNICIAN` from creating catalog products.
+  6. `201 Created` — Allows `WAREHOUSE_STAFF` to create a catalog product.
+  7. `200 OK` — Allows `WAREHOUSE_STAFF` to patch product specifications.
+  8. `403 Forbidden` — Blocks `WAREHOUSE_STAFF` from deleting a product.
+  9. `204 No Content` — Allows `ADMIN` to delete an unused catalog product.
+
+  #### Suite 2: Validation & Guard Invariants (5 tests)
+  10. `400 Bad Request` — Rejects product creation when mandatory fields (name, SKU, model, category) are missing.
+  11. `400 Bad Request` — Rejects product ID route parameter that is not a valid UUID.
+  12. `409 Conflict` — Blocks creating a product when normalized SKU already exists in database.
+  13. `404 Not Found` — Returns 404 when querying a non-existent product UUID.
+  14. `409 Conflict` — Blocks deleting a product that currently has active stock in warehouse inventory.
+
 ### Running Verification Commands:
 ```bash
 # Run all unit tests
 pnpm --filter @alfahd/api test
+
+# Run products E2E integration tests
+pnpm --filter @alfahd/api test:e2e test/products.e2e-spec.ts
 
 # Run strict TypeScript compiler check (0 errors)
 pnpm --filter @alfahd/api typecheck
@@ -177,36 +201,3 @@ pnpm --filter @alfahd/api typecheck
 # Run linter
 pnpm --filter @alfahd/api lint
 ```
-
----
-
-## 7. Stage 2: Handover Guide for Auth & RBAC Integration
-
-When the teammate building `AuthModule` and `UsersModule` delivers the authentication guards, integrate them in two simple steps:
-
-1. **Attach Guards to `ProductsController`**:
-   ```typescript
-   import { UseGuards } from '@nestjs/common';
-   import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
-   import { Roles } from '../auth/decorators/roles.decorator.js';
-   import { Role } from '@alfahd/types';
-
-   @UseGuards(JwtAuthGuard, RolesGuard)
-   @Controller('products')
-   export class ProductsController {
-     @Post()
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
-     async create(...) { ... }
-
-     @Get()
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF, Role.CS)
-     async findAll(...) { ... }
-
-     @Delete(':id')
-     @Roles(Role.ADMIN)
-     async remove(...) { ... }
-   }
-   ```
-
-2. **Add RBAC Integration Tests**:
-   * Create `products-rbac.e2e-spec.ts` testing `401 Unauthorized` for unauthenticated requests and `403 Forbidden` for unauthorized roles (e.g. `Role.TECHNICIAN` attempting to delete a product).

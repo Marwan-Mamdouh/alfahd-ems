@@ -20,6 +20,7 @@ describe('Warehouses (e2e)', () => {
   let warehouseStore: Warehouse[] = [];
 
   const mockRepositoryService = {
+    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
     warehouses: {
       findByName: async (name: string) => {
         return warehouseStore.find(
@@ -27,6 +28,9 @@ describe('Warehouses (e2e)', () => {
         );
       },
       findById: async (id: string) => {
+        return warehouseStore.find((w) => w.id === id);
+      },
+      findByIdForUpdate: async (id: string) => {
         return warehouseStore.find((w) => w.id === id);
       },
       findManyWithPagination: async (params: {
@@ -77,6 +81,12 @@ describe('Warehouses (e2e)', () => {
           return { canDelete: false, reason: 'Warehouse has active inventory' };
         }
         return { canDelete: true };
+      },
+      softDeactivate: async (id: string) => {
+        const index = warehouseStore.findIndex((w) => w.id === id);
+        if (index === -1) return undefined;
+        warehouseStore[index].isActive = false;
+        return warehouseStore[index];
       },
       deleteById: async (id: string) => {
         warehouseStore = warehouseStore.filter((w) => w.id !== id);

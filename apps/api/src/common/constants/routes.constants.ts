@@ -22,6 +22,23 @@ export const routes = {
   routers: {
     root: 'routers',
     id: ':id',
+    export: 'export',
+    assign: ':id/assign',
+    transition: ':id/transition',
+    condition: ':id/condition',
+    assignments: ':id/assignments',
+    conditionHistory: ':id/condition-history',
+    statusHistory: ':id/status-history',
+  },
+  ip: {
+    root: 'ip-addresses',
+    id: ':id',
+    reserve: ':id/reserve',
+    release: ':id/release',
+    archive: ':id/archive',
+    unarchive: ':id/unarchive',
+    history: ':id/history',
+    import: 'import',
   },
 } as const;
 

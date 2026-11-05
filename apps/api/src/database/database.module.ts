@@ -11,12 +11,16 @@ export type Db = NodePgDatabase<typeof schema>;
 
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
+  private ended = false;
+
   constructor(
     @Inject(DRIZZLE) readonly db: Db,
     @Inject(DRIZZLE_POOL) private readonly pool: Pool,
   ) {}
 
   async onModuleDestroy() {
+    if (this.ended) return;
+    this.ended = true;
     await this.pool.end();
   }
 }

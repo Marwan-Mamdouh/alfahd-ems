@@ -20,6 +20,7 @@ describe('Inventory (e2e)', () => {
   const WAREHOUSE_A_ID = '11111111-1111-4111-8111-111111111111';
   const WAREHOUSE_B_ID = '22222222-2222-4222-8222-222222222222';
   const PRODUCT_X_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const PRODUCT_ROUTER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const TECHNICIAN_ID = '44444444-4444-4444-8444-444444444444';
   const STAFF_USER_ID = '55555555-5555-4555-8555-555555555555';
   const NON_EXISTENT_ID = '99999999-9999-4999-8999-999999999999';
@@ -28,8 +29,15 @@ describe('Inventory (e2e)', () => {
   let movementsStore: StockMovement[] = [];
 
   const mockRepositoryService = {
+    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
     warehouses: {
       findById: async (id: string) => {
+        if (id === WAREHOUSE_A_ID || id === WAREHOUSE_B_ID) {
+          return { id, name: `Warehouse ${id.substring(0, 4)}`, isActive: true };
+        }
+        return undefined;
+      },
+      findByIdForUpdate: async (id: string) => {
         if (id === WAREHOUSE_A_ID || id === WAREHOUSE_B_ID) {
           return { id, name: `Warehouse ${id.substring(0, 4)}`, isActive: true };
         }
@@ -39,10 +47,22 @@ describe('Inventory (e2e)', () => {
     products: {
       findById: async (id: string) => {
         if (id === PRODUCT_X_ID) {
-          return { id, name: 'Optic Cable', sku: 'OPT-100', isActive: true };
+          return { id, name: 'Optic Cable', sku: 'OPT-100', category: 'Cables', isActive: true };
+        }
+        if (id === PRODUCT_ROUTER_ID) {
+          return {
+            id,
+            name: 'Wi-Fi 6 Router',
+            sku: 'RTR-WIFI6-01',
+            category: 'Routers',
+            isActive: true,
+          };
         }
         return undefined;
       },
+    },
+    routers: {
+      countByProductId: async (productId: string) => (productId === PRODUCT_ROUTER_ID ? 1 : 0),
     },
     inventory: {
       getStock: async (warehouseId: string, productId: string) => {
@@ -366,6 +386,88 @@ describe('Inventory (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.destInventory.quantity).toBe(15);
+    });
+  });
+
+  describe('Protection of Serialized SKUs from Quantity-Only Operations', () => {
+    it('returns 400 Bad Request when attempting quantity-only inbound on serialized SKU', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .post('/inventory/inbound')
+        .set(auth)
+        .send({
+          warehouseId: WAREHOUSE_A_ID,
+          productId: PRODUCT_ROUTER_ID,
+          quantity: 10,
+          supplierName: 'Direct Import',
+        })
+        .expect(400);
+
+      expect(res.body.message).toContain('serialized SKU');
+    });
+
+    it('returns 400 Bad Request when attempting quantity-only outbound on serialized SKU', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .post('/inventory/outbound')
+        .set(auth)
+        .send({
+          warehouseId: WAREHOUSE_A_ID,
+          productId: PRODUCT_ROUTER_ID,
+          technicianId: TECHNICIAN_ID,
+          quantity: 1,
+        })
+        .expect(400);
+
+      expect(res.body.message).toContain('serialized SKU');
+    });
+
+    it('returns 400 Bad Request when attempting quantity-only return on serialized SKU', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .post('/inventory/returns')
+        .set(auth)
+        .send({
+          warehouseId: WAREHOUSE_A_ID,
+          productId: PRODUCT_ROUTER_ID,
+          technicianId: TECHNICIAN_ID,
+          quantity: 1,
+        })
+        .expect(400);
+
+      expect(res.body.message).toContain('serialized SKU');
+    });
+
+    it('returns 400 Bad Request when attempting quantity-only transfer on serialized SKU', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .post('/inventory/transfer')
+        .set(auth)
+        .send({
+          fromWarehouseId: WAREHOUSE_A_ID,
+          toWarehouseId: WAREHOUSE_B_ID,
+          productId: PRODUCT_ROUTER_ID,
+          quantity: 2,
+        })
+        .expect(400);
+
+      expect(res.body.message).toContain('serialized SKU');
+    });
+
+    it('returns 400 Bad Request when attempting adjustStock on serialized SKU (prevents zero-stock bypass)', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const res = await request(app.getHttpServer())
+        .post('/inventory/adjust')
+        .set(auth)
+        .send({
+          warehouseId: WAREHOUSE_A_ID,
+          productId: PRODUCT_ROUTER_ID,
+          newQuantity: 0,
+          notes: 'Attempting to zero stock of serialized router',
+        })
+        .expect(400);
+
+      expect(res.body.message).toContain('serialized SKU');
     });
   });
 });

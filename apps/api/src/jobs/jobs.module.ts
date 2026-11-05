@@ -8,6 +8,9 @@ import { JobsService } from './jobs.service.js';
     BullModule.registerQueue({
       name: 'reports',
     }),
+    BullModule.registerQueue({
+      name: 'ip-imports',
+    }),
   ],
   controllers: [JobsController],
   providers: [JobsService],

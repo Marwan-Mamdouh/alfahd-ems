@@ -4,7 +4,9 @@ import type {
   WarehouseInventory,
   StockMovement,
   NewStockMovement,
+  Product,
 } from '../../database/schema/index.js';
+import type { Warehouse } from '../warehouses/warehouse.types.js';
 import type {
   InboundStockDto,
   OutboundStockDto,
@@ -22,17 +24,63 @@ const DEFAULT_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
 export class InventoryService {
   constructor(private readonly repo: RepositoryService) {}
 
-  private async ensureWarehouseExists(warehouseId: string): Promise<void> {
+  private async ensureWarehouseExists(warehouseId: string): Promise<Warehouse> {
     const warehouse = await this.repo.warehouses.findById(warehouseId);
     if (!warehouse) {
       throw new NotFoundException(`Warehouse with ID "${warehouseId}" was not found`);
     }
+    if (!warehouse.isActive) {
+      throw new BadRequestException(
+        'Cannot perform inventory operations on a deactivated warehouse',
+      );
+    }
+    return warehouse;
   }
 
-  private async ensureProductExists(productId: string): Promise<void> {
+  private async ensureProductExists(productId: string): Promise<Product> {
     const product = await this.repo.products.findById(productId);
     if (!product) {
       throw new NotFoundException(`Product with ID "${productId}" was not found`);
+    }
+    return product;
+  }
+
+  private async isSerializedProduct(product: Product): Promise<boolean> {
+    const category = product.category?.trim().toLowerCase() ?? '';
+    if (
+      category === 'router' ||
+      category === 'routers' ||
+      category === 'serialized' ||
+      category.includes('router')
+    ) {
+      return true;
+    }
+
+    const sku = product.sku?.trim().toUpperCase() ?? '';
+    if (sku.startsWith('RTR-') || sku.includes('ROUTER')) {
+      return true;
+    }
+
+    const name = product.name?.trim().toLowerCase() ?? '';
+    if (name.includes('router')) {
+      return true;
+    }
+
+    if (this.repo.routers?.countByProductId) {
+      const routerCount = await this.repo.routers.countByProductId(product.id);
+      if (routerCount > 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async assertNonSerializedProduct(product: Product): Promise<void> {
+    if (await this.isSerializedProduct(product)) {
+      throw new BadRequestException(
+        `Product "${product.name}" (${product.sku}) is a serialized SKU. Generic quantity-only inventory operations are prohibited for serialized items; manage stock via RoutersModule.`,
+      );
     }
   }
 
@@ -40,7 +88,8 @@ export class InventoryService {
     dto: InboundStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
     await this.ensureWarehouseExists(dto.warehouseId);
-    await this.ensureProductExists(dto.productId);
+    const product = await this.ensureProductExists(dto.productId);
+    await this.assertNonSerializedProduct(product);
 
     const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
     const currentQty = current?.quantity ?? 0;
@@ -63,7 +112,8 @@ export class InventoryService {
     dto: OutboundStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
     await this.ensureWarehouseExists(dto.warehouseId);
-    await this.ensureProductExists(dto.productId);
+    const product = await this.ensureProductExists(dto.productId);
+    await this.assertNonSerializedProduct(product);
 
     const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
     const currentQty = current?.quantity ?? 0;
@@ -93,7 +143,8 @@ export class InventoryService {
     dto: ReturnStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
     await this.ensureWarehouseExists(dto.warehouseId);
-    await this.ensureProductExists(dto.productId);
+    const product = await this.ensureProductExists(dto.productId);
+    await this.assertNonSerializedProduct(product);
 
     const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
     const currentQty = current?.quantity ?? 0;
@@ -121,7 +172,8 @@ export class InventoryService {
 
     await this.ensureWarehouseExists(dto.fromWarehouseId);
     await this.ensureWarehouseExists(dto.toWarehouseId);
-    await this.ensureProductExists(dto.productId);
+    const product = await this.ensureProductExists(dto.productId);
+    await this.assertNonSerializedProduct(product);
 
     const sourceCurrent = await this.repo.inventory.getStock(dto.fromWarehouseId, dto.productId);
     const sourceQty = sourceCurrent?.quantity ?? 0;
@@ -172,7 +224,8 @@ export class InventoryService {
     dto: AdjustStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
     await this.ensureWarehouseExists(dto.warehouseId);
-    await this.ensureProductExists(dto.productId);
+    const product = await this.ensureProductExists(dto.productId);
+    await this.assertNonSerializedProduct(product);
 
     const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
     const currentQty = current?.quantity ?? 0;

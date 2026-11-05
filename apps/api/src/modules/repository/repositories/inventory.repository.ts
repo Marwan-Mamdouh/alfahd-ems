@@ -1,6 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, desc, count, type SQL } from 'drizzle-orm';
+import { eq, and, desc, count, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../../../database/schema/index.js';
 import {
   warehouseInventory,
@@ -54,8 +54,17 @@ export class InventoryRepository extends BaseRepository<
     super(db, warehouseInventory);
   }
 
-  async getStock(warehouseId: string, productId: string): Promise<WarehouseInventory | undefined> {
-    const [record] = await this.db
+  private getClient(tx?: NodePgDatabase<typeof schema>): NodePgDatabase<typeof schema> {
+    return tx ?? this.db;
+  }
+
+  async getStock(
+    warehouseId: string,
+    productId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<WarehouseInventory | undefined> {
+    const client = this.getClient(tx);
+    const [record] = await client
       .select()
       .from(schema.warehouseInventory)
       .where(
@@ -65,6 +74,26 @@ export class InventoryRepository extends BaseRepository<
         ),
       )
       .limit(1);
+
+    return record;
+  }
+
+  async getStockForUpdate(
+    warehouseId: string,
+    productId: string,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<WarehouseInventory | undefined> {
+    const [record] = await tx
+      .select()
+      .from(schema.warehouseInventory)
+      .where(
+        and(
+          eq(schema.warehouseInventory.warehouseId, warehouseId),
+          eq(schema.warehouseInventory.productId, productId),
+        ),
+      )
+      .limit(1)
+      .for('update');
 
     return record;
   }
@@ -123,9 +152,27 @@ export class InventoryRepository extends BaseRepository<
   async recordMovementInTransaction(
     movement: NewStockMovement,
     newQuantity: number,
+    tx?: NodePgDatabase<typeof schema>,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
-    return this.db.transaction(async (tx) => {
-      const [inventory] = await tx
+    const run = async (client: NodePgDatabase<typeof schema>) => {
+      // Lock warehouse row to serialize with deactivation and validate active status
+      const [wh] = await client
+        .select({ id: schema.warehouses.id, isActive: schema.warehouses.isActive })
+        .from(schema.warehouses)
+        .where(eq(schema.warehouses.id, movement.warehouseId))
+        .for('update')
+        .limit(1);
+
+      if (!wh) {
+        throw new NotFoundException(`Warehouse with ID "${movement.warehouseId}" was not found`);
+      }
+      if (!wh.isActive) {
+        throw new BadRequestException(
+          'Cannot perform inventory operations on a deactivated warehouse',
+        );
+      }
+
+      const [inventory] = await client
         .insert(schema.warehouseInventory)
         .values({
           warehouseId: movement.warehouseId,
@@ -141,10 +188,71 @@ export class InventoryRepository extends BaseRepository<
         })
         .returning();
 
-      const [createdMovement] = await tx.insert(schema.stockMovements).values(movement).returning();
+      const [createdMovement] = await client
+        .insert(schema.stockMovements)
+        .values(movement)
+        .returning();
 
       return { inventory, movement: createdMovement };
-    });
+    };
+
+    if (tx) {
+      return run(tx);
+    }
+    return this.db.transaction(run);
+  }
+
+  async recordMovementWithDelta(
+    movement: NewStockMovement,
+    delta: number,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
+    const run = async (client: NodePgDatabase<typeof schema>) => {
+      // Lock warehouse row to serialize with deactivation and validate active status
+      const [wh] = await client
+        .select({ id: schema.warehouses.id, isActive: schema.warehouses.isActive })
+        .from(schema.warehouses)
+        .where(eq(schema.warehouses.id, movement.warehouseId))
+        .for('update')
+        .limit(1);
+
+      if (!wh) {
+        throw new NotFoundException(`Warehouse with ID "${movement.warehouseId}" was not found`);
+      }
+      if (!wh.isActive) {
+        throw new BadRequestException(
+          'Cannot perform inventory operations on a deactivated warehouse',
+        );
+      }
+
+      const [inventory] = await client
+        .insert(schema.warehouseInventory)
+        .values({
+          warehouseId: movement.warehouseId,
+          productId: movement.productId,
+          quantity: Math.max(0, delta),
+        })
+        .onConflictDoUpdate({
+          target: [schema.warehouseInventory.warehouseId, schema.warehouseInventory.productId],
+          set: {
+            quantity: sql`GREATEST(0, ${schema.warehouseInventory.quantity} + ${delta})`,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      const [createdMovement] = await client
+        .insert(schema.stockMovements)
+        .values(movement)
+        .returning();
+
+      return { inventory, movement: createdMovement };
+    };
+
+    if (tx) {
+      return run(tx);
+    }
+    return this.db.transaction(run);
   }
 
   async executeTransferInTransaction(
@@ -156,9 +264,30 @@ export class InventoryRepository extends BaseRepository<
     destNewQty: number,
     movementOut: NewStockMovement,
     movementIn: NewStockMovement,
+    tx?: NodePgDatabase<typeof schema>,
   ): Promise<{ sourceInventory: WarehouseInventory; destInventory: WarehouseInventory }> {
-    return this.db.transaction(async (tx) => {
-      const [sourceInventory] = await tx
+    const run = async (client: NodePgDatabase<typeof schema>) => {
+      // Lock both warehouses in deterministic sorted order
+      const sortedWhIds = [fromWarehouseId, toWarehouseId].sort();
+      for (const whId of sortedWhIds) {
+        const [wh] = await client
+          .select({ id: schema.warehouses.id, isActive: schema.warehouses.isActive })
+          .from(schema.warehouses)
+          .where(eq(schema.warehouses.id, whId))
+          .for('update')
+          .limit(1);
+
+        if (!wh) {
+          throw new NotFoundException(`Warehouse with ID "${whId}" was not found`);
+        }
+        if (!wh.isActive) {
+          throw new BadRequestException(
+            'Cannot perform inventory operations on a deactivated warehouse',
+          );
+        }
+      }
+
+      const [sourceInventory] = await client
         .update(schema.warehouseInventory)
         .set({ quantity: sourceNewQty, updatedAt: new Date() })
         .where(
@@ -169,7 +298,7 @@ export class InventoryRepository extends BaseRepository<
         )
         .returning();
 
-      const [destInventory] = await tx
+      const [destInventory] = await client
         .insert(schema.warehouseInventory)
         .values({
           warehouseId: toWarehouseId,
@@ -185,10 +314,15 @@ export class InventoryRepository extends BaseRepository<
         })
         .returning();
 
-      await tx.insert(schema.stockMovements).values([movementOut, movementIn]);
+      await client.insert(schema.stockMovements).values([movementOut, movementIn]);
 
       return { sourceInventory, destInventory };
-    });
+    };
+
+    if (tx) {
+      return run(tx);
+    }
+    return this.db.transaction(run);
   }
 
   async findManyMovements(

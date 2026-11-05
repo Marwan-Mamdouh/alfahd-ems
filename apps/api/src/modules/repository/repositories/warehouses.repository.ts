@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, ilike, or, and, count, sum, type SQL } from 'drizzle-orm';
+import { eq, ilike, or, and, count, sum, isNull, type SQL } from 'drizzle-orm';
 import * as schema from '../../../database/schema/index.js';
 import { warehouses } from '../../../database/schema/index.js';
 import { DRIZZLE } from '../../../database/database.module.js';
@@ -46,16 +46,39 @@ export class WarehousesRepository extends BaseRepository<
     super(db, warehouses);
   }
 
+  private getClient(tx?: NodePgDatabase<typeof schema>): NodePgDatabase<typeof schema> {
+    return tx ?? this.db;
+  }
+
   override async findAll(): Promise<Warehouse[]> {
     const rows = await this.db.select().from(schema.warehouses);
     return rows.map(toWarehouse);
   }
 
-  override async findById(id: string): Promise<Warehouse | null> {
-    const [row] = await this.db
+  override async findById(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<Warehouse | null> {
+    const client = this.getClient(tx);
+    const [row] = await client
       .select()
       .from(schema.warehouses)
       .where(eq(schema.warehouses.id, id))
+      .limit(1);
+
+    return row ? toWarehouse(row) : null;
+  }
+
+  async findByIdForUpdate(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<Warehouse | null> {
+    const client = this.getClient(tx);
+    const [row] = await client
+      .select()
+      .from(schema.warehouses)
+      .where(eq(schema.warehouses.id, id))
+      .for('update')
       .limit(1);
 
     return row ? toWarehouse(row) : null;
@@ -138,8 +161,12 @@ export class WarehousesRepository extends BaseRepository<
     return updated ? toWarehouse(updated) : undefined;
   }
 
-  async countActiveInventory(warehouseId: string): Promise<number> {
-    const [result] = await this.db
+  async countActiveInventory(
+    warehouseId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const [result] = await client
       .select({ total: sum(schema.warehouseInventory.quantity).mapWith(Number) })
       .from(schema.warehouseInventory)
       .where(eq(schema.warehouseInventory.warehouseId, warehouseId));
@@ -147,8 +174,12 @@ export class WarehousesRepository extends BaseRepository<
     return result?.total ?? 0;
   }
 
-  async countAssignedStaff(warehouseId: string): Promise<number> {
-    const [{ total }] = await this.db
+  async countAssignedStaff(
+    warehouseId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
       .select({ total: count() })
       .from(schema.users)
       .where(eq(schema.users.assignedWarehouseId, warehouseId));
@@ -156,8 +187,42 @@ export class WarehousesRepository extends BaseRepository<
     return Number(total);
   }
 
-  async canDeleteWarehouse(warehouseId: string): Promise<{ canDelete: boolean; reason?: string }> {
-    const activeInventory = await this.countActiveInventory(warehouseId);
+  async countPhysicallyLocatedRouters(
+    warehouseId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
+      .select({ total: count() })
+      .from(schema.routers)
+      .where(eq(schema.routers.warehouseId, warehouseId));
+
+    return Number(total);
+  }
+
+  async countActiveCustodyRouters(
+    warehouseId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
+      .select({ total: count() })
+      .from(schema.routerAssignments)
+      .where(
+        and(
+          eq(schema.routerAssignments.warehouseId, warehouseId),
+          isNull(schema.routerAssignments.releasedAt),
+        ),
+      );
+
+    return Number(total);
+  }
+
+  async canDeleteWarehouse(
+    warehouseId: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<{ canDelete: boolean; reason?: string }> {
+    const activeInventory = await this.countActiveInventory(warehouseId, tx);
     if (activeInventory > 0) {
       return {
         canDelete: false,
@@ -165,7 +230,7 @@ export class WarehousesRepository extends BaseRepository<
       };
     }
 
-    const assignedStaff = await this.countAssignedStaff(warehouseId);
+    const assignedStaff = await this.countAssignedStaff(warehouseId, tx);
     if (assignedStaff > 0) {
       return {
         canDelete: false,
@@ -173,6 +238,36 @@ export class WarehousesRepository extends BaseRepository<
       };
     }
 
+    const physicallyLocatedRouters = await this.countPhysicallyLocatedRouters(warehouseId, tx);
+    if (physicallyLocatedRouters > 0) {
+      return {
+        canDelete: false,
+        reason: `Cannot deactivate warehouse with ${physicallyLocatedRouters} physically located router(s). Relocate routers first.`,
+      };
+    }
+
+    const activeCustodyRouters = await this.countActiveCustodyRouters(warehouseId, tx);
+    if (activeCustodyRouters > 0) {
+      return {
+        canDelete: false,
+        reason: `Cannot deactivate warehouse with ${activeCustodyRouters} active router custody assignment(s). Release custody first.`,
+      };
+    }
+
     return { canDelete: true };
+  }
+
+  async softDeactivate(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<Warehouse | undefined> {
+    const client = this.getClient(tx);
+    const [updated] = await client
+      .update(schema.warehouses)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(schema.warehouses.id, id))
+      .returning();
+
+    return updated ? toWarehouse(updated) : undefined;
   }
 }

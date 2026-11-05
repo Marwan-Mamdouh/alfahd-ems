@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Role, type JobStatusResponseDto } from '@alfahd/types';
@@ -15,10 +15,16 @@ export const GENERIC_JOB_ERROR = 'Report generation failed';
 export class JobsService {
   private readonly logger = new Logger(JobsService.name);
 
-  constructor(@InjectQueue('reports') private readonly reportsQueue: Queue) {}
+  constructor(
+    @InjectQueue('reports') private readonly reportsQueue: Queue,
+    @Optional() @InjectQueue('ip-imports') private readonly ipImportsQueue?: Queue,
+  ) {}
 
   async getJobStatus(jobId: string, currentUser?: JwtUser): Promise<JobStatusResponseDto> {
-    const job = await this.reportsQueue.getJob(jobId);
+    let job = await this.reportsQueue.getJob(jobId);
+    if (!job && this.ipImportsQueue) {
+      job = await this.ipImportsQueue.getJob(jobId);
+    }
     if (!job) {
       throw new NotFoundException(`Job with ID ${jobId} not found`);
     }
@@ -51,14 +57,25 @@ export class JobsService {
     const failedReason: string | null = job.failedReason ?? null;
     if (status === 'FAILED' && failedReason) {
       // Full detail stays server-side for operators.
-      this.logger.error(`Report job ${jobId} failed: ${failedReason}`);
+      this.logger.error(`Job ${jobId} failed: ${failedReason}`);
     }
 
-    return {
+    const rv = job.returnvalue;
+
+    const response: JobStatusResponseDto = {
       id: String(job.id),
       status,
-      downloadUrl: job.returnvalue?.downloadUrl ?? null,
+      downloadUrl: rv?.downloadUrl ?? null,
       error: status === 'FAILED' ? GENERIC_JOB_ERROR : null,
     };
+
+    if (rv && (rv.inserted !== undefined || rv.skipped !== undefined)) {
+      response.inserted = rv.inserted ?? 0;
+      response.skipped = rv.skipped ?? 0;
+      response.errors = rv.errors ?? [];
+      response.result = rv;
+    }
+
+    return response;
   }
 }

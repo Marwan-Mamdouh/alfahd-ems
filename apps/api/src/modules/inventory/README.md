@@ -12,12 +12,21 @@ Derived from **SOW Section 2.1.6, Section 4.1, Section 6** and **CRM SRS Section
 * **Warehouse Stock Balances:** Tracks physical counts of products across regional hubs via `warehouse_inventory`. Quantities can never be negative (< 0).
 * **Immutable Audit Ledger:** Every stock change appends a record into `stock_movements`. Movements cannot be updated or deleted.
 * **5 Supported Movement Types:**
-  1. `INBOUND_SUPPLIER`: Vendor deliveries (free-text `supplierName` per SOW Section 6 out-of-scope rule).
-  2. `OUTBOUND_TECHNICIAN`: Materials issued to technicians for field installation tickets.
-  3. `RETURN_TECHNICIAN`: Unused or retrieved equipment returned from technicians to the warehouse.
+  1. `INBOUND_SUPPLIER`: Vendor deliveries (free-text `supplierName` per SOW Section 6 out-of-scope rule; also triggered automatically on new router receipts `isNewReceipt: true`).
+  2. `OUTBOUND_TECHNICIAN`: Materials issued to technicians for field installation tickets (also triggered when a router is handed over to a technician).
+  3. `RETURN_TECHNICIAN`: Unused or retrieved equipment returned from technicians to the warehouse (also triggered when a returned router is re-inspected as available).
   4. `TRANSFER_WAREHOUSE`: Inter-warehouse stock redistribution.
-  5. `ADJUSTMENT`: Physical audit count reconciliations with mandatory justification notes.
-* **Database Transactions:** All balance changes and movement records are committed atomically via `db.transaction()`.
+  5. `ADJUSTMENT`: Physical audit count reconciliations with mandatory justification notes (also triggered when an in-warehouse router is marked damaged, decrementing usable stock).
+* **Cross-Module Integration (M2b Routers & Atomic Writes):**
+  * In Milestone M2b (Issues #51 & #52), `RoutersService` integrates with `InventoryRepository` using caller-owned transactions (`tx`).
+  * `getStockForUpdate(warehouseId, productId, tx)` acquires pessimistic row locks (`FOR UPDATE`) on inventory balances during router onboarding, assignment, and condition updates.
+  * `recordMovementWithDelta(movement, delta, tx)` atomically applies relative stock deltas using SQL `GREATEST(0, warehouse_inventory.quantity + delta)` alongside `stock_movements` ledger inserts within the same transaction. This guarantees asset creation, custody assignments, condition history, and stock movements commit or roll back together atomically.
+* **Protection of Serialized SKUs from Quantity-Only Operations (Issue #56):**
+  * In accordance with `docs/contracts/m2b-supply-implementation.md` (§5.3 line 171), serialized router products are strictly protected from generic quantity-only inventory operations (`receiveInbound`, `issueOutbound`, `receiveReturn`, `transferStock`, and `adjustStock`).
+  * Classification is authoritative: products are identified as serialized via category (`Routers`, `Router`), SKU prefix/naming (`RTR-`), or presence of registered router assets in the database (`countByProductId > 0`).
+  * Generic quantity-only mutations on serialized SKUs throw `400 Bad Request` to prevent inventory balance divergence (e.g. zeroing stock while serialized assets remain active). Serialized inventory is managed exclusively through `RoutersModule`.
+  * Ordinary non-router inventory (cables, connectors, tools) remains 100% compatible.
+* **Database Transactions:** All balance changes and movement records are committed atomically via caller-provided or method-managed PostgreSQL transactions (`db.transaction()`).
 
 ---
 
@@ -99,8 +108,10 @@ export type NewStockMovement = typeof stockMovements.$inferInsert;
 
 ### C. `InventoryRepository` Methods
 * `getStock(warehouseId, productId)`: Fetches current stock row.
+* `getStockForUpdate(warehouseId, productId, tx?)`: Fetches stock row with pessimistic row-level locking (`FOR UPDATE`) inside an active transaction.
 * `findManyInventory(params)`: Returns paginated stock balances joined with product details (SKU, name, category, lowStockThreshold) and warehouse details.
-* `recordMovementInTransaction(movement, newQuantity)`: Atomically upserts `warehouse_inventory` and inserts into `stock_movements`.
+* `recordMovementInTransaction(movement, newQuantity, tx?)`: Atomically upserts `warehouse_inventory` and inserts into `stock_movements`, supporting caller-owned transactions.
+* `recordMovementWithDelta(movement, delta, tx?)`: Atomically modifies `warehouse_inventory` using relative SQL deltas (`GREATEST(0, quantity + delta)`) on conflict, preventing race conditions, and inserts into `stock_movements`.
 * `executeTransferInTransaction(...)`: Atomically deducts from source warehouse, adds to destination warehouse, and records two transfer movements.
 * `findManyMovements(params)`: Queries paginated movement audit logs with filters (`warehouseId`, `productId`, `movementType`, `technicianId`).
 * `findMovementById(id)`: Fetches a single audit transaction record.
@@ -144,14 +155,46 @@ All routes dynamically consume the centralized route constants manifest (`src/co
 Unit testing conforms strictly to TDD and runs via Vitest:
 
 * **Service Unit Tests (`inventory.service.spec.ts`)**:
-  * 15 comprehensive test cases covering inbound receipts, outbound stock checks, insufficient stock guards, technician returns, atomic transfers, same-warehouse rejections, physical adjustments, and audit trail queries.
+  * 21 comprehensive test cases covering inbound receipts, outbound stock checks, insufficient stock guards, technician returns, atomic transfers, same-warehouse rejections, physical adjustments, audit trail queries, and serialized SKU write rejections across all 5 inventory write paths.
 * **Controller Unit Tests (`inventory.controller.spec.ts`)**:
   * 10 test cases verifying route delegation, status codes, and query params forwarding.
+
+* **Integration & E2E Test Suite (`test/inventory.e2e-spec.ts`)**:
+  * **18 test cases** across 4 testing suites verifying complete RBAC, user context binding, inventory invariants, and serialized SKU write protections:
+
+  #### Suite 1: Authentication & Authorization (RBAC) (7 tests)
+  1. `401 Unauthorized` — Rejects unauthenticated requests lacking a Bearer JWT token.
+  2. `403 Forbidden` — Blocks `TECHNICIAN` from querying inventory balances.
+  3. `200 OK` — Allows `CS` (Customer Support) to query inventory stock.
+  4. `200 OK` — Allows `WAREHOUSE_STAFF` to query warehouse-specific stock balances.
+  5. `403 Forbidden` — Blocks `CS` from executing inbound stock receipts.
+  6. `403 Forbidden` — Blocks `WAREHOUSE_STAFF` from executing physical stock adjustments (reconciliations).
+  7. `200 OK` — Allows `ADMIN` to perform stock adjustments with mandatory justification.
+
+  #### Suite 2: User Context Injection (`@CurrentUser`) (1 test)
+  8. `201 Created` — Automatically extracts authenticated user ID from JWT and populates `responsibleUserId` in the audit ledger.
+
+  #### Suite 3: Inventory Validation & Transaction Invariants (5 tests)
+  9. `400 Bad Request` — Rejects inbound receipts when quantity is zero or negative ($\le 0$).
+  10. `404 Not Found` — Returns 404 when inbound targets a non-existent warehouse UUID.
+  11. `400 Bad Request` — Blocks outbound dispatch when requested quantity exceeds current available stock.
+  12. `400 Bad Request` — Rejects inter-warehouse transfer when source and destination warehouse are identical.
+  13. `200 OK` — Successfully processes inter-warehouse stock transfer atomically between two distinct warehouses.
+
+  #### Suite 4: Serialized SKU Protection from Quantity-Only Operations (5 tests)
+  14. `400 Bad Request` — Rejects quantity-only inbound on serialized router SKU.
+  15. `400 Bad Request` — Rejects quantity-only outbound on serialized router SKU.
+  16. `400 Bad Request` — Rejects quantity-only technician return on serialized router SKU.
+  17. `400 Bad Request` — Rejects quantity-only inter-warehouse transfer on serialized router SKU.
+  18. `400 Bad Request` — Rejects quantity-only physical stock adjustment on serialized router SKU (prevents zero-stock bypass).
 
 ### Running Verification Commands:
 ```bash
 # Run all unit tests
 pnpm --filter @alfahd/api test
+
+# Run inventory E2E integration tests
+pnpm --filter @alfahd/api test:e2e test/inventory.e2e-spec.ts
 
 # Run strict TypeScript compiler check (0 errors)
 pnpm --filter @alfahd/api typecheck
@@ -159,41 +202,3 @@ pnpm --filter @alfahd/api typecheck
 # Run linter
 pnpm --filter @alfahd/api lint
 ```
-
----
-
-## 7. Stage 2: Handover Guide for Auth & RBAC Integration
-
-When `AuthModule` and `UsersModule` are delivered by your teammate:
-
-1. **Attach Guards & Current User**:
-   ```typescript
-   import { UseGuards } from '@nestjs/common';
-   import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
-   import { Roles } from '../auth/decorators/roles.decorator.js';
-   import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-   import { Role } from '@alfahd/types';
-   import { routes } from '../../common/constants/routes.constants.js';
-
-   @UseGuards(JwtAuthGuard, RolesGuard)
-   @Controller(routes.inventory.root)
-   export class InventoryController {
-     @Post(routes.inventory.inbound)
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
-     async receiveInbound(@Body() dto: InboundStockDto, @CurrentUser() user: any) {
-       return this.inventoryService.receiveInbound({ ...dto, responsibleUserId: user.id });
-     }
-
-     @Post(routes.inventory.outbound)
-     @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
-     async issueOutbound(@Body() dto: OutboundStockDto, @CurrentUser() user: any) {
-       return this.inventoryService.issueOutbound({ ...dto, responsibleUserId: user.id });
-     }
-
-     @Post(routes.inventory.adjust)
-     @Roles(Role.ADMIN) // High privilege: only admin can reconcile physical discrepancies
-     async adjustStock(@Body() dto: AdjustStockDto, @CurrentUser() user: any) {
-       return this.inventoryService.adjustStock({ ...dto, responsibleUserId: user.id });
-     }
-   }
-   ```

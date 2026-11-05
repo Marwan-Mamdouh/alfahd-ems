@@ -25,17 +25,21 @@ describe('WarehousesService', () => {
   const mockWarehousesRepo = {
     findByName: vi.fn(),
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
     findManyWithPagination: vi.fn(),
     create: vi.fn(),
     updateWarehouse: vi.fn(),
     deleteById: vi.fn(),
     countActiveInventory: vi.fn(),
     countAssignedStaff: vi.fn(),
+    countPhysicallyLocatedRouters: vi.fn(),
     canDeleteWarehouse: vi.fn(),
+    softDeactivate: vi.fn(),
   };
 
   const mockRepositoryService = {
     warehouses: mockWarehousesRepo,
+    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
   };
 
   beforeEach(async () => {
@@ -161,34 +165,55 @@ describe('WarehousesService', () => {
   });
 
   describe('remove', () => {
-    it('should delete warehouse when no active inventory and no staff assigned', async () => {
-      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+    it('should deactivate warehouse when no active inventory, staff, or routers', async () => {
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
       mockWarehousesRepo.canDeleteWarehouse.mockResolvedValue({ canDelete: true });
-      mockWarehousesRepo.deleteById.mockResolvedValue(undefined);
+      mockWarehousesRepo.softDeactivate.mockResolvedValue({ ...mockWarehouse, isActive: false });
 
       await expect(service.remove(mockWarehouse.id)).resolves.not.toThrow();
 
-      expect(mockWarehousesRepo.findById).toHaveBeenCalledWith(mockWarehouse.id);
-      expect(mockWarehousesRepo.canDeleteWarehouse).toHaveBeenCalledWith(mockWarehouse.id);
-      expect(mockWarehousesRepo.deleteById).toHaveBeenCalledWith(mockWarehouse.id);
+      expect(mockWarehousesRepo.findByIdForUpdate).toHaveBeenCalledWith(
+        mockWarehouse.id,
+        expect.anything(),
+      );
+      expect(mockWarehousesRepo.canDeleteWarehouse).toHaveBeenCalledWith(
+        mockWarehouse.id,
+        expect.anything(),
+      );
+      expect(mockWarehousesRepo.softDeactivate).toHaveBeenCalledWith(
+        mockWarehouse.id,
+        expect.anything(),
+      );
     });
 
     it('should throw NotFoundException if warehouse to delete is not found', async () => {
-      mockWarehousesRepo.findById.mockResolvedValue(null);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(null);
 
       await expect(service.remove('missing-id')).rejects.toThrow(NotFoundException);
-      expect(mockWarehousesRepo.deleteById).not.toHaveBeenCalled();
+      expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
     });
 
-    it('should throw ConflictException if warehouse holds inventory or assigned staff', async () => {
-      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+    it('should throw ConflictException if warehouse holds inventory, staff, or located routers', async () => {
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
       mockWarehousesRepo.canDeleteWarehouse.mockResolvedValue({
         canDelete: false,
         reason: 'Cannot delete warehouse holding active inventory (50 units in stock)',
       });
 
       await expect(service.remove(mockWarehouse.id)).rejects.toThrow(ConflictException);
-      expect(mockWarehousesRepo.deleteById).not.toHaveBeenCalled();
+      expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException if warehouse has physically located damaged/repair routers without custody', async () => {
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockWarehousesRepo.canDeleteWarehouse.mockResolvedValue({
+        canDelete: false,
+        reason:
+          'Cannot deactivate warehouse with 2 physically located router(s). Relocate routers first.',
+      });
+
+      await expect(service.remove(mockWarehouse.id)).rejects.toThrow(ConflictException);
+      expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
     });
   });
 });
