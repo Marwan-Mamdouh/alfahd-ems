@@ -159,7 +159,7 @@ export class IpController {
   @Post(routes.ip.import)
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles(Role.ADMIN)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   @ApiOperation({ summary: 'Bulk import IPv4 addresses from CSV (asynchronous)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({

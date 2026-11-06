@@ -35,6 +35,24 @@ export class ProductsRepository extends BaseRepository<
     super(db, products);
   }
 
+  async findByIdForUpdate(
+    id: string,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<Product | undefined> {
+    // NO KEY UPDATE serializes classification writers without conflicting with
+    // foreign-key key-share locks taken by router and inventory writes.
+    const [product] = await tx
+      .select()
+      .from(products)
+      .where(eq(products.id, id))
+      .for('no key update');
+    return product;
+  }
+
+  async markSerialized(id: string, tx: NodePgDatabase<typeof schema>): Promise<void> {
+    await tx.update(products).set({ isSerialized: true }).where(eq(products.id, id));
+  }
+
   async findBySku(sku: string): Promise<Product | undefined> {
     const [record] = await this.db
       .select()

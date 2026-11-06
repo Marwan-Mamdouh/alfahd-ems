@@ -56,14 +56,15 @@ export class RoutersService {
       throw new ConflictException(`Router with serial number "${trimmedSerial}" already exists`);
     }
 
-    const product = await this.repo.products.findById(dto.productId);
-    if (!product) {
-      throw new NotFoundException(`Product with ID "${dto.productId}" was not found`);
-    }
-
     const condition: RouterPhysicalCondition = dto.physicalCondition ?? 'SERVICEABLE';
 
     const run = async (tx: NodePgDatabase<typeof schema>) => {
+      // Product lock precedes warehouse locks, matching generic inventory writes.
+      const product = await this.repo.products.findByIdForUpdate(dto.productId, tx);
+      if (!product) {
+        throw new NotFoundException(`Product with ID "${dto.productId}" was not found`);
+      }
+      if (!product.isSerialized) await this.repo.products.markSerialized(dto.productId, tx);
       // Lock warehouse row to serialize concurrent placement/deactivation
       const warehouse = await this.repo.warehouses.findByIdForUpdate(dto.warehouseId, tx);
       if (!warehouse) {
@@ -85,7 +86,7 @@ export class RoutersService {
         );
         const currentStock = inventory?.quantity ?? 0;
 
-        if (condition === 'SERVICEABLE') {
+        {
           if (currentStock <= 0) {
             throw new ConflictException(
               `Cannot onboard router into existing stock: warehouse "${warehouse.name}" has 0 recorded stock for product "${product.name}". Use a new receipt (isNewReceipt: true) to receive new inventory.`,
@@ -154,22 +155,19 @@ export class RoutersService {
       }
 
       // Case B: Damaged opening unit reconciliation -> -1 stock (with explicit audit evidence)
-      if (!dto.isNewReceipt && condition === 'DAMAGED') {
-        const inventory = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
-        if ((inventory?.quantity ?? 0) > 0) {
-          await this.repo.inventory.recordMovementWithDelta(
-            {
-              warehouseId: dto.warehouseId,
-              productId: dto.productId,
-              movementType: 'ADJUSTMENT',
-              quantity: 1,
-              responsibleUserId,
-              notes: `Explicit reconciliation: opening stock unit registered as DAMAGED (serial: ${trimmedSerial})`,
-            },
-            -1,
-            tx,
-          );
-        }
+      if (!dto.isNewReceipt && condition !== 'SERVICEABLE') {
+        await this.repo.inventory.recordMovementWithDelta(
+          {
+            warehouseId: dto.warehouseId,
+            productId: dto.productId,
+            movementType: 'ADJUSTMENT',
+            quantity: 1,
+            responsibleUserId,
+            notes: `Explicit reconciliation: opening stock unit registered as ${condition} (serial: ${trimmedSerial})`,
+          },
+          -1,
+          tx,
+        );
 
         await this.repo.routers.createConditionHistory(
           {
@@ -179,7 +177,8 @@ export class RoutersService {
             fromWarehouseId: dto.warehouseId,
             toWarehouseId: dto.warehouseId,
             externalLocation: null,
-            reason: dto.notes ?? 'Initial onboarding inspection identified opening unit as damaged',
+            reason:
+              dto.notes ?? `Initial onboarding inspection identified opening unit as ${condition}`,
             changedBy: responsibleUserId,
           },
           tx,
@@ -344,42 +343,10 @@ export class RoutersService {
         // Custody is closed and remains empty
         await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
       } else if (dto.status === 'INSTALLED_AT_CUSTOMER') {
-        if (dto.targetWarehouseId) {
-          throw new BadRequestException(
-            'Cannot target a warehouse when installing a router at a customer location',
-          );
-        }
-
-        if (router.physicalCondition !== 'SERVICEABLE') {
-          throw new BadRequestException(
-            `Cannot install router with physical condition "${router.physicalCondition}" at customer. Router must be SERVICEABLE`,
-          );
-        }
-
-        const activeCustody = await this.repo.routers.findActiveAssignment(id, tx);
-        if (!activeCustody || activeCustody.holderType !== 'TECHNICIAN') {
-          throw new BadRequestException(
-            'Cannot install at customer: router has no active technician custody to transfer',
-          );
-        }
-
-        // 1. Close technician custody
-        await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
-
-        // 2. Open approved customer custody atomically without premature customer tables or FKs
-        await this.repo.routers.createAssignment(
-          {
-            routerId: id,
-            holderType: 'CUSTOMER',
-            warehouseId: null,
-            technicianId: null,
-            assignedBy: responsibleUserId,
-            notes: dto.notes ?? dto.reason ?? 'Installed at customer location',
-          },
-          tx,
+        // Customer identity and target validation are deferred to a later milestone.
+        throw new BadRequestException(
+          'Customer installation is unavailable until customer custody targets are supported',
         );
-
-        newWarehouseId = null;
       } else if (dto.status === 'RETURNED') {
         if (router.status === 'INSTALLED_AT_CUSTOMER' && !dto.targetWarehouseId) {
           throw new BadRequestException(
@@ -421,20 +388,20 @@ export class RoutersService {
           throw new BadRequestException('Cannot place router in a deactivated warehouse');
         }
 
-        // Restore warehouse custody
-        await this.repo.routers.createAssignment(
-          {
-            routerId: id,
-            holderType: 'WAREHOUSE',
-            warehouseId: newWarehouseId,
-            assignedBy: responsibleUserId,
-            notes: dto.notes ?? 'Router returned and verified available',
-          },
-          tx,
-        );
-
-        // Add back to usable stock if condition is serviceable
+        // Unserviceable routers have neither usable stock nor warehouse custody.
         if (router.physicalCondition === 'SERVICEABLE') {
+          await this.repo.routers.createAssignment(
+            {
+              routerId: id,
+              holderType: 'WAREHOUSE',
+              warehouseId: newWarehouseId,
+              assignedBy: responsibleUserId,
+              notes: dto.notes ?? 'Router returned and verified available',
+            },
+            tx,
+          );
+
+          // Add back to usable stock if condition is serviceable
           await this.repo.inventory.recordMovementWithDelta(
             {
               warehouseId: newWarehouseId,

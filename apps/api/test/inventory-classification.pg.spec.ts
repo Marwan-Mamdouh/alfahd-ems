@@ -1,0 +1,968 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
+import * as schema from '../src/database/schema/index.js';
+import { RepositoryService } from '../src/modules/repository/repository.service.js';
+import { ProductsRepository } from '../src/modules/repository/repositories/products.repository.js';
+import { WarehousesRepository } from '../src/modules/repository/repositories/warehouses.repository.js';
+import { InventoryRepository } from '../src/modules/repository/repositories/inventory.repository.js';
+import { RoutersRepository } from '../src/modules/repository/repositories/routers.repository.js';
+import { IpRepository } from '../src/modules/repository/repositories/ip.repository.js';
+import { InventoryService } from '../src/modules/inventory/inventory.service.js';
+import { RoutersService } from '../src/modules/routers/routers.service.js';
+import { IpService } from '../src/modules/ip-management/ip.service.js';
+import { WarehousesService } from '../src/modules/warehouses/warehouses.service.js';
+
+// Only point this at a migrated, disposable database; the suite writes fixtures.
+const url = process.env.INVENTORY_TEST_DATABASE_URL;
+describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
+  const pool = new Pool({ connectionString: url });
+  const db = drizzle(pool, { schema });
+  const products = new ProductsRepository(db);
+  const inventoryRepo = new InventoryRepository(db);
+  const repo = new RepositoryService(
+    db,
+    products,
+    new WarehousesRepository(db),
+    inventoryRepo,
+    new RoutersRepository(db),
+    new IpRepository(db),
+  );
+  const inventory = new InventoryService(repo);
+  const routers = new RoutersService(repo, {} as never);
+  const ips = new IpService(repo);
+  const warehouses = new WarehousesService(repo);
+  const warehouseId = randomUUID();
+  const actorId = randomUUID();
+  const technicianId = randomUUID();
+
+  beforeAll(async () => {
+    await db
+      .insert(schema.warehouses)
+      .values({ id: warehouseId, name: 'Synthetic test warehouse' });
+    await db.insert(schema.users).values({
+      id: actorId,
+      email: `${actorId}@example.invalid`,
+      passwordHash: 'synthetic',
+      role: 'ADMIN',
+    });
+    await db.insert(schema.users).values({
+      id: technicianId,
+      email: `${technicianId}@example.invalid`,
+      passwordHash: 'synthetic',
+      role: 'TECHNICIAN',
+      assignedWarehouseId: warehouseId,
+    });
+  });
+  afterAll(async () => {
+    // Fixtures are left in the disposable DB for inspection; only close connections.
+    await pool.end();
+  });
+  async function product() {
+    const id = randomUUID();
+    await db
+      .insert(schema.products)
+      .values({ id, name: 'Generic device', sku: id, category: 'Hardware', model: 'test' });
+    return id;
+  }
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+  async function waitForProductLock() {
+    for (let i = 0; i < 100; i++) {
+      const result = await pool.query(
+        "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%products%'",
+      );
+      if (result.rowCount) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('Expected a transaction to wait for the product lock');
+  }
+
+  it('rejects an adjustment waiting behind a first receipt', async () => {
+    const productId = await product();
+    const entered = deferred();
+    const release = deferred();
+    const receipt = db.transaction(async (tx) => {
+      await routers.create(
+        { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+        actorId,
+        tx,
+      );
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const adjustment = inventory.adjustStock({
+      productId,
+      warehouseId,
+      newQuantity: 0,
+      notes: 'race',
+      responsibleUserId: actorId,
+    });
+    try {
+      await waitForProductLock();
+    } finally {
+      release.resolve();
+    }
+    await receipt;
+    await expect(adjustment).rejects.toThrow('serialized SKU');
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect(
+      await db.select().from(schema.routers).where(eq(schema.routers.productId, productId)),
+    ).toHaveLength(1);
+  });
+
+  it('commits an adjustment before a waiting first receipt without losing it', async () => {
+    const productId = await product();
+    const entered = deferred();
+    const release = deferred();
+    const original = inventoryRepo.getStock.bind(inventoryRepo);
+    inventoryRepo.getStock = async (...args) => {
+      const result = await original(...args);
+      if (args[1] === productId) {
+        entered.resolve();
+        await release.promise;
+      }
+      return result;
+    };
+    try {
+      const adjustment = inventory.adjustStock({
+        productId,
+        warehouseId,
+        newQuantity: 2,
+        notes: 'opening stock',
+        responsibleUserId: actorId,
+      });
+      await entered.promise;
+      const receipt = routers.create(
+        { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+        actorId,
+      );
+      try {
+        await waitForProductLock();
+      } finally {
+        release.resolve();
+      }
+      await adjustment;
+      await receipt;
+      inventoryRepo.getStock = original;
+      expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(3);
+      expect(
+        (await db.select().from(schema.products).where(eq(schema.products.id, productId)))[0]
+          .isSerialized,
+      ).toBe(true);
+    } finally {
+      inventoryRepo.getStock = original;
+    }
+  });
+
+  it('rolls classification back with a caller-owned failed receipt', async () => {
+    const productId = await product();
+    await expect(
+      db.transaction(async (tx) => {
+        await routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+          tx,
+        );
+        throw new Error('synthetic rollback');
+      }),
+    ).rejects.toThrow('synthetic rollback');
+    expect(
+      (await db.select().from(schema.products).where(eq(schema.products.id, productId)))[0]
+        .isSerialized,
+    ).toBe(false);
+    expect(await inventoryRepo.getStock(warehouseId, productId)).toBeUndefined();
+    await inventory.adjustStock({
+      productId,
+      warehouseId,
+      newQuantity: 2,
+      notes: 'opening stock',
+      responsibleUserId: actorId,
+    });
+  });
+
+  it('restores a repaired router once after inspection, even with competing updates', async () => {
+    const productId = await product();
+    const [router] = await db
+      .insert(schema.routers)
+      .values({
+        productId,
+        warehouseId,
+        serialNumber: randomUUID(),
+        status: 'UNDER_REPAIR',
+        physicalCondition: 'UNDER_REPAIR',
+      })
+      .returning();
+
+    await routers.transition(
+      router.id,
+      { status: 'AVAILABLE', reason: 'Repair completed' },
+      actorId,
+    );
+    expect(await inventoryRepo.getStock(warehouseId, productId)).toBeUndefined();
+    expect(await repo.routers.findActiveAssignment(router.id)).toBeUndefined();
+
+    await Promise.all([
+      routers.updateCondition(
+        router.id,
+        { physicalCondition: 'SERVICEABLE', reason: 'Inspection passed' },
+        actorId,
+      ),
+      routers.updateCondition(
+        router.id,
+        { physicalCondition: 'SERVICEABLE', reason: 'Inspection passed' },
+        actorId,
+      ),
+    ]);
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('WAREHOUSE');
+    expect(
+      await db
+        .select()
+        .from(schema.routerAssignments)
+        .where(eq(schema.routerAssignments.routerId, router.id)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(schema.stockMovements)
+        .where(eq(schema.stockMovements.productId, productId)),
+    ).toHaveLength(1);
+  });
+
+  it('preserves technician custody and history when customer installation is gated', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await routers.assign(router.id, { technicianId }, actorId);
+    await expect(
+      routers.transition(
+        router.id,
+        { status: 'INSTALLED_AT_CUSTOMER', reason: 'Installed' },
+        actorId,
+      ),
+    ).rejects.toThrow('Customer installation is unavailable');
+    const assignments = await repo.routers.findAssignmentsByRouter(router.id);
+    expect(assignments).toHaveLength(2);
+    expect(
+      assignments
+        .filter((assignment) => assignment.releasedAt === null)
+        .map((assignment) => assignment.holderType),
+    ).toEqual(['TECHNICIAN']);
+    expect(
+      assignments
+        .filter((assignment) => assignment.releasedAt !== null)
+        .map((assignment) => assignment.holderType)
+        .sort(),
+    ).toEqual(['WAREHOUSE']);
+    expect((await routers.findById(router.id)).status).toBe('ASSIGNED_TO_TECHNICIAN');
+    expect(await repo.routers.findStatusHistory(router.id)).toHaveLength(0);
+  });
+
+  it('rejects damaged registration against stock already represented by a serial', async () => {
+    const productId = await product();
+    await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await expect(
+      routers.create(
+        { productId, warehouseId, serialNumber: randomUUID(), physicalCondition: 'DAMAGED' },
+        actorId,
+      ),
+    ).rejects.toThrow();
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect(
+      await db.select().from(schema.routers).where(eq(schema.routers.productId, productId)),
+    ).toHaveLength(1);
+  });
+
+  it('serializes competing IP reservations with one actual history event', async () => {
+    const ip = await ips.create(
+      { address: `10.123.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
+      actorId,
+    );
+    const outcomes = await Promise.allSettled([
+      ips.reserve(ip.id, 'first', actorId),
+      ips.reserve(ip.id, 'second', actorId),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const history = await repo.ip.findHistoryByIp(ip.id);
+    expect(history.filter((event) => event.action === 'RESERVE')).toHaveLength(1);
+  });
+
+  it('rolls IP metadata back when audit insertion fails', async () => {
+    const ip = await ips.create(
+      {
+        address: `10.124.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`,
+        notes: 'before',
+      },
+      actorId,
+    );
+    const original = repo.ip.createHistory.bind(repo.ip);
+    repo.ip.createHistory = async () => {
+      throw new Error('injected audit failure');
+    };
+    try {
+      await expect(ips.update(ip.id, { notes: 'after' }, actorId)).rejects.toThrow(
+        'injected audit failure',
+      );
+    } finally {
+      repo.ip.createHistory = original;
+    }
+    expect((await ips.findById(ip.id)).notes).toBe('before');
+    expect(
+      (await repo.ip.findHistoryByIp(ip.id)).filter((event) => event.action === 'UPDATE_METADATA'),
+    ).toHaveLength(0);
+  });
+
+  it('enforces IPv4 host semantics and canonical uniqueness in direct SQL', async () => {
+    await expect(
+      pool.query("INSERT INTO ip_addresses(address) VALUES ('2001:db8::1')"),
+    ).rejects.toThrow();
+    await expect(
+      pool.query("INSERT INTO ip_addresses(address) VALUES ('192.0.2.0/24')"),
+    ).rejects.toThrow();
+    const address = `198.18.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    await pool.query('INSERT INTO ip_addresses(address) VALUES ($1::inet)', [address]);
+    await expect(
+      pool.query("INSERT INTO ip_addresses(address) VALUES (($1 || '/32')::inet)", [address]),
+    ).rejects.toThrow();
+  });
+
+  it('preserves concurrent receipts against initially absent stock and rejects competing assignments', async () => {
+    const productId = await product();
+    const created = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+        ),
+      ),
+    );
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(2);
+    const assignments = await Promise.allSettled([
+      routers.assign(created[0].id, { technicianId }, actorId),
+      routers.assign(created[0].id, { technicianId }, actorId),
+    ]);
+    expect(assignments.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect((await repo.routers.findActiveAssignment(created[0].id))?.holderType).toBe('TECHNICIAN');
+  });
+
+  it('serializes receipt against warehouse deactivation', async () => {
+    const productId = await product();
+    const id = randomUUID();
+    await db.insert(schema.warehouses).values({ id, name: 'Synthetic deactivation race' });
+    const outcomes = await Promise.allSettled([
+      warehouses.remove(id),
+      routers.create(
+        { productId, warehouseId: id, serialNumber: randomUUID(), isNewReceipt: true },
+        actorId,
+      ),
+    ]);
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const [warehouse] = await db
+      .select()
+      .from(schema.warehouses)
+      .where(eq(schema.warehouses.id, id));
+    const devices = await db
+      .select()
+      .from(schema.routers)
+      .where(eq(schema.routers.warehouseId, id));
+    if (!warehouse.isActive) expect(devices).toHaveLength(0);
+    else expect(devices).toHaveLength(1);
+  });
+
+  it('never leaves an archived reserved IP during competing operations', async () => {
+    const address = `10.125.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    const ip = await ips.create({ address }, actorId);
+    const outcomes = await Promise.allSettled([
+      ips.reserve(ip.id, 'reserve', actorId),
+      ips.archive(ip.id, 'archive', actorId),
+    ]);
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const current = await ips.findById(ip.id);
+    expect(current.isArchived && current.status === 'RESERVED').toBe(false);
+    const history = await repo.ip.findHistoryByIp(ip.id);
+    expect(
+      history.filter((event) => event.action === 'RESERVE' || event.action === 'ARCHIVE'),
+    ).toHaveLength(1);
+  });
+
+  it('rolls back a return and its lifecycle history with the caller transaction', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await routers.assign(router.id, { technicianId }, actorId);
+    await expect(
+      db.transaction(async (tx) => {
+        await routers.transition(
+          router.id,
+          { status: 'RETURNED', reason: 'Return', targetWarehouseId: warehouseId },
+          actorId,
+          tx,
+        );
+        throw new Error('caller rollback');
+      }),
+    ).rejects.toThrow('caller rollback');
+    expect((await routers.findById(router.id)).status).toBe('ASSIGNED_TO_TECHNICIAN');
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('TECHNICIAN');
+    expect(await repo.routers.findStatusHistory(router.id)).toHaveLength(0);
+  });
+
+  it('moves usable stock and custody, removes both for external repair, then restores once', async () => {
+    const productId = await product();
+    const destination = randomUUID();
+    await db.insert(schema.warehouses).values({ id: destination, name: 'Synthetic destination' });
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await routers.updateCondition(
+      router.id,
+      { physicalCondition: 'SERVICEABLE', warehouseId: destination, reason: 'Move' },
+      actorId,
+    );
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(0);
+    expect((await inventoryRepo.getStock(destination, productId))?.quantity).toBe(1);
+    expect((await repo.routers.findActiveAssignment(router.id))?.warehouseId).toBe(destination);
+    await routers.updateCondition(
+      router.id,
+      {
+        physicalCondition: 'UNDER_REPAIR',
+        externalLocation: 'Synthetic repair shop',
+        reason: 'Repair',
+      },
+      actorId,
+    );
+    expect((await inventoryRepo.getStock(destination, productId))?.quantity).toBe(0);
+    expect(await repo.routers.findActiveAssignment(router.id)).toBeUndefined();
+    expect((await routers.findById(router.id)).warehouseId).toBeNull();
+    await routers.updateCondition(
+      router.id,
+      { physicalCondition: 'SERVICEABLE', warehouseId: destination, reason: 'Inspected' },
+      actorId,
+    );
+    expect((await inventoryRepo.getStock(destination, productId))?.quantity).toBe(1);
+    expect((await repo.routers.findActiveAssignment(router.id))?.warehouseId).toBe(destination);
+  });
+
+  it('requires transition reasons and persists the valid reason atomically', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await routers.assign(router.id, { technicianId }, actorId);
+    await expect(
+      routers.transition(router.id, { status: 'RETURNED', reason: '  ' }, actorId),
+    ).rejects.toThrow();
+    await expect(
+      routers.transition(router.id, { status: 'AVAILABLE', reason: 'Not allowed' }, actorId),
+    ).rejects.toThrow();
+    expect(await repo.routers.findStatusHistory(router.id)).toHaveLength(0);
+    await routers.transition(
+      router.id,
+      { status: 'RETURNED', reason: '  Recovered  ', targetWarehouseId: warehouseId },
+      actorId,
+    );
+    const history = await repo.routers.findStatusHistory(router.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fromStatus: 'ASSIGNED_TO_TECHNICIAN',
+      toStatus: 'RETURNED',
+      changedBy: actorId,
+      reason: 'Recovered',
+    });
+    expect(history[0].createdAt).toBeInstanceOf(Date);
+  });
+
+  it('records reconstructable IP metadata and does not audit no-op edits', async () => {
+    const ip = await ips.create(
+      {
+        address: `10.126.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`,
+        notes: 'before',
+      },
+      actorId,
+    );
+    await ips.update(ip.id, { notes: 'after' }, actorId);
+    await ips.update(ip.id, { notes: 'after' }, actorId);
+    const changes = (await repo.ip.findHistoryByIp(ip.id)).filter(
+      (event) => event.action === 'UPDATE_METADATA',
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({
+      metadataBefore: { notes: 'before' },
+      metadataAfter: { notes: 'after' },
+      actorId,
+    });
+    expect(changes[0].createdAt).toBeInstanceOf(Date);
+  });
+
+  it('allows only one competing opening registration and never fabricates a receipt', async () => {
+    const productId = await product();
+    await inventory.adjustStock({
+      productId,
+      warehouseId,
+      newQuantity: 1,
+      notes: 'opening stock',
+      responsibleUserId: actorId,
+    });
+    const outcomes = await Promise.allSettled([
+      routers.create({ productId, warehouseId, serialNumber: randomUUID() }, actorId),
+      routers.create(
+        { productId, warehouseId, serialNumber: randomUUID(), physicalCondition: 'DAMAGED' },
+        actorId,
+      ),
+    ]);
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const devices = await db
+      .select()
+      .from(schema.routers)
+      .where(eq(schema.routers.productId, productId));
+    expect(devices).toHaveLength(1);
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(
+      devices[0].physicalCondition === 'SERVICEABLE' ? 1 : 0,
+    );
+    const movements = await db
+      .select()
+      .from(schema.stockMovements)
+      .where(eq(schema.stockMovements.productId, productId));
+    expect(
+      movements.filter((movement) => movement.movementType === 'INBOUND_SUPPLIER'),
+    ).toHaveLength(0);
+  });
+
+  it('rolls back assignment, stock and custody with a caller-owned transaction', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await expect(
+      db.transaction(async (tx) => {
+        await routers.assign(router.id, { technicianId }, actorId, tx);
+        throw new Error('caller rollback');
+      }),
+    ).rejects.toThrow('caller rollback');
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect((await routers.findById(router.id)).status).toBe('AVAILABLE');
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('WAREHOUSE');
+    expect(await repo.routers.findAssignmentsByRouter(router.id)).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(schema.stockMovements)
+        .where(eq(schema.stockMovements.productId, productId)),
+    ).toHaveLength(1);
+  });
+
+  it('records one release when two release attempts compete', async () => {
+    const ip = await ips.create(
+      { address: `10.127.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
+      actorId,
+    );
+    await ips.reserve(ip.id, 'reserve', actorId);
+    const outcomes = await Promise.allSettled([
+      ips.release(ip.id, 'one', actorId),
+      ips.release(ip.id, 'two', actorId),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect((await ips.findById(ip.id)).status).toBe('FREE');
+    expect(
+      (await repo.ip.findHistoryByIp(ip.id)).filter((event) => event.action === 'RELEASE'),
+    ).toHaveLength(1);
+  });
+
+  it('records one unarchive when concurrent retries restore an archived IP', async () => {
+    const ip = await ips.create(
+      { address: `10.128.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
+      actorId,
+    );
+    await ips.archive(ip.id, 'archive', actorId);
+    await Promise.all([ips.unarchive(ip.id, 'one', actorId), ips.unarchive(ip.id, 'two', actorId)]);
+    expect((await ips.findById(ip.id)).isArchived).toBe(false);
+    expect(
+      (await repo.ip.findHistoryByIp(ip.id)).filter((event) => event.action === 'UNARCHIVE'),
+    ).toHaveLength(1);
+  });
+
+  it.each(['receipt', 'return', 'condition'] as const)(
+    'rejects %s waiting behind warehouse deactivation',
+    async (operation) => {
+      const target = randomUUID();
+      await db
+        .insert(schema.warehouses)
+        .values({ id: target, name: `Synthetic inactive ${operation}` });
+      const productId = await product();
+      let routerId = '';
+      if (operation !== 'receipt') {
+        const router = await routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+        );
+        routerId = router.id;
+        if (operation === 'return') await routers.assign(router.id, { technicianId }, actorId);
+      }
+      const entered = deferred();
+      const release = deferred();
+      const deactivation = db.transaction(async (tx) => {
+        await repo.warehouses.findByIdForUpdate(target, tx);
+        await repo.warehouses.softDeactivate(target, tx);
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+      const placement =
+        operation === 'receipt'
+          ? routers.create(
+              { productId, warehouseId: target, serialNumber: randomUUID(), isNewReceipt: true },
+              actorId,
+            )
+          : operation === 'return'
+            ? routers.transition(
+                routerId,
+                { status: 'RETURNED', reason: 'Return', targetWarehouseId: target },
+                actorId,
+              )
+            : routers.updateCondition(
+                routerId,
+                { physicalCondition: 'SERVICEABLE', warehouseId: target, reason: 'Move' },
+                actorId,
+              );
+      const outcome = placement.then(
+        () => 'fulfilled',
+        () => 'rejected',
+      );
+      try {
+        let blocked = false;
+        for (let i = 0; i < 100; i++) {
+          const result = await pool.query(
+            "SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%warehouses%'",
+          );
+          if (result.rowCount) {
+            blocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(blocked).toBe(true);
+      } finally {
+        release.resolve();
+      }
+      await deactivation;
+      expect(await outcome).toBe('rejected');
+      expect(
+        await db.select().from(schema.routers).where(eq(schema.routers.warehouseId, target)),
+      ).toHaveLength(0);
+      expect((await repo.warehouses.findById(target))?.isActive).toBe(false);
+    },
+  );
+
+  it('rolls back condition and location changes and their stock and custody history', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await expect(
+      db.transaction(async (tx) => {
+        await routers.updateCondition(
+          router.id,
+          { physicalCondition: 'DAMAGED', reason: 'Synthetic damage' },
+          actorId,
+          tx,
+        );
+        throw new Error('caller rollback');
+      }),
+    ).rejects.toThrow('caller rollback');
+    expect((await routers.findById(router.id)).physicalCondition).toBe('SERVICEABLE');
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('WAREHOUSE');
+    expect(await repo.routers.findConditionHistory(router.id)).toHaveLength(0);
+    expect(await repo.routers.findAssignmentsByRouter(router.id)).toHaveLength(1);
+  });
+
+  it.each(['receipt', 'return', 'condition'] as const)(
+    'blocks deactivation waiting behind a committed %s placement',
+    async (operation) => {
+      const target = randomUUID();
+      await db
+        .insert(schema.warehouses)
+        .values({ id: target, name: `Synthetic placement ${operation}` });
+      const productId = await product();
+      let routerId = '';
+      if (operation !== 'receipt') {
+        const router = await routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+        );
+        routerId = router.id;
+        if (operation === 'return') await routers.assign(router.id, { technicianId }, actorId);
+      }
+      const entered = deferred();
+      const release = deferred();
+      const placement = db.transaction(async (tx) => {
+        if (operation === 'receipt')
+          await routers.create(
+            { productId, warehouseId: target, serialNumber: randomUUID(), isNewReceipt: true },
+            actorId,
+            tx,
+          );
+        else if (operation === 'return')
+          await routers.transition(
+            routerId,
+            { status: 'RETURNED', reason: 'Return', targetWarehouseId: target },
+            actorId,
+            tx,
+          );
+        else
+          await routers.updateCondition(
+            routerId,
+            { physicalCondition: 'SERVICEABLE', warehouseId: target, reason: 'Move' },
+            actorId,
+            tx,
+          );
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+      const outcome = warehouses.remove(target).then(
+        () => 'fulfilled',
+        () => 'rejected',
+      );
+      try {
+        let blocked = false;
+        for (let i = 0; i < 100; i++) {
+          const result = await pool.query(
+            "SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%warehouses%'",
+          );
+          if (result.rowCount) {
+            blocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(blocked).toBe(true);
+      } finally {
+        release.resolve();
+      }
+      await placement;
+      expect(await outcome).toBe('rejected');
+      expect((await repo.warehouses.findById(target))?.isActive).toBe(true);
+      expect(
+        await db.select().from(schema.routers).where(eq(schema.routers.warehouseId, target)),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('protects warehouses with stock, assigned staff or damaged routers', async () => {
+    const stockWh = randomUUID();
+    const staffWh = randomUUID();
+    const damagedWh = randomUUID();
+    await db.insert(schema.warehouses).values([
+      { id: stockWh, name: 'Synthetic stock blocker' },
+      { id: staffWh, name: 'Synthetic staff blocker' },
+      { id: damagedWh, name: 'Synthetic damaged blocker' },
+    ]);
+    const productId = await product();
+    await db
+      .insert(schema.warehouseInventory)
+      .values({ warehouseId: stockWh, productId, quantity: 1 });
+    await db.insert(schema.users).values({
+      email: `${randomUUID()}@example.invalid`,
+      passwordHash: 'synthetic',
+      role: 'TECHNICIAN',
+      assignedWarehouseId: staffWh,
+    });
+    await db.insert(schema.routers).values({
+      productId,
+      warehouseId: damagedWh,
+      serialNumber: randomUUID(),
+      status: 'AVAILABLE',
+      physicalCondition: 'DAMAGED',
+    });
+    for (const id of [stockWh, staffWh, damagedWh]) {
+      await expect(warehouses.remove(id)).rejects.toMatchObject({ status: 409 });
+      expect((await repo.warehouses.findById(id))?.isActive).toBe(true);
+    }
+  });
+
+  it('retains both concurrent receipts when a stock row already exists', async () => {
+    const productId = await product();
+    await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await Promise.all(
+      Array.from({ length: 2 }, () =>
+        routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+        ),
+      ),
+    );
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(3);
+    expect(
+      await db.select().from(schema.routers).where(eq(schema.routers.productId, productId)),
+    ).toHaveLength(3);
+    expect(
+      await db
+        .select()
+        .from(schema.stockMovements)
+        .where(eq(schema.stockMovements.productId, productId)),
+    ).toHaveLength(3);
+  });
+
+  it('rolls back router, custody, stock and movement when a late receipt step fails', async () => {
+    const productId = await product();
+    const serialNumber = randomUUID();
+    const original = inventoryRepo.recordMovementWithDelta.bind(inventoryRepo);
+    inventoryRepo.recordMovementWithDelta = async (...args) => {
+      await original(...args);
+      throw new Error('synthetic post-movement failure');
+    };
+    try {
+      await expect(
+        routers.create({ productId, warehouseId, serialNumber, isNewReceipt: true }, actorId),
+      ).rejects.toThrow('synthetic post-movement failure');
+    } finally {
+      inventoryRepo.recordMovementWithDelta = original;
+    }
+    expect(await repo.routers.findBySerialNumber(serialNumber)).toBeUndefined();
+    expect(await inventoryRepo.getStock(warehouseId, productId)).toBeUndefined();
+    expect(
+      await db
+        .select()
+        .from(schema.stockMovements)
+        .where(eq(schema.stockMovements.productId, productId)),
+    ).toHaveLength(0);
+    expect(
+      (await db.select().from(schema.products).where(eq(schema.products.id, productId)))[0]
+        .isSerialized,
+    ).toBe(false);
+  });
+
+  it.each(['SERVICEABLE', 'DAMAGED', 'UNDER_REPAIR'] as const)(
+    'reconciles a single %s opening unit and rejects a serial retry',
+    async (physicalCondition) => {
+      const productId = await product();
+      const serialNumber = randomUUID();
+      await inventory.adjustStock({
+        productId,
+        warehouseId,
+        newQuantity: 1,
+        notes: 'opening count',
+        responsibleUserId: actorId,
+      });
+      await routers.create({ productId, warehouseId, serialNumber, physicalCondition }, actorId);
+      await expect(
+        routers.create({ productId, warehouseId, serialNumber, physicalCondition }, actorId),
+      ).rejects.toThrow();
+      expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(
+        physicalCondition === 'SERVICEABLE' ? 1 : 0,
+      );
+      const movements = await db
+        .select()
+        .from(schema.stockMovements)
+        .where(eq(schema.stockMovements.productId, productId));
+      expect(
+        movements.filter((movement) => movement.movementType === 'INBOUND_SUPPLIER'),
+      ).toHaveLength(0);
+      expect(
+        movements.filter((movement) => movement.notes?.includes('Explicit reconciliation')),
+      ).toHaveLength(physicalCondition === 'SERVICEABLE' ? 0 : 1);
+    },
+  );
+
+  it.each(['inbound', 'outbound', 'return', 'transfer'] as const)(
+    'rejects generic %s waiting behind first serialized receipt',
+    async (operation) => {
+      const productId = await product();
+      const destination = randomUUID();
+      await db
+        .insert(schema.warehouses)
+        .values({ id: destination, name: 'Synthetic transfer target' });
+      const entered = deferred();
+      const release = deferred();
+      const receipt = db.transaction(async (tx) => {
+        await routers.create(
+          { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+          tx,
+        );
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+      const dto = { productId, warehouseId, quantity: 1, responsibleUserId: actorId };
+      const generic =
+        operation === 'inbound'
+          ? inventory.receiveInbound({ ...dto, supplierName: 'Synthetic' })
+          : operation === 'outbound'
+            ? inventory.issueOutbound({ ...dto, technicianId })
+            : operation === 'return'
+              ? inventory.receiveReturn({ ...dto, technicianId })
+              : inventory.transferStock({
+                  productId,
+                  fromWarehouseId: warehouseId,
+                  toWarehouseId: destination,
+                  quantity: 1,
+                  responsibleUserId: actorId,
+                });
+      const outcome = generic.then(
+        () => 'fulfilled',
+        () => 'rejected',
+      );
+      try {
+        await waitForProductLock();
+      } finally {
+        release.resolve();
+      }
+      await receipt;
+      expect(await outcome).toBe('rejected');
+      expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+      expect(await inventoryRepo.getStock(destination, productId)).toBeUndefined();
+    },
+  );
+
+  it('rolls back a valid lifecycle transition if status audit insertion fails', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    await routers.assign(router.id, { technicianId }, actorId);
+    const original = repo.routers.createStatusHistory.bind(repo.routers);
+    repo.routers.createStatusHistory = async () => {
+      throw new Error('synthetic status audit failure');
+    };
+    try {
+      await expect(
+        routers.transition(
+          router.id,
+          { status: 'RETURNED', targetWarehouseId: warehouseId, reason: 'Returned' },
+          actorId,
+        ),
+      ).rejects.toThrow('synthetic status audit failure');
+    } finally {
+      repo.routers.createStatusHistory = original;
+    }
+    expect((await routers.findById(router.id)).status).toBe('ASSIGNED_TO_TECHNICIAN');
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('TECHNICIAN');
+    expect(await repo.routers.findStatusHistory(router.id)).toHaveLength(0);
+  });
+});

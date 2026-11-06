@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../../../database/schema/index.js';
 import {
   ipAddresses,
@@ -34,6 +34,37 @@ export class IpRepository extends BaseRepository<
 
   private getClient(tx?: NodePgDatabase<typeof schema>): NodePgDatabase<typeof schema> {
     return tx ?? this.db;
+  }
+
+  async lockImportJob(jobId: string, tx: NodePgDatabase<typeof schema>): Promise<void> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${jobId}, 0))`);
+  }
+
+  async findImportOutcome(jobId: string, rowNumber: number, tx: NodePgDatabase<typeof schema>) {
+    const [row] = await tx
+      .select()
+      .from(schema.ipImportRowOutcomes)
+      .where(
+        and(
+          eq(schema.ipImportRowOutcomes.jobId, jobId),
+          eq(schema.ipImportRowOutcomes.rowNumber, rowNumber),
+        ),
+      )
+      .limit(1);
+    return row;
+  }
+
+  async recordImportOutcome(
+    jobId: string,
+    rowNumber: number,
+    outcome: string,
+    reason: string | null,
+    tx: NodePgDatabase<typeof schema>,
+  ) {
+    await tx
+      .insert(schema.ipImportRowOutcomes)
+      .values({ jobId, rowNumber, outcome, reason })
+      .onConflictDoNothing();
   }
 
   async findByAddress(

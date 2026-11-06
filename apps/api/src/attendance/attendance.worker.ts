@@ -13,6 +13,7 @@ import {
   routerAssignments,
 } from '../database/schema/index.js';
 import { StorageService } from '../storage/storage.interface.js';
+import { REPORT_STORAGE } from '../storage/local-report-storage.service.js';
 import { calculateHoursWorked } from '../common/utils/attendance.utils.js';
 import { formatLocalTimestamp } from '../common/services/clock.service.js';
 import { sanitizeSpreadsheetCell } from '../common/utils/spreadsheet.utils.js';
@@ -23,7 +24,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
 
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
-    private readonly storageService: StorageService,
+    @Inject(REPORT_STORAGE) private readonly storageService: StorageService,
   ) {
     super();
   }
@@ -199,6 +200,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       { header: 'Condition: DAMAGED', key: 'damaged', width: 22 },
       { header: 'Condition: UNDER_REPAIR', key: 'underRepairCondition', width: 26 },
       { header: 'Lifecycle: AVAILABLE', key: 'available', width: 22 },
+      { header: 'Lifecycle: DAMAGED', key: 'damagedLifecycle', width: 22 },
       { header: 'Lifecycle: UNDER_REPAIR', key: 'underRepair', width: 24 },
       { header: 'Lifecycle: RETURNED', key: 'returned', width: 22 },
       { header: 'Lifecycle: ASSIGNED_TO_TECHNICIAN', key: 'assignedToTech', width: 32 },
@@ -218,6 +220,8 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       fgColor: { argb: 'FF1F497D' },
     };
     summaryHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    summaryHeaderRow.getCell(3).note =
+      'Counts are distinct devices by physical location. Lifecycle, condition, custody and usable stock are independent dimensions and overlap; do not add across dimensions.';
 
     for (const w of warehouseList) {
       const warehouseRouters = routerRows.filter((r) => r.router.warehouseId === w.id);
@@ -268,6 +272,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
         damaged,
         underRepairCondition,
         available,
+        damagedLifecycle: warehouseRouters.filter((r) => r.router.status === 'DAMAGED').length,
         underRepair,
         returned,
         assignedToTech,
@@ -296,6 +301,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
             (r) => r.router.physicalCondition === 'UNDER_REPAIR',
           ).length,
           available: externalRouters.filter((r) => r.router.status === 'AVAILABLE').length,
+          damagedLifecycle: externalRouters.filter((r) => r.router.status === 'DAMAGED').length,
           underRepair: externalRouters.filter((r) => r.router.status === 'UNDER_REPAIR').length,
           returned: externalRouters.filter((r) => r.router.status === 'RETURNED').length,
           assignedToTech: externalRouters.filter(

@@ -418,8 +418,8 @@ describe('AttendanceReportWorker', () => {
       expect(cairoRow.getCell(5).value).toBe(1); // Serviceable: 1
       expect(cairoRow.getCell(6).value).toBe(1); // Damaged: 1
       expect(cairoRow.getCell(8).value).toBe(2); // Available lifecycle: 2
-      expect(cairoRow.getCell(16).value).toBe(1); // Custody Technician: 1
-      expect(cairoRow.getCell(17).value).toBe(1); // Custody None: 1
+      expect(cairoRow.getCell(17).value).toBe(1); // Custody Technician: 1
+      expect(cairoRow.getCell(18).value).toBe(1); // Custody None: 1
 
       // Row 3: Alexandria Depot (Empty warehouse)
       const alexRow = summarySheet!.getRow(3);
@@ -434,7 +434,7 @@ describe('AttendanceReportWorker', () => {
       expect(externalRow.getCell(1).value).toBe('External / Off-Site Locations');
       expect(externalRow.getCell(3).value).toBe(1); // 1 device offsite
       expect(externalRow.getCell(4).value).toBe(0); // 0 usable stock offsite
-      expect(externalRow.getCell(9).value).toBe(1); // Under repair: 1
+      expect(externalRow.getCell(10).value).toBe(1); // Under repair: 1
 
       // ─── 2. Verify Sheet 2: Router Inventory Details ───────────────────
       const detailsSheet = wb.getWorksheet('Router Inventory Details');

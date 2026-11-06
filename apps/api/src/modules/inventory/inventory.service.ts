@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../../database/schema/index.js';
 import { RepositoryService } from '../repository/repository.service.js';
 import type {
   WarehouseInventory,
@@ -24,8 +26,11 @@ const DEFAULT_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
 export class InventoryService {
   constructor(private readonly repo: RepositoryService) {}
 
-  private async ensureWarehouseExists(warehouseId: string): Promise<Warehouse> {
-    const warehouse = await this.repo.warehouses.findById(warehouseId);
+  private async ensureWarehouseExists(
+    warehouseId: string,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<Warehouse> {
+    const warehouse = await this.repo.warehouses.findByIdForUpdate(warehouseId, tx);
     if (!warehouse) {
       throw new NotFoundException(`Warehouse with ID "${warehouseId}" was not found`);
     }
@@ -37,47 +42,19 @@ export class InventoryService {
     return warehouse;
   }
 
-  private async ensureProductExists(productId: string): Promise<Product> {
-    const product = await this.repo.products.findById(productId);
+  private async ensureProductExists(
+    productId: string,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<Product> {
+    const product = await this.repo.products.findByIdForUpdate(productId, tx);
     if (!product) {
       throw new NotFoundException(`Product with ID "${productId}" was not found`);
     }
     return product;
   }
 
-  private async isSerializedProduct(product: Product): Promise<boolean> {
-    const category = product.category?.trim().toLowerCase() ?? '';
-    if (
-      category === 'router' ||
-      category === 'routers' ||
-      category === 'serialized' ||
-      category.includes('router')
-    ) {
-      return true;
-    }
-
-    const sku = product.sku?.trim().toUpperCase() ?? '';
-    if (sku.startsWith('RTR-') || sku.includes('ROUTER')) {
-      return true;
-    }
-
-    const name = product.name?.trim().toLowerCase() ?? '';
-    if (name.includes('router')) {
-      return true;
-    }
-
-    if (this.repo.routers?.countByProductId) {
-      const routerCount = await this.repo.routers.countByProductId(product.id);
-      if (routerCount > 0) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private async assertNonSerializedProduct(product: Product): Promise<void> {
-    if (await this.isSerializedProduct(product)) {
+  private assertNonSerializedProduct(product: Product): void {
+    if (product.isSerialized) {
       throw new BadRequestException(
         `Product "${product.name}" (${product.sku}) is a serialized SKU. Generic quantity-only inventory operations are prohibited for serialized items; manage stock via RoutersModule.`,
       );
@@ -87,80 +64,86 @@ export class InventoryService {
   async receiveInbound(
     dto: InboundStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
-    await this.ensureWarehouseExists(dto.warehouseId);
-    const product = await this.ensureProductExists(dto.productId);
-    await this.assertNonSerializedProduct(product);
+    return this.repo.transaction(async (tx) => {
+      const product = await this.ensureProductExists(dto.productId, tx);
+      this.assertNonSerializedProduct(product);
+      await this.ensureWarehouseExists(dto.warehouseId, tx);
 
-    const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
-    const currentQty = current?.quantity ?? 0;
-    const newQuantity = currentQty + dto.quantity;
+      const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
+      const currentQty = current?.quantity ?? 0;
+      const newQuantity = currentQty + dto.quantity;
 
-    const movement: NewStockMovement = {
-      warehouseId: dto.warehouseId,
-      productId: dto.productId,
-      movementType: 'INBOUND_SUPPLIER',
-      quantity: dto.quantity,
-      supplierName: dto.supplierName.trim(),
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes ? dto.notes.trim() : null,
-    };
+      const movement: NewStockMovement = {
+        warehouseId: dto.warehouseId,
+        productId: dto.productId,
+        movementType: 'INBOUND_SUPPLIER',
+        quantity: dto.quantity,
+        supplierName: dto.supplierName.trim(),
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes ? dto.notes.trim() : null,
+      };
 
-    return this.repo.inventory.recordMovementInTransaction(movement, newQuantity);
+      return this.repo.inventory.recordMovementInTransaction(movement, newQuantity, tx);
+    });
   }
 
   async issueOutbound(
     dto: OutboundStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
-    await this.ensureWarehouseExists(dto.warehouseId);
-    const product = await this.ensureProductExists(dto.productId);
-    await this.assertNonSerializedProduct(product);
+    return this.repo.transaction(async (tx) => {
+      const product = await this.ensureProductExists(dto.productId, tx);
+      this.assertNonSerializedProduct(product);
+      await this.ensureWarehouseExists(dto.warehouseId, tx);
 
-    const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
-    const currentQty = current?.quantity ?? 0;
+      const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
+      const currentQty = current?.quantity ?? 0;
 
-    if (currentQty < dto.quantity) {
-      throw new BadRequestException(
-        `Insufficient stock: available ${currentQty}, requested ${dto.quantity}`,
-      );
-    }
+      if (currentQty < dto.quantity) {
+        throw new BadRequestException(
+          `Insufficient stock: available ${currentQty}, requested ${dto.quantity}`,
+        );
+      }
 
-    const newQuantity = currentQty - dto.quantity;
+      const newQuantity = currentQty - dto.quantity;
 
-    const movement: NewStockMovement = {
-      warehouseId: dto.warehouseId,
-      productId: dto.productId,
-      movementType: 'OUTBOUND_TECHNICIAN',
-      quantity: dto.quantity,
-      technicianId: dto.technicianId,
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes ? dto.notes.trim() : null,
-    };
+      const movement: NewStockMovement = {
+        warehouseId: dto.warehouseId,
+        productId: dto.productId,
+        movementType: 'OUTBOUND_TECHNICIAN',
+        quantity: dto.quantity,
+        technicianId: dto.technicianId,
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes ? dto.notes.trim() : null,
+      };
 
-    return this.repo.inventory.recordMovementInTransaction(movement, newQuantity);
+      return this.repo.inventory.recordMovementInTransaction(movement, newQuantity, tx);
+    });
   }
 
   async receiveReturn(
     dto: ReturnStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
-    await this.ensureWarehouseExists(dto.warehouseId);
-    const product = await this.ensureProductExists(dto.productId);
-    await this.assertNonSerializedProduct(product);
+    return this.repo.transaction(async (tx) => {
+      const product = await this.ensureProductExists(dto.productId, tx);
+      this.assertNonSerializedProduct(product);
+      await this.ensureWarehouseExists(dto.warehouseId, tx);
 
-    const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
-    const currentQty = current?.quantity ?? 0;
-    const newQuantity = currentQty + dto.quantity;
+      const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
+      const currentQty = current?.quantity ?? 0;
+      const newQuantity = currentQty + dto.quantity;
 
-    const movement: NewStockMovement = {
-      warehouseId: dto.warehouseId,
-      productId: dto.productId,
-      movementType: 'RETURN_TECHNICIAN',
-      quantity: dto.quantity,
-      technicianId: dto.technicianId,
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes ? dto.notes.trim() : null,
-    };
+      const movement: NewStockMovement = {
+        warehouseId: dto.warehouseId,
+        productId: dto.productId,
+        movementType: 'RETURN_TECHNICIAN',
+        quantity: dto.quantity,
+        technicianId: dto.technicianId,
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes ? dto.notes.trim() : null,
+      };
 
-    return this.repo.inventory.recordMovementInTransaction(movement, newQuantity);
+      return this.repo.inventory.recordMovementInTransaction(movement, newQuantity, tx);
+    });
   }
 
   async transferStock(
@@ -170,77 +153,86 @@ export class InventoryService {
       throw new BadRequestException('Cannot transfer stock to the same warehouse');
     }
 
-    await this.ensureWarehouseExists(dto.fromWarehouseId);
-    await this.ensureWarehouseExists(dto.toWarehouseId);
-    const product = await this.ensureProductExists(dto.productId);
-    await this.assertNonSerializedProduct(product);
+    return this.repo.transaction(async (tx) => {
+      const product = await this.ensureProductExists(dto.productId, tx);
+      this.assertNonSerializedProduct(product);
+      for (const id of [dto.fromWarehouseId, dto.toWarehouseId].sort())
+        await this.ensureWarehouseExists(id, tx);
 
-    const sourceCurrent = await this.repo.inventory.getStock(dto.fromWarehouseId, dto.productId);
-    const sourceQty = sourceCurrent?.quantity ?? 0;
-
-    if (sourceQty < dto.quantity) {
-      throw new BadRequestException(
-        `Insufficient stock in source warehouse: available ${sourceQty}, requested ${dto.quantity}`,
+      const sourceCurrent = await this.repo.inventory.getStock(
+        dto.fromWarehouseId,
+        dto.productId,
+        tx,
       );
-    }
+      const sourceQty = sourceCurrent?.quantity ?? 0;
 
-    const destCurrent = await this.repo.inventory.getStock(dto.toWarehouseId, dto.productId);
-    const destQty = destCurrent?.quantity ?? 0;
+      if (sourceQty < dto.quantity) {
+        throw new BadRequestException(
+          `Insufficient stock in source warehouse: available ${sourceQty}, requested ${dto.quantity}`,
+        );
+      }
 
-    const sourceNewQty = sourceQty - dto.quantity;
-    const destNewQty = destQty + dto.quantity;
+      const destCurrent = await this.repo.inventory.getStock(dto.toWarehouseId, dto.productId, tx);
+      const destQty = destCurrent?.quantity ?? 0;
 
-    const movementOut: NewStockMovement = {
-      warehouseId: dto.fromWarehouseId,
-      productId: dto.productId,
-      movementType: 'TRANSFER_WAREHOUSE',
-      quantity: -dto.quantity,
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes ? dto.notes.trim() : `Transfer to warehouse ${dto.toWarehouseId}`,
-    };
+      const sourceNewQty = sourceQty - dto.quantity;
+      const destNewQty = destQty + dto.quantity;
 
-    const movementIn: NewStockMovement = {
-      warehouseId: dto.toWarehouseId,
-      productId: dto.productId,
-      movementType: 'TRANSFER_WAREHOUSE',
-      quantity: dto.quantity,
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes ? dto.notes.trim() : `Transfer from warehouse ${dto.fromWarehouseId}`,
-    };
+      const movementOut: NewStockMovement = {
+        warehouseId: dto.fromWarehouseId,
+        productId: dto.productId,
+        movementType: 'TRANSFER_WAREHOUSE',
+        quantity: -dto.quantity,
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes ? dto.notes.trim() : `Transfer to warehouse ${dto.toWarehouseId}`,
+      };
 
-    return this.repo.inventory.executeTransferInTransaction(
-      dto.fromWarehouseId,
-      dto.toWarehouseId,
-      dto.productId,
-      dto.quantity,
-      sourceNewQty,
-      destNewQty,
-      movementOut,
-      movementIn,
-    );
+      const movementIn: NewStockMovement = {
+        warehouseId: dto.toWarehouseId,
+        productId: dto.productId,
+        movementType: 'TRANSFER_WAREHOUSE',
+        quantity: dto.quantity,
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes ? dto.notes.trim() : `Transfer from warehouse ${dto.fromWarehouseId}`,
+      };
+
+      return this.repo.inventory.executeTransferInTransaction(
+        dto.fromWarehouseId,
+        dto.toWarehouseId,
+        dto.productId,
+        dto.quantity,
+        sourceNewQty,
+        destNewQty,
+        movementOut,
+        movementIn,
+        tx,
+      );
+    });
   }
 
   async adjustStock(
     dto: AdjustStockDto,
   ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
-    await this.ensureWarehouseExists(dto.warehouseId);
-    const product = await this.ensureProductExists(dto.productId);
-    await this.assertNonSerializedProduct(product);
+    return this.repo.transaction(async (tx) => {
+      const product = await this.ensureProductExists(dto.productId, tx);
+      this.assertNonSerializedProduct(product);
+      await this.ensureWarehouseExists(dto.warehouseId, tx);
 
-    const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId);
-    const currentQty = current?.quantity ?? 0;
-    const delta = dto.newQuantity - currentQty;
+      const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
+      const currentQty = current?.quantity ?? 0;
+      const delta = dto.newQuantity - currentQty;
 
-    const movement: NewStockMovement = {
-      warehouseId: dto.warehouseId,
-      productId: dto.productId,
-      movementType: 'ADJUSTMENT',
-      quantity: delta,
-      responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
-      notes: dto.notes.trim(),
-    };
+      const movement: NewStockMovement = {
+        warehouseId: dto.warehouseId,
+        productId: dto.productId,
+        movementType: 'ADJUSTMENT',
+        quantity: delta,
+        responsibleUserId: dto.responsibleUserId ?? DEFAULT_SYSTEM_USER_ID,
+        notes: dto.notes.trim(),
+      };
 
-    return this.repo.inventory.recordMovementInTransaction(movement, dto.newQuantity);
+      return this.repo.inventory.recordMovementInTransaction(movement, dto.newQuantity, tx);
+    });
   }
 
   async findAllStock(

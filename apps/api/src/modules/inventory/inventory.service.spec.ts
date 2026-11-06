@@ -80,6 +80,7 @@ describe('InventoryService', () => {
 
   const mockProductsRepo = {
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
   };
 
   const mockRoutersRepo = {
@@ -97,12 +98,14 @@ describe('InventoryService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
+    mockProductsRepo.findByIdForUpdate.mockImplementation((id: string) =>
+      mockProductsRepo.findById(id),
+    );
+    mockWarehousesRepo.findByIdForUpdate.mockImplementation((id: string) =>
+      mockWarehousesRepo.findById(id),
+    );
+
     mockWarehousesRepo.findById.mockResolvedValue({
-      id: mockWarehouseId,
-      name: 'Main Hub',
-      isActive: true,
-    });
-    mockWarehousesRepo.findByIdForUpdate.mockResolvedValue({
       id: mockWarehouseId,
       name: 'Main Hub',
       isActive: true,
@@ -159,6 +162,7 @@ describe('InventoryService', () => {
           supplierName: 'El-Sewedy Electric',
         }),
         150, // newQuantity = 100 + 50
+        expect.anything(),
       );
       expect(result.inventory.quantity).toBe(150);
     });
@@ -213,6 +217,7 @@ describe('InventoryService', () => {
           technicianId: mockTechId,
         }),
         70, // 100 - 30
+        expect.anything(),
       );
       expect(result.inventory.quantity).toBe(70);
     });
@@ -255,6 +260,7 @@ describe('InventoryService', () => {
           quantity: 10,
         }),
         110,
+        expect.anything(),
       );
       expect(result.inventory.quantity).toBe(110);
     });
@@ -293,6 +299,7 @@ describe('InventoryService', () => {
         50, // dest: 10 + 40
         expect.objectContaining({ movementType: 'TRANSFER_WAREHOUSE' }),
         expect.objectContaining({ movementType: 'TRANSFER_WAREHOUSE' }),
+        expect.anything(),
       );
       expect(result.sourceInventory.quantity).toBe(60);
       expect(result.destInventory.quantity).toBe(50);
@@ -357,6 +364,7 @@ describe('InventoryService', () => {
           notes: 'Damaged 5 units during inspection',
         }),
         95,
+        expect.anything(),
       );
       expect(result.inventory.quantity).toBe(95);
     });
@@ -411,6 +419,7 @@ describe('InventoryService', () => {
       name: 'Wi-Fi 6 Router',
       sku: 'RTR-WIFI6-01',
       category: 'Routers',
+      isSerialized: true,
       lowStockThreshold: 5,
     };
 
@@ -476,12 +485,13 @@ describe('InventoryService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('identifies serialized SKU by registered router count when category is generic', async () => {
+    it('identifies serialized SKU by persisted classification when category is generic', async () => {
       const genericProduct = {
         id: 'generic-hardware-prod',
         name: 'Enterprise Box',
         sku: 'BOX-ENT-99',
         category: 'Hardware',
+        isSerialized: true,
       };
       mockProductsRepo.findById.mockResolvedValue(genericProduct);
       mockRoutersRepo.countByProductId.mockResolvedValue(5);

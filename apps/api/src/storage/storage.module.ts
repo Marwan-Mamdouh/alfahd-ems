@@ -3,10 +3,21 @@ import { ConfigService } from '@nestjs/config';
 import { StorageService } from './storage.interface.js';
 import { CloudinaryStorageService } from './cloudinary.service.js';
 import { FakeStorageService } from './fake-storage.service.js';
+import { LocalReportStorageService, REPORT_STORAGE } from './local-report-storage.service.js';
 
 @Global()
 @Module({
   providers: [
+    LocalReportStorageService,
+    {
+      provide: REPORT_STORAGE,
+      inject: [ConfigService, StorageService, LocalReportStorageService],
+      useFactory: (
+        config: ConfigService,
+        storage: StorageService,
+        local: LocalReportStorageService,
+      ) => (config.get<string>('REPORT_STORAGE_PROVIDER') === 'local' ? local : storage),
+    },
     {
       provide: StorageService,
       inject: [ConfigService],
@@ -37,6 +48,6 @@ import { FakeStorageService } from './fake-storage.service.js';
       },
     },
   ],
-  exports: [StorageService],
+  exports: [StorageService, LocalReportStorageService, REPORT_STORAGE],
 })
 export class StorageModule {}

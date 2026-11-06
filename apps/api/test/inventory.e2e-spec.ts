@@ -45,6 +45,7 @@ describe('Inventory (e2e)', () => {
       },
     },
     products: {
+      findByIdForUpdate: async (id: string) => mockRepositoryService.products.findById(id),
       findById: async (id: string) => {
         if (id === PRODUCT_X_ID) {
           return { id, name: 'Optic Cable', sku: 'OPT-100', category: 'Cables', isActive: true };
@@ -55,6 +56,7 @@ describe('Inventory (e2e)', () => {
             name: 'Wi-Fi 6 Router',
             sku: 'RTR-WIFI6-01',
             category: 'Routers',
+            isSerialized: true,
             isActive: true,
           };
         }
