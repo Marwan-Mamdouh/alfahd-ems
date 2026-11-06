@@ -13,6 +13,7 @@ export function makeProduct(overrides: Partial<Product> = {}): Product {
     lowStockThreshold: faker.number.int({ min: 5, max: 20 }),
     createdAt: faker.date.past(),
     updatedAt: faker.date.recent(),
+    isSerialized: false,
     ...overrides,
   };
 }

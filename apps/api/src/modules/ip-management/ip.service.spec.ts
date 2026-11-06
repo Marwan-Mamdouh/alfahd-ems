@@ -33,6 +33,9 @@ describe('IpService', () => {
   };
 
   const mockIpRepo = {
+    lockImportJob: vi.fn(),
+    findImportOutcome: vi.fn(),
+    recordImportOutcome: vi.fn(),
     findByAddress: vi.fn(),
     findById: vi.fn(),
     findByIdForUpdate: vi.fn(),
@@ -573,6 +576,15 @@ not-an-ip,Invalid IP
       expect(outcome.inserted).toBe(0);
       expect(outcome.skipped).toBe(1); // Treated safely as a skip
       expect(outcome.errors).toHaveLength(0);
+    });
+
+    it('masks database errors and retains physical row numbers after blank lines', async () => {
+      mockIpRepo.findByAddress.mockResolvedValue(undefined);
+      mockIpRepo.createIpOnConflictDoNothing.mockRejectedValue(new Error('secret database detail'));
+      const result = await service.processImportJob('address\n\n192.168.1.99', 'admin-id', 'job');
+      expect(result.errors).toEqual([
+        { row: 3, address: '192.168.1.99', reason: 'Unable to import row' },
+      ]);
     });
   });
 });

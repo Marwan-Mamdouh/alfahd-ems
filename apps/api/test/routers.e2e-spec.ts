@@ -247,6 +247,8 @@ describe('Routers (e2e)', () => {
       },
     },
     products: {
+      findByIdForUpdate: async (id: string) => mockRepositoryService.products.findById(id),
+      markSerialized: async () => {},
       findById: async (id: string) => {
         if (
           id === PRODUCT_ROUTER_ID ||
@@ -641,7 +643,7 @@ describe('Routers (e2e)', () => {
       expect(mainHubRow.getCell(5).value).toBe(1); // Condition: SERVICEABLE
       expect(mainHubRow.getCell(6).value).toBe(0); // Condition: DAMAGED
       expect(mainHubRow.getCell(8).value).toBe(1); // Lifecycle: AVAILABLE
-      expect(mainHubRow.getCell(15).value).toBe(1); // Custody: WAREHOUSE
+      expect(mainHubRow.getCell(16).value).toBe(1); // Custody: WAREHOUSE
 
       // Row 3: Secondary Hub (empty warehouse with clean 0 counts)
       const secondaryHubRow = summarySheet!.getRow(3);
@@ -988,7 +990,7 @@ describe('Routers (e2e)', () => {
       expect(res.body.data.status).toBe('RETURNED');
     });
 
-    it('transitions an ASSIGNED_TO_TECHNICIAN router to INSTALLED_AT_CUSTOMER and establishes customer custody', async () => {
+    it('rejects customer installation until customer targets are supported', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
       const dto = makeTransitionRouterDto({
         status: 'INSTALLED_AT_CUSTOMER',
@@ -996,19 +998,14 @@ describe('Routers (e2e)', () => {
         reason: 'Customer installation verified',
       });
 
-      const res = await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .patch(`/routers/${ROUTER_FOR_INSTALL_ID}/transition`)
         .set(auth)
         .send(dto)
-        .expect(200);
-
-      expect(res.body.data.status).toBe('INSTALLED_AT_CUSTOMER');
-      expect(res.body.data.currentHolderType).toBe('CUSTOMER');
-      expect(res.body.data.currentHolderId).toBeNull();
-      expect(res.body.data.warehouseId).toBeNull();
+        .expect(400);
     });
 
-    it('transitions an INSTALLED_AT_CUSTOMER router to RETURNED with target warehouse', async () => {
+    it('returns the technician-held router after a rejected installation', async () => {
       const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
       const dto = makeTransitionRouterDto({
         status: 'RETURNED',

@@ -17,6 +17,18 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+
+export const ipImportRowOutcomes = pgTable(
+  'ip_import_row_outcomes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    jobId: text('job_id').notNull(),
+    rowNumber: integer('row_number').notNull(),
+    outcome: text('outcome').notNull(),
+    reason: text('reason'),
+  },
+  (table) => [uniqueIndex('ip_import_row_outcomes_job_row').on(table.jobId, table.rowNumber)],
+);
 import {
   DEPARTMENTS,
   USER_STATUSES,
@@ -137,6 +149,7 @@ export const products = pgTable('products', {
   category: varchar('category', { length: 100 }).notNull(),
   description: text('description'),
   lowStockThreshold: integer('low_stock_threshold').default(10).notNull(),
+  isSerialized: boolean('is_serialized').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

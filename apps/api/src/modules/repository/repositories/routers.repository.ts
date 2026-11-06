@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, isNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../../../database/schema/index.js';
 import {
   routers,
@@ -133,8 +133,7 @@ export class RoutersRepository extends BaseRepository<
       .where(
         and(
           eq(schema.routerAssignments.routerId, routerId),
-          // IS NULL check on releasedAt for currently active assignment
-          eq(schema.routerAssignments.releasedAt, null as unknown as Date),
+          isNull(schema.routerAssignments.releasedAt),
         ),
       )
       .limit(1);
@@ -154,7 +153,7 @@ export class RoutersRepository extends BaseRepository<
       .where(
         and(
           eq(schema.routerAssignments.routerId, routerId),
-          eq(schema.routerAssignments.releasedAt, null as unknown as Date),
+          isNull(schema.routerAssignments.releasedAt),
         ),
       )
       .returning();

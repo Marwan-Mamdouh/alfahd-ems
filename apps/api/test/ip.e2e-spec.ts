@@ -102,6 +102,7 @@ describe('IP Management (e2e)', () => {
   };
 
   let nextTxId = 1;
+  const importOutcomes = new Map<string, { outcome: string; reason: string | null }>();
 
   interface MockTx {
     txId: number;
@@ -137,6 +138,17 @@ describe('IP Management (e2e)', () => {
       }
     },
     ip: {
+      lockImportJob: async () => {},
+      findImportOutcome: async (jobId: string, row: number) =>
+        importOutcomes.get(`${jobId}:${row}`),
+      recordImportOutcome: async (
+        jobId: string,
+        row: number,
+        outcome: string,
+        reason: string | null,
+      ) => {
+        importOutcomes.set(`${jobId}:${row}`, { outcome, reason });
+      },
       findByAddress: async (address: string) => {
         return ipStore.find((i) => i.address.trim().toLowerCase() === address.trim().toLowerCase());
       },

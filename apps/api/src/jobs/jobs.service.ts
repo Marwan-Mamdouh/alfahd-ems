@@ -3,6 +3,10 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Role, type JobStatusResponseDto } from '@alfahd/types';
 import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
+import {
+  LOCAL_REPORT_PREFIX,
+  LocalReportStorageService,
+} from '../storage/local-report-storage.service.js';
 
 /**
  * Generic failure text returned to clients. Raw `job.failedReason` is never
@@ -18,9 +22,10 @@ export class JobsService {
   constructor(
     @InjectQueue('reports') private readonly reportsQueue: Queue,
     @Optional() @InjectQueue('ip-imports') private readonly ipImportsQueue?: Queue,
+    @Optional() private readonly localReports?: LocalReportStorageService,
   ) {}
 
-  async getJobStatus(jobId: string, currentUser?: JwtUser): Promise<JobStatusResponseDto> {
+  private async getAuthorizedJob(jobId: string, currentUser?: JwtUser) {
     let job = await this.reportsQueue.getJob(jobId);
     if (!job && this.ipImportsQueue) {
       job = await this.ipImportsQueue.getJob(jobId);
@@ -35,6 +40,11 @@ export class JobsService {
         throw new NotFoundException(`Job with ID ${jobId} not found`);
       }
     }
+    return job;
+  }
+
+  async getJobStatus(jobId: string, currentUser?: JwtUser): Promise<JobStatusResponseDto> {
+    const job = await this.getAuthorizedJob(jobId, currentUser);
 
     const state = await job.getState();
     let status: JobStatusResponseDto['status'];
@@ -65,7 +75,10 @@ export class JobsService {
     const response: JobStatusResponseDto = {
       id: String(job.id),
       status,
-      downloadUrl: rv?.downloadUrl ?? null,
+      downloadUrl:
+        typeof rv?.downloadUrl === 'string' && rv.downloadUrl.startsWith(LOCAL_REPORT_PREFIX)
+          ? `/jobs/${encodeURIComponent(jobId)}/download`
+          : (rv?.downloadUrl ?? null),
       error: status === 'FAILED' ? GENERIC_JOB_ERROR : null,
     };
 
@@ -77,5 +90,19 @@ export class JobsService {
     }
 
     return response;
+  }
+
+  async downloadLocalReport(jobId: string, currentUser: JwtUser): Promise<Buffer> {
+    const job = await this.getAuthorizedJob(jobId, currentUser);
+    const url = job.returnvalue?.downloadUrl;
+    if (
+      (await job.getState()) !== 'completed' ||
+      typeof url !== 'string' ||
+      !url.startsWith(LOCAL_REPORT_PREFIX) ||
+      !this.localReports
+    ) {
+      throw new NotFoundException('Report not found');
+    }
+    return this.localReports.readReport(url.slice(LOCAL_REPORT_PREFIX.length));
   }
 }

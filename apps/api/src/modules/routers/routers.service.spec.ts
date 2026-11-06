@@ -72,6 +72,8 @@ describe('RoutersService', () => {
 
   const mockProductsRepo = {
     findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
+    markSerialized: vi.fn(),
   };
 
   const mockInventoryRepo = {
@@ -96,6 +98,10 @@ describe('RoutersService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
+    mockProductsRepo.findByIdForUpdate.mockImplementation((id: string) =>
+      mockProductsRepo.findById(id),
+    );
+
     mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
     mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
 
@@ -117,6 +123,28 @@ describe('RoutersService', () => {
   });
 
   describe('create', () => {
+    it.each(['DAMAGED', 'UNDER_REPAIR'] as const)(
+      'rejects %s opening units when all stock already has usable serials',
+      async (physicalCondition) => {
+        mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+        mockProductsRepo.findById.mockResolvedValue(mockProduct);
+        mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 1 });
+        mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(1);
+        await expect(
+          service.create(
+            {
+              serialNumber: 'NEW',
+              productId: mockProduct.id,
+              warehouseId: mockWarehouse.id,
+              physicalCondition,
+            },
+            'admin-id',
+          ),
+        ).rejects.toThrow(ConflictException);
+        expect(mockRoutersRepo.createRouter).not.toHaveBeenCalled();
+        expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
+      },
+    );
     it('registers an existing router without adding inventory stock (isNewReceipt=false)', async () => {
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
@@ -192,6 +220,7 @@ describe('RoutersService', () => {
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
       mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 5 });
+      mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(2);
       mockInventoryRepo.getStock.mockResolvedValue({ quantity: 5 });
       mockRoutersRepo.createRouter.mockResolvedValue({
         ...mockRouter,
@@ -348,6 +377,69 @@ describe('RoutersService', () => {
   });
 
   describe('transition', () => {
+    it('opens custody and adds stock only after an available repair is restored to serviceable', async () => {
+      const repairing = {
+        ...mockRouter,
+        status: 'UNDER_REPAIR' as const,
+        physicalCondition: 'UNDER_REPAIR' as const,
+      };
+      const available = { ...repairing, status: 'AVAILABLE' as const };
+      const restored = { ...available, physicalCondition: 'SERVICEABLE' as const };
+      mockRoutersRepo.findByIdForUpdate
+        .mockResolvedValueOnce(repairing)
+        .mockResolvedValueOnce(available);
+      mockRoutersRepo.updateRouter.mockResolvedValueOnce(available).mockResolvedValueOnce(restored);
+      mockRoutersRepo.findActiveAssignment
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(mockAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      await service.transition(
+        mockRouter.id,
+        { status: 'AVAILABLE', reason: 'Returned from repair' },
+        'admin-id',
+      );
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+      expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
+      await service.updateCondition(
+        mockRouter.id,
+        { physicalCondition: 'SERVICEABLE', reason: 'Inspection passed' },
+        'admin-id',
+      );
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledTimes(1);
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledTimes(1);
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warehouseId: mockWarehouse.id,
+          productId: mockProduct.id,
+          responsibleUserId: 'admin-id',
+        }),
+        1,
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledTimes(1);
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledTimes(1);
+      expect(mockRoutersRepo.releaseActiveAssignment).not.toHaveBeenCalled();
+    });
+    it('does not restore stock or custody when repair is still unserviceable', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockRouter,
+        status: 'UNDER_REPAIR',
+        physicalCondition: 'UNDER_REPAIR',
+      });
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        status: 'AVAILABLE',
+        physicalCondition: 'UNDER_REPAIR',
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
+      await service.transition(
+        mockRouter.id,
+        { status: 'AVAILABLE', reason: 'Inspection pending' },
+        'admin-id',
+      );
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+      expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
+    });
     it('rejects manual transition if reason is missing, empty, or whitespace-only', async () => {
       const assignedRouter = { ...mockRouter, status: 'ASSIGNED_TO_TECHNICIAN' as const };
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
@@ -410,88 +502,26 @@ describe('RoutersService', () => {
       expect(result.status).toBe('RETURNED');
     });
 
-    it('transitions ASSIGNED_TO_TECHNICIAN to INSTALLED_AT_CUSTOMER: closes technician custody and opens CUSTOMER custody atomically', async () => {
-      const assignedRouter = {
+    it('rejects customer installation without changing technician custody', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
         ...mockRouter,
-        status: 'ASSIGNED_TO_TECHNICIAN' as const,
-        physicalCondition: 'SERVICEABLE' as const,
-        warehouseId: null,
-      };
-      const techAssignment = {
-        ...mockAssignment,
-        holderType: 'TECHNICIAN' as const,
-        technicianId: 'tech-123',
-        releasedAt: null,
-      };
-      const customerAssignment = {
-        ...mockAssignment,
-        id: 'cust-assign-uuid',
-        holderType: 'CUSTOMER' as const,
-        technicianId: null,
-        warehouseId: null,
-        notes: 'Installed at customer villa 42',
-      };
-
-      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(assignedRouter);
-      mockRoutersRepo.findActiveAssignment
-        .mockResolvedValueOnce(techAssignment) // for initial check
-        .mockResolvedValueOnce(customerAssignment); // for mapToDto
-      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(techAssignment);
-      mockRoutersRepo.createAssignment.mockResolvedValue(customerAssignment);
-      mockRoutersRepo.updateRouter.mockResolvedValue({
-        ...assignedRouter,
-        status: 'INSTALLED_AT_CUSTOMER',
+        status: 'ASSIGNED_TO_TECHNICIAN',
+        physicalCondition: 'SERVICEABLE',
         warehouseId: null,
       });
-      mockRoutersRepo.createStatusHistory.mockResolvedValue({});
 
-      const result = await service.transition(
-        mockRouter.id,
-        {
-          status: 'INSTALLED_AT_CUSTOMER',
-          notes: 'Installed at customer villa 42',
-          reason: 'Customer install completed',
-        },
-        'admin-id',
-      );
+      await expect(
+        service.transition(
+          mockRouter.id,
+          { status: 'INSTALLED_AT_CUSTOMER', reason: 'Customer install completed' },
+          'admin-id',
+        ),
+      ).rejects.toThrow('Customer installation is unavailable');
 
-      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalledWith(
-        mockRouter.id,
-        expect.any(Date),
-        expect.anything(),
-      );
-      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
-        {
-          routerId: mockRouter.id,
-          holderType: 'CUSTOMER',
-          warehouseId: null,
-          technicianId: null,
-          assignedBy: 'admin-id',
-          notes: 'Installed at customer villa 42',
-        },
-        expect.anything(),
-      );
-      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledWith(
-        {
-          routerId: mockRouter.id,
-          fromStatus: 'ASSIGNED_TO_TECHNICIAN',
-          toStatus: 'INSTALLED_AT_CUSTOMER',
-          reason: 'Customer install completed',
-          changedBy: 'admin-id',
-        },
-        expect.anything(),
-      );
-      expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
-        mockRouter.id,
-        expect.objectContaining({
-          status: 'INSTALLED_AT_CUSTOMER',
-          warehouseId: null,
-        }),
-        expect.anything(),
-      );
-      expect(result.status).toBe('INSTALLED_AT_CUSTOMER');
-      expect(result.currentHolderType).toBe('CUSTOMER');
-      expect(result.currentHolderId).toBeNull();
+      expect(mockRoutersRepo.releaseActiveAssignment).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.updateRouter).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createStatusHistory).not.toHaveBeenCalled();
     });
 
     it('rejects transition to INSTALLED_AT_CUSTOMER when router physicalCondition is not SERVICEABLE', async () => {

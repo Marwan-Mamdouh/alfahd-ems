@@ -27,3 +27,7 @@ The status values are `AVAILABLE`, `ASSIGNED_TO_TECHNICIAN`, `INSTALLED_AT_CUSTO
 ## Decisions still open
 
 Holder types remain WAREHOUSE, TECHNICIAN and CUSTOMER. The latest approved empty-custody, physical-condition, location and stock behavior is in the M2b implementation contract. Its §12 lists the remaining technical freeze items, including exact condition values, target validation, interface and error bodies. Do not add AVAILABLE → DAMAGED or simulate an assignment to record warehouse damage.
+
+## M2b customer installation gate
+
+The current M2b operation rejects `ASSIGNED_TO_TECHNICIAN` → `INSTALLED_AT_CUSTOMER` until a customer custody target can be passed and validated. This preserves the technician's custody and avoids creating a customer assignment without an identifiable target. The M3a close-time handoff remains required by the M3a contract; removing this gate requires that integration and its target validation, not merely adding a customer foreign key.

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import type { CreateIpDto, UpdateIpDto, IpQueryDto } from './dto/index.js';
 
 @Injectable()
 export class IpService {
+  private readonly logger = new Logger(IpService.name);
   constructor(
     private readonly repo: RepositoryService,
     @Optional() @InjectQueue('ip-imports') private readonly ipImportsQueue?: Queue,
@@ -338,10 +340,7 @@ export class IpService {
       throw new BadRequestException('CSV file exceeds maximum size limit of 5MB');
     }
 
-    const text = fileBuffer
-      .toString('utf-8')
-      .replace(/^\uFEFF/, '')
-      .trim();
+    const text = fileBuffer.toString('utf-8').replace(/^\uFEFF/, '');
     const lines = text
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -388,17 +387,16 @@ export class IpService {
     jobId: string,
   ): Promise<IpImportResultDto> {
     const clean = csvContent.replace(/^\uFEFF/, '');
-    const lines = clean
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+    const lines = clean.split(/\r?\n/).map((line) => line.trim());
+    while (lines.length > 0 && !lines[lines.length - 1]) lines.pop();
 
-    if (lines.length <= 1) {
+    const headerIndex = lines.findIndex((line) => line.length > 0);
+    if (headerIndex < 0 || lines.slice(headerIndex + 1).every((line) => !line)) {
       return { total: 0, inserted: 0, skipped: 0, errors: [] };
     }
 
     // Header check
-    const headerLine = lines[0].toLowerCase();
+    const headerLine = lines[headerIndex].toLowerCase();
     const headers = headerLine.split(',').map((h) => h.trim().replace(/^["']|["']$/g, ''));
     const addressColIndex = headers.indexOf('address');
 
@@ -409,7 +407,7 @@ export class IpService {
     const notesColIndex = headers.indexOf('notes');
 
     const result: IpImportResultDto = {
-      total: lines.length - 1,
+      total: lines.slice(headerIndex + 1).filter(Boolean).length,
       inserted: 0,
       skipped: 0,
       errors: [],
@@ -417,8 +415,11 @@ export class IpService {
 
     const seenInFile = new Set<string>();
 
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = headerIndex + 1; i < lines.length; i++) {
       const rowNum = i + 1; // 1-based index (with header)
+      if (!lines[i]) {
+        continue;
+      }
       const parts = lines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
       const rawAddress = parts[addressColIndex];
       const rawNotes = notesColIndex !== -1 ? parts[notesColIndex] : undefined;
@@ -447,25 +448,23 @@ export class IpService {
       }
       seenInFile.add(rawAddress);
 
-      // Check if already in DB
-      const existing = await this.repo.ip.findByAddress(rawAddress);
-      if (existing) {
-        // Retry-safe bookkeeping: check if created by THIS SAME JOB in an earlier attempt
-        const history = await this.repo.ip.findHistoryByIp(existing.id);
-        const isFromSameJob = history.some(
-          (h) => h.action === 'CREATE' && h.reason?.includes(`job:${jobId}`),
-        );
-
-        if (isFromSameJob) {
-          result.inserted += 1;
-        } else {
-          result.skipped += 1;
-        }
-        continue;
-      }
-
+      let outcome: { outcome: string; reason: string | null };
       try {
-        await this.repo.transaction(async (tx) => {
+        outcome = await this.repo.transaction(async (tx) => {
+          await this.repo.ip.lockImportJob(jobId, tx);
+          const previous = await this.repo.ip.findImportOutcome(jobId, rowNum, tx);
+          if (previous) return previous;
+          const existing = await this.repo.ip.findByAddress(rawAddress, tx);
+          if (existing) {
+            const history = await this.repo.ip.findHistoryByIp(existing.id, tx);
+            const value = history.some(
+              (h) => h.action === 'CREATE' && h.reason === `Bulk CSV import (job:${jobId})`,
+            )
+              ? 'inserted'
+              : 'skipped';
+            await this.repo.ip.recordImportOutcome(jobId, rowNum, value, null, tx);
+            return { outcome: value, reason: null };
+          }
           const created = await this.repo.ip.createIpOnConflictDoNothing(
             {
               address: rawAddress,
@@ -478,8 +477,8 @@ export class IpService {
 
           if (!created) {
             // Concurrent duplicate insertion conflict handled safely by ON CONFLICT DO NOTHING
-            result.skipped += 1;
-            return;
+            await this.repo.ip.recordImportOutcome(jobId, rowNum, 'skipped', null, tx);
+            return { outcome: 'skipped', reason: null };
           }
 
           await this.repo.ip.createHistory(
@@ -496,22 +495,43 @@ export class IpService {
             tx,
           );
 
-          result.inserted += 1;
+          await this.repo.ip.recordImportOutcome(jobId, rowNum, 'inserted', null, tx);
+          return { outcome: 'inserted', reason: null };
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        this.logger.error(
+          `IP import job ${jobId}, row ${rowNum} failed`,
+          err instanceof Error ? err.stack : String(err),
+        );
+        outcome = await this.repo.transaction(async (tx) => {
+          await this.repo.ip.lockImportJob(jobId, tx);
+          const previous = await this.repo.ip.findImportOutcome(jobId, rowNum, tx);
+          if (previous) return previous;
+          await this.repo.ip.recordImportOutcome(
+            jobId,
+            rowNum,
+            'error',
+            'Unable to import row',
+            tx,
+          );
+          return { outcome: 'error', reason: 'Unable to import row' };
+        });
+      }
+      if (outcome.outcome === 'inserted') result.inserted += 1;
+      else if (outcome.outcome === 'skipped') result.skipped += 1;
+      else
         result.errors.push({
           row: rowNum,
           address: rawAddress,
-          reason: err.message ?? 'Database insertion error',
+          reason: outcome.reason ?? 'Unable to import row',
         });
-      }
     }
 
     return result;
   }
 
   async importCsv(csvContent: string, actorId: string): Promise<IpImportResultDto> {
-    return this.processImportJob(csvContent, actorId, 'sync-import');
+    return this.processImportJob(csvContent, actorId, randomUUID());
   }
 
   private mapToDto(ip: schema.IpAddress): IpAddressDto {

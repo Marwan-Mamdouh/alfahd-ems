@@ -78,6 +78,7 @@ describe('Products (e2e)', () => {
           category: data.category!,
           description: data.description ?? null,
           lowStockThreshold: data.lowStockThreshold ?? 10,
+          isSerialized: false,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -118,6 +119,7 @@ describe('Products (e2e)', () => {
         category: 'Routers',
         description: 'Gigabit dual-band wireless router',
         lowStockThreshold: 10,
+        isSerialized: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -129,6 +131,7 @@ describe('Products (e2e)', () => {
         category: 'Cables',
         description: 'Shielded high-speed ethernet cable roll',
         lowStockThreshold: 5,
+        isSerialized: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       },

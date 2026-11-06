@@ -36,6 +36,8 @@ export const envSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().optional(),
     CLOUDINARY_API_KEY: z.string().optional(),
     CLOUDINARY_API_SECRET: z.string().optional(),
+    REPORT_STORAGE_PROVIDER: z.enum(['cloudinary', 'local']).optional(),
+    REPORT_STORAGE_DIR: z.string().min(1).optional(),
     // Attendance configuration
     ATTENDANCE_CUTOFF_TIME: z
       .string()
@@ -55,6 +57,13 @@ export const envSchema = z
     },
   )
   .superRefine((data, ctx) => {
+    if (data.REPORT_STORAGE_PROVIDER === 'local' && !data.REPORT_STORAGE_DIR) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['REPORT_STORAGE_DIR'],
+        message: 'REPORT_STORAGE_DIR is required for local report storage',
+      });
+    }
     if (data.EMAIL_PROVIDER === 'smtp') {
       for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'] as const) {
         if (!data[key]) {
