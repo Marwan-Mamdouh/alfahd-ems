@@ -18,12 +18,6 @@ const STATUS_CONFIG = {
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300",
     dotClassName: "bg-amber-500",
   },
-  ABSENT: {
-    label: "غائب",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300",
-    dotClassName: "bg-red-500",
-  },
 } as const;
 
 export function AttendanceStatusBadge({ status }: AttendanceStatusBadgeProps) {

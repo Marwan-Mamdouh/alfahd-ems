@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Loader2, PackagePlus, Save, X } from "lucide-react";
 
 import type { InventoryItemRow, InventoryItemFormValues } from "./types";
@@ -51,12 +51,6 @@ export function InventoryItemForm({
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
-
-  useEffect(() => {
-    setValues(getInitialValues(item));
-    setErrors({});
-    setSubmitError(null);
-  }, [item]);
 
   function updateField(field: keyof InventoryItemFormValues, value: string) {
     setValues((previous) => ({

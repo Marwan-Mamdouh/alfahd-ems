@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X, CalendarDays } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,6 @@ const DEPARTMENTS = [
 const STATUSES = [
   { value: "ON_TIME", label: "في الموعد" },
   { value: "LATE", label: "متأخر" },
-  { value: "ABSENT", label: "غائب" },
 ];
 
 const fieldClass =

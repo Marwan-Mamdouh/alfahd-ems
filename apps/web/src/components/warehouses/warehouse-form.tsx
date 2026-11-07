@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Loader2, MapPin, Save, X } from "lucide-react";
 
 import type { WarehouseFormValues, WarehouseRow } from "./types";
@@ -55,12 +55,6 @@ export function WarehouseForm({
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
-
-  useEffect(() => {
-    setValues(getInitialValues(warehouse));
-    setErrors({});
-    setSubmitError(null);
-  }, [warehouse]);
 
   function updateField(field: keyof WarehouseFormValues, value: string) {
     setValues((previous) => ({

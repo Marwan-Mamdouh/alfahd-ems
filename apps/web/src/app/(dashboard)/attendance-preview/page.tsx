@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarCheck, Users, Clock3, UserX, CheckCircle2, FlaskConical } from "lucide-react";
+import { CalendarCheck, Users, Clock3, CheckCircle2, FlaskConical } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
 
@@ -38,17 +38,6 @@ const DEMO_ATTENDANCE: AttendanceRow[] = [
     checkOut: "2026-10-15T16:15:00+03:00",
     workingMinutes: 460,
     status: "LATE",
-  },
-  {
-    id: "attendance-3",
-    employeeId: "emp-3",
-    employeeName: "سارة أحمد",
-    department: "CUSTOMER_SERVICE",
-    date: "2026-10-15",
-    checkIn: null,
-    checkOut: null,
-    workingMinutes: null,
-    status: "ABSENT",
   },
   {
     id: "attendance-4",
@@ -93,17 +82,6 @@ const DEMO_ATTENDANCE: AttendanceRow[] = [
     checkOut: "2026-10-14T16:05:00+03:00",
     workingMinutes: 480,
     status: "ON_TIME",
-  },
-  {
-    id: "attendance-8",
-    employeeId: "emp-4",
-    employeeName: "محمود خالد",
-    department: "MANAGEMENT",
-    date: "2026-10-14",
-    checkIn: null,
-    checkOut: null,
-    workingMinutes: null,
-    status: "ABSENT",
   },
 ];
 
@@ -170,7 +148,6 @@ function AttendancePreviewContent() {
       total: filteredRecords.length,
       onTime: filteredRecords.filter((record) => record.status === "ON_TIME").length,
       late: filteredRecords.filter((record) => record.status === "LATE").length,
-      absent: filteredRecords.filter((record) => record.status === "ABSENT").length,
     }),
     [filteredRecords]
   );
@@ -230,7 +207,7 @@ function AttendancePreviewContent() {
       ) : (
         <>
           {/* Statistics */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
               title="إجمالي السجلات"
               value={stats.total}
@@ -252,12 +229,6 @@ function AttendancePreviewContent() {
               className="bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
             />
 
-            <StatCard
-              title="الغياب"
-              value={stats.absent}
-              icon={<UserX className="h-6 w-6" />}
-              className="bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
-            />
           </div>
 
           {/* Records */}

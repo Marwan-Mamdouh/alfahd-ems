@@ -15,6 +15,11 @@ import {
 import { EmployeeForm, type EmployeeFormValues } from "@/components/employees/employee-form";
 
 // Demo data only. No backend requests or persistence.
+const DEMO_WAREHOUSES = [
+  { id: "warehouse-main", name: "المخزن الرئيسي" },
+  { id: "warehouse-cairo", name: "مخزن القاهرة" },
+];
+
 const INITIAL_EMPLOYEES: EmployeeRow[] = [
   {
     id: "demo-1",
@@ -23,8 +28,10 @@ const INITIAL_EMPLOYEES: EmployeeRow[] = [
     phone: "01000000001",
     department: "TECHNICAL",
     role: "TECHNICIAN",
+    warehouseId: "warehouse-main",
     warehouseName: "المخزن الرئيسي",
     status: "ACTIVE",
+    statusChanges: [],
   },
   {
     id: "demo-2",
@@ -33,8 +40,10 @@ const INITIAL_EMPLOYEES: EmployeeRow[] = [
     phone: "01000000002",
     department: "WAREHOUSE",
     role: "WAREHOUSE_STAFF",
+    warehouseId: "warehouse-cairo",
     warehouseName: "مخزن القاهرة",
     status: "ACTIVE",
+    statusChanges: [],
   },
   {
     id: "demo-3",
@@ -43,8 +52,10 @@ const INITIAL_EMPLOYEES: EmployeeRow[] = [
     phone: "01000000003",
     department: "CUSTOMER_SERVICE",
     role: "CS",
+    warehouseId: null,
     warehouseName: null,
     status: "INACTIVE",
+    statusChanges: [],
   },
   {
     id: "demo-4",
@@ -53,8 +64,10 @@ const INITIAL_EMPLOYEES: EmployeeRow[] = [
     phone: "01000000004",
     department: "MANAGEMENT",
     role: "ADMIN",
+    warehouseId: null,
     warehouseName: null,
     status: "ACTIVE",
+    statusChanges: [],
   },
 ];
 
@@ -125,20 +138,46 @@ function EmployeeManagementPreview() {
       throw new Error("البريد الإلكتروني مستخدم بالفعل في بيانات المعاينة.");
     }
 
+    const warehouse = DEMO_WAREHOUSES.find((entry) => entry.id === values.warehouseId);
+    if ((values.role === "TECHNICIAN" || values.warehouseId) && !warehouse) {
+      throw new Error("يرجى اختيار مخزن موجود للفني.");
+    }
+
+    const statusChanged = viewMode === "edit" && selectedEmployee &&
+      values.status !== selectedEmployee.status;
+    const reason = values.statusReason.trim();
+    if (statusChanged && !reason) {
+      throw new Error("سبب تغيير الحالة مطلوب.");
+    }
+
+    const statusChange = statusChanged ? {
+      from: selectedEmployee.status,
+      to: values.status,
+      reason,
+      changedAt: new Date().toISOString(),
+    } : null;
+
     const employeeData = {
       name: values.name,
       email: values.email,
       phone: values.phone || null,
       department: values.department,
       role: values.role,
-      warehouseName: values.warehouseName || null,
+      warehouseId: warehouse?.id ?? null,
+      warehouseName: warehouse?.name ?? null,
       status: values.status,
     };
 
     if (viewMode === "edit" && selectedEmployee) {
       setEmployees((previous) =>
         previous.map((employee) =>
-          employee.id === selectedEmployee.id ? { ...employee, ...employeeData } : employee
+          employee.id === selectedEmployee.id ? {
+            ...employee,
+            ...employeeData,
+            statusChanges: statusChange
+              ? [...employee.statusChanges, statusChange]
+              : employee.statusChanges,
+          } : employee
         )
       );
 
@@ -147,6 +186,7 @@ function EmployeeManagementPreview() {
       const newEmployee: EmployeeRow = {
         id: crypto.randomUUID(),
         ...employeeData,
+        statusChanges: [],
       };
 
       setEmployees((previous) => [newEmployee, ...previous]);
@@ -250,6 +290,7 @@ function EmployeeManagementPreview() {
           <EmployeeForm
             key={viewMode === "edit" ? selectedEmployee?.id : "new-employee"}
             employee={viewMode === "edit" ? selectedEmployee : null}
+            warehouses={DEMO_WAREHOUSES}
             onSubmit={handleEmployeeSubmit}
             onCancel={backToList}
           />

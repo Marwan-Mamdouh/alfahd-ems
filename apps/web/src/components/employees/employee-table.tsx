@@ -13,8 +13,15 @@ export interface EmployeeRow {
   phone: string | null;
   department: string;
   role: string;
+  warehouseId: string | null;
   warehouseName: string | null;
   status: "ACTIVE" | "INACTIVE";
+  statusChanges: {
+    from: EmployeeRow["status"];
+    to: EmployeeRow["status"];
+    reason: string;
+    changedAt: string;
+  }[];
 }
 
 interface EmployeeTableProps {

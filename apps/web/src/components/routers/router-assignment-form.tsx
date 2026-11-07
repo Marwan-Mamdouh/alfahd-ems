@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Loader2, Router as RouterIcon, Save, UserRoundPlus, X } from "lucide-react";
 
 import type { RouterAssignmentFormValues, RouterRow } from "./types";
@@ -59,16 +59,6 @@ export function RouterAssignmentForm({
   );
 
   const canAssignSelectedRouter = selectedRouter?.status === "IN_STOCK";
-
-  useEffect(() => {
-    setValues({
-      routerId: initialRouterId,
-      technicianId: "",
-      notes: "",
-    });
-    setErrors({});
-    setSubmitError(null);
-  }, [initialRouterId]);
 
   function updateField(field: keyof RouterAssignmentFormValues, value: string) {
     setValues((previous) => ({

@@ -37,7 +37,6 @@ export function EmployeeAttendanceHistory({
       total: employeeRecords.length,
       onTime: employeeRecords.filter((record) => record.status === "ON_TIME").length,
       late: employeeRecords.filter((record) => record.status === "LATE").length,
-      absent: employeeRecords.filter((record) => record.status === "ABSENT").length,
     }),
     [employeeRecords]
   );
@@ -67,12 +66,11 @@ export function EmployeeAttendanceHistory({
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             { label: "إجمالي السجلات", value: stats.total },
             { label: "في الموعد", value: stats.onTime },
             { label: "متأخر", value: stats.late },
-            { label: "غائب", value: stats.absent },
           ].map((stat) => (
             <div key={stat.label} className="rounded-xl border bg-muted/30 p-4">
               <p className="text-xs text-muted-foreground">{stat.label}</p>

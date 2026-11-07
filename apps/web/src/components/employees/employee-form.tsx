@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Loader2, Save, X } from "lucide-react";
 
 import type { EmployeeRow } from "./employee-table";
@@ -11,12 +11,14 @@ export interface EmployeeFormValues {
   phone: string;
   department: string;
   role: string;
-  warehouseName: string;
+  warehouseId: string;
   status: "ACTIVE" | "INACTIVE";
+  statusReason: string;
 }
 
 interface EmployeeFormProps {
   employee?: EmployeeRow | null;
+  warehouses: { id: string; name: string }[];
   onSubmit: (values: EmployeeFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
@@ -28,8 +30,9 @@ const EMPTY_VALUES: EmployeeFormValues = {
   phone: "",
   department: "",
   role: "",
-  warehouseName: "",
+  warehouseId: "",
   status: "ACTIVE",
+  statusReason: "",
 };
 
 // Temporary values until the backend contract is confirmed.
@@ -56,8 +59,9 @@ function getInitialValues(employee?: EmployeeRow | null): EmployeeFormValues {
     phone: employee.phone ?? "",
     department: employee.department,
     role: employee.role,
-    warehouseName: employee.warehouseName ?? "",
+    warehouseId: employee.warehouseId ?? "",
     status: employee.status,
+    statusReason: "",
   };
 }
 
@@ -71,6 +75,7 @@ const labelClass = "mb-2 block text-sm font-medium text-foreground";
 
 export function EmployeeForm({
   employee,
+  warehouses,
   onSubmit,
   onCancel,
   isSubmitting = false,
@@ -84,11 +89,7 @@ export function EmployeeForm({
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
-
-  useEffect(() => {
-    setValues(getInitialValues(employee));
-    setSubmitError(null);
-  }, [employee]);
+  const statusChanged = Boolean(employee && values.status !== employee.status);
 
   function updateField<K extends keyof EmployeeFormValues>(field: K, value: EmployeeFormValues[K]) {
     setValues((previous) => ({
@@ -109,7 +110,7 @@ export function EmployeeForm({
       name: values.name.trim(),
       email: values.email.trim().toLowerCase(),
       phone: values.phone.trim(),
-      warehouseName: values.warehouseName.trim(),
+      statusReason: values.statusReason.trim(),
     };
 
     if (!cleanedValues.name || !cleanedValues.email) {
@@ -119,6 +120,19 @@ export function EmployeeForm({
 
     if (!cleanedValues.department || !cleanedValues.role) {
       setSubmitError("يرجى اختيار القسم والدور.");
+      return;
+    }
+
+    if (
+      (cleanedValues.role === "TECHNICIAN" || cleanedValues.warehouseId) &&
+      !warehouses.some((warehouse) => warehouse.id === cleanedValues.warehouseId)
+    ) {
+      setSubmitError("يرجى اختيار مخزن موجود للفني.");
+      return;
+    }
+
+    if (statusChanged && !cleanedValues.statusReason) {
+      setSubmitError("سبب تغيير الحالة مطلوب.");
       return;
     }
 
@@ -239,18 +253,24 @@ export function EmployeeForm({
 
         <div>
           <label htmlFor="employee-warehouse" className={labelClass}>
-            المخزن التابع له
+            المخزن التابع له {values.role === "TECHNICIAN" && "*"}
           </label>
-          <input
+          <select
             id="employee-warehouse"
-            type="text"
-            value={values.warehouseName}
-            onChange={(e) => updateField("warehouseName", e.target.value)}
-            placeholder="اسم المخزن"
+            required={values.role === "TECHNICIAN"}
+            value={values.warehouseId}
+            onChange={(e) => updateField("warehouseId", e.target.value)}
             className={inputClass}
-          />
+          >
+            <option value="">اختر المخزن</option>
+            {warehouses.map((warehouse) => (
+              <option key={warehouse.id} value={warehouse.id}>
+                {warehouse.name}
+              </option>
+            ))}
+          </select>
           <p className="mt-1 text-xs text-muted-foreground">
-            مؤقتًا لحين ربط قائمة المخازن الفعلية.
+            قائمة مخازن تجريبية — اختيار مخزن مطلوب للفنيين.
           </p>
         </div>
 
@@ -269,6 +289,37 @@ export function EmployeeForm({
           </select>
         </div>
       </div>
+
+      {statusChanged && (
+        <div>
+          <label htmlFor="employee-status-reason" className={labelClass}>
+            سبب تغيير الحالة *
+          </label>
+          <input
+            id="employee-status-reason"
+            required
+            value={values.statusReason}
+            onChange={(event) => updateField("statusReason", event.target.value)}
+            className={inputClass}
+          />
+        </div>
+      )}
+
+      {employee && employee.statusChanges.length > 0 && (
+        <section aria-label="سجل تغييرات الحالة" className="flex flex-col gap-2">
+          <h3 className="font-semibold">سجل تغييرات الحالة — معاينة فقط</h3>
+          <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+            {employee.statusChanges.map((change, index) => (
+              <li key={index}>
+                <time dateTime={change.changedAt}>
+                  {new Date(change.changedAt).toLocaleString("ar-EG")}
+                </time>
+                {" — "}{change.from}{" → "}{change.to}{": "}{change.reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {submitError && (
         <div
