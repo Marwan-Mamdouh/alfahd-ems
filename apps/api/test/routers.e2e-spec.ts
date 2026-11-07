@@ -119,6 +119,16 @@ describe('Routers (e2e)', () => {
         };
       },
       createRouter: async (data: Partial<Router>) => {
+        const existing = routerStore.find(
+          (r) => r.serialNumber.toLowerCase() === data.serialNumber!.toLowerCase(),
+        );
+        if (existing) {
+          const err = new Error(
+            'duplicate key value violates unique constraint "routers_serial_number_unique"',
+          );
+          (err as any).code = '23505';
+          throw err;
+        }
         const created: Router = {
           id: data.id ?? '77777777-7777-4777-8777-777777777777',
           serialNumber: data.serialNumber!,
@@ -1496,6 +1506,50 @@ describe('Routers (e2e)', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.message).toContain('Insufficient stock in warehouse');
+    });
+
+    it('rejects competing concurrent retries with identical serial numbers (one 201, one 409 Conflict)', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const serialNumber = 'SN-COMPETING-RETRY-001';
+
+      const dto1 = makeCreateRouterDto({
+        serialNumber,
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+      const dto2 = makeCreateRouterDto({
+        serialNumber,
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+
+      const initialStock =
+        stockStore.find(
+          (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+        )?.quantity ?? 0;
+
+      // Execute both registrations concurrently with identical serial number
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto1),
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto2),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      expect(statuses).toEqual([201, 409]);
+
+      // Verify stock was incremented only once
+      const finalStock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      )?.quantity;
+      expect(finalStock).toBe(initialStock + 1);
+
+      // Verify only one router exists with this serial
+      const matchingRouters = routerStore.filter(
+        (r) => r.serialNumber.toLowerCase() === serialNumber.toLowerCase(),
+      );
+      expect(matchingRouters).toHaveLength(1);
     });
   });
 

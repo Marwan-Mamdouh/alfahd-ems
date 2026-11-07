@@ -257,6 +257,97 @@ describe('RoutersService', () => {
       );
     });
 
+    it('reconciles an UNDER_REPAIR opening unit with ADJUSTMENT movement (-1), condition history and no custody assignment', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 3 });
+      mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(1);
+      mockRoutersRepo.createRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'UNDER_REPAIR',
+      });
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({});
+
+      await service.create(
+        {
+          serialNumber: 'SN-REPAIR-OPENING',
+          productId: mockProduct.id,
+          warehouseId: mockWarehouse.id,
+          isNewReceipt: false,
+          physicalCondition: 'UNDER_REPAIR',
+          notes: 'Inspection found burned capacitor',
+        },
+        'admin-id',
+      );
+
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          movementType: 'ADJUSTMENT',
+          quantity: 1,
+          notes: expect.stringContaining(
+            'Explicit reconciliation: opening stock unit registered as UNDER_REPAIR',
+          ),
+        }),
+        -1,
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fromCondition: 'SERVICEABLE',
+          toCondition: 'UNDER_REPAIR',
+        }),
+        expect.anything(),
+      );
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+    });
+
+    it('maps a database unique constraint violation (code 23505) to ConflictException during concurrent retry', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockRoutersRepo.createRouter.mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'duplicate key value violates unique constraint "routers_serial_number_unique"',
+          ),
+          { code: '23505' },
+        ),
+      );
+
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-RACE-SERIAL',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: true,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects retrying an already registered serial without altering inventory stock or movements', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(mockRouter);
+
+      await expect(
+        service.create(
+          {
+            serialNumber: mockRouter.serialNumber,
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: false,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(mockRoutersRepo.createRouter).not.toHaveBeenCalled();
+      expect(mockInventoryRepo.recordMovementWithDelta).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
+    });
+
     it('receives a new router into warehouse and atomically increments inventory (isNewReceipt=true)', async () => {
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);

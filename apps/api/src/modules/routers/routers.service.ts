@@ -188,7 +188,20 @@ export class RoutersService {
       return this.mapToDto(router, null);
     };
 
-    return externalTx ? run(externalTx) : this.repo.transaction(run);
+    try {
+      return await (externalTx ? run(externalTx) : this.repo.transaction(run));
+    } catch (err: any) {
+      if (
+        err?.code === '23505' ||
+        err?.cause?.code === '23505' ||
+        err?.message?.includes('duplicate key value violates unique constraint')
+      ) {
+        throw new ConflictException(
+          `A router with serial number "${trimmedSerial}" already exists`,
+        );
+      }
+      throw err;
+    }
   }
 
   async findById(id: string): Promise<RouterDto> {
