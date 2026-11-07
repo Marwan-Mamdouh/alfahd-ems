@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq } from 'drizzle-orm';
+import { ConflictException } from '@nestjs/common';
 import * as schema from '../src/database/schema/index.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
 import { ProductsRepository } from '../src/modules/repository/repositories/products.repository.js';
@@ -887,6 +888,114 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
       ).toHaveLength(physicalCondition === 'SERVICEABLE' ? 0 : 1);
     },
   );
+
+  it('rejects competing concurrent retries with the same serial number and avoids duplicate movements', async () => {
+    const productId = await product();
+    const serialNumber = randomUUID();
+    const outcomes = await Promise.allSettled([
+      routers.create({ productId, warehouseId, serialNumber, isNewReceipt: true }, actorId),
+      routers.create({ productId, warehouseId, serialNumber, isNewReceipt: true }, actorId),
+    ]);
+    expect(outcomes.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    const rejected = outcomes.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(ConflictException);
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    const movements = await db
+      .select()
+      .from(schema.stockMovements)
+      .where(eq(schema.stockMovements.productId, productId));
+    expect(movements).toHaveLength(1);
+  });
+
+  it('verifies complete reconciliation evidence when onboarding damaged opening units', async () => {
+    const productId = await product();
+    const damagedSerial = randomUUID();
+    const serviceableSerial = randomUUID();
+
+    // 1. Establish opening stock of 2 units
+    await inventory.adjustStock({
+      productId,
+      warehouseId,
+      newQuantity: 2,
+      notes: 'opening count for reconciliation evidence',
+      responsibleUserId: actorId,
+    });
+
+    // 2. Onboard 1 damaged opening unit
+    const damagedRouter = await routers.create(
+      {
+        productId,
+        warehouseId,
+        serialNumber: damagedSerial,
+        physicalCondition: 'DAMAGED',
+        notes: 'Broken chassis on opening inspection',
+      },
+      actorId,
+    );
+
+    // 3. Onboard 1 serviceable opening unit
+    const serviceableRouter = await routers.create(
+      {
+        productId,
+        warehouseId,
+        serialNumber: serviceableSerial,
+        physicalCondition: 'SERVICEABLE',
+      },
+      actorId,
+    );
+
+    // 4. Verify opening stock adjusted down by 1 (2 opening - 1 damaged = 1 serviceable stock remaining)
+    const stock = await inventoryRepo.getStock(warehouseId, productId);
+    expect(stock?.quantity).toBe(1);
+
+    // 5. Verify registration capacity is now exhausted (1 stock - 1 usable registered = 0)
+    await expect(
+      routers.create(
+        {
+          productId,
+          warehouseId,
+          serialNumber: randomUUID(),
+          physicalCondition: 'SERVICEABLE',
+        },
+        actorId,
+      ),
+    ).rejects.toThrow(ConflictException);
+
+    // 6. Verify damaged router properties and custody
+    expect(damagedRouter.physicalCondition).toBe('DAMAGED');
+    expect(damagedRouter.status).toBe('AVAILABLE');
+    const damagedCustody = await repo.routers.findActiveAssignment(damagedRouter.id);
+    expect(damagedCustody).toBeUndefined();
+
+    // 7. Verify serviceable router custody
+    const serviceableCustody = await repo.routers.findActiveAssignment(serviceableRouter.id);
+    expect(serviceableCustody?.holderType).toBe('WAREHOUSE');
+
+    // 8. Verify condition history audit evidence for damaged router
+    const condHistory = await repo.routers.findConditionHistory(damagedRouter.id);
+    expect(condHistory).toHaveLength(1);
+    expect(condHistory[0]).toMatchObject({
+      fromCondition: 'SERVICEABLE',
+      toCondition: 'DAMAGED',
+      reason: 'Broken chassis on opening inspection',
+      changedBy: actorId,
+    });
+
+    // 9. Verify movement audit evidence: exactly 1 ADJUSTMENT movement for reconciliation
+    const movements = await db
+      .select()
+      .from(schema.stockMovements)
+      .where(eq(schema.stockMovements.productId, productId));
+    const reconciliationMovements = movements.filter(
+      (m) =>
+        m.movementType === 'ADJUSTMENT' &&
+        m.notes?.includes('Explicit reconciliation: opening stock unit registered as DAMAGED'),
+    );
+    expect(reconciliationMovements).toHaveLength(1);
+    expect(reconciliationMovements[0].quantity).toBe(1);
+    expect(reconciliationMovements[0].responsibleUserId).toBe(actorId);
+  });
 
   it.each(['inbound', 'outbound', 'return', 'transfer'] as const)(
     'rejects generic %s waiting behind first serialized receipt',
