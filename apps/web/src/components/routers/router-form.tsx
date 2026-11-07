@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Loader2, Router as RouterIcon, Save, X } from "lucide-react";
 
 import type { RouterFormValues, RouterRow } from "./types";
@@ -52,12 +52,6 @@ export function RouterForm({
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
-
-  useEffect(() => {
-    setValues(getInitialValues(router));
-    setErrors({});
-    setSubmitError(null);
-  }, [router]);
 
   function updateField(field: keyof RouterFormValues, value: string) {
     setValues((previous) => ({
