@@ -61,7 +61,7 @@ Do NOT propose interfaces yet. After the file is written, ask the user: "Which o
 
 ### 3. Grilling loop
 
-Once the user picks a candidate, call the Skill tool with "grilling" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.
+Once the user picks a candidate, interview them directly. Ask one focused question at a time, starting with constraints and dependencies, then explore the deepened module's interface, what sits behind the seam, trade-offs, and which tests survive. Check the code when it can answer a question, challenge assumptions, and summarize decisions and unresolved points before moving on. Do not assume a separate interviewing skill is installed.
 
 Side effects happen inline as decisions crystallize; call the Skill tool with "domain-modeling" to keep the domain model current as you go:
 

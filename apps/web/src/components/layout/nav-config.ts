@@ -59,9 +59,10 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         label: "الحضور",
-        href: "/attendance-preview",
+        href: "/attendance",
         icon: "CalendarCheck",
         permission: "attendance.view",
+        comingSoon: true,
       },
     ],
   },
@@ -70,21 +71,24 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       {
         label: "المخازن",
-        href: "/warehouses-preview",
+        href: "/warehouses",
         icon: "Warehouse",
         permission: "warehouses.manage",
+        comingSoon: true,
       },
       {
         label: "المخزون",
-        href: "/inventory-preview",
+        href: "/inventory",
         icon: "Package",
         permission: "inventory.manage",
+        comingSoon: true,
       },
       {
         label: "الراوترات",
-        href: "/routers-preview",
+        href: "/routers",
         icon: "Router",
         permission: "routers.manage",
+        comingSoon: true,
       },
       {
         label: "عناوين IP",
@@ -98,7 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "الإدارة",
     items: [
-      { label: "الموظفون", href: "/employees-preview", icon: "Users", permission: "employees.manage" },
+      { label: "الموظفون", href: "/employees", icon: "Users", permission: "employees.manage" },
       {
         label: "التقارير",
         href: "/reports",
