@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { getQueueToken } from '@nestjs/bullmq';
 import request from 'supertest';
@@ -289,20 +289,31 @@ describe('Routers (e2e)', () => {
         let stock = stockStore.find(
           (s) => s.warehouseId === movement.warehouseId && s.productId === movement.productId,
         );
-        if (!stock) {
-          stock = {
-            id: 'inv-stock-delta',
-            warehouseId: movement.warehouseId,
-            productId: movement.productId,
-            quantity: Math.max(0, delta),
-            updatedAt: new Date(),
-          };
-          stockStore.push(stock);
-        } else {
-          stock.quantity = Math.max(0, stock.quantity + delta);
+        if (delta < 0) {
+          const currentQty = stock?.quantity ?? 0;
+          if (!stock || currentQty + delta < 0) {
+            throw new BadRequestException(
+              `Insufficient stock in warehouse: available ${currentQty}, requested ${Math.abs(delta)}`,
+            );
+          }
+          stock.quantity += delta;
           stock.updatedAt = new Date();
+        } else if (delta > 0) {
+          if (!stock) {
+            stock = {
+              id: 'inv-stock-delta-' + Math.random().toString(36).slice(2),
+              warehouseId: movement.warehouseId,
+              productId: movement.productId,
+              quantity: delta,
+              updatedAt: new Date(),
+            };
+            stockStore.push(stock);
+          } else {
+            stock.quantity += delta;
+            stock.updatedAt = new Date();
+          }
         }
-        return { inventory: stock, movement: { id: 'mov-1', ...movement, createdAt: new Date() } };
+        return { inventory: stock!, movement: { id: 'mov-1', ...movement, createdAt: new Date() } };
       },
     },
   };
@@ -1393,6 +1404,98 @@ describe('Routers (e2e)', () => {
 
       const statuses = [res1.status, res2.status].sort();
       expect(statuses).toEqual([200, 409]);
+    });
+
+    it('concurrent receipts preserve both increments on existing stock rows', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      // Pre-seed stock row with quantity 5
+      const existing = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      );
+      if (existing) {
+        existing.quantity = 5;
+      } else {
+        stockStore.push({
+          id: 'inv-existing-1',
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          productId: PRODUCT_ROUTER_ID,
+          quantity: 5,
+          updatedAt: new Date(),
+        });
+      }
+
+      const dto1 = makeCreateRouterDto({
+        serialNumber: 'SN-CONCURRENT-EXISTING-001',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+      const dto2 = makeCreateRouterDto({
+        serialNumber: 'SN-CONCURRENT-EXISTING-002',
+        warehouseId: WAREHOUSE_ACTIVE_ID,
+        productId: PRODUCT_ROUTER_ID,
+        isNewReceipt: true,
+      });
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto1),
+        request(app.getHttpServer()).post('/routers').set(auth).send(dto2),
+      ]);
+
+      expect(res1.status).toBe(201);
+      expect(res2.status).toBe(201);
+
+      const finalStock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === PRODUCT_ROUTER_ID,
+      )?.quantity;
+
+      expect(finalStock).toBe(7);
+    });
+
+    it('rejects outbound movement when stock is zero/insufficient', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+      const targetRouterId = '22334455-6677-8899-aabb-ccddeeff0011';
+
+      // Set stock to 0 for this product in active warehouse
+      const stock = stockStore.find(
+        (s) => s.warehouseId === WAREHOUSE_ACTIVE_ID && s.productId === ZERO_STOCK_PRODUCT_ID,
+      );
+      if (stock) {
+        stock.quantity = 0;
+      } else {
+        stockStore.push({
+          id: 'inv-zero-1',
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          productId: ZERO_STOCK_PRODUCT_ID,
+          quantity: 0,
+          updatedAt: new Date(),
+        });
+      }
+
+      routerStore.push(
+        makeRouter({
+          id: targetRouterId,
+          serialNumber: 'SN-NO-STOCK-ROUTER',
+          productId: ZERO_STOCK_PRODUCT_ID,
+          warehouseId: WAREHOUSE_ACTIVE_ID,
+          status: 'AVAILABLE',
+          physicalCondition: 'SERVICEABLE',
+        }),
+      );
+
+      const assignDto = makeAssignRouterDto({
+        technicianId: TECH_USER_ID,
+        notes: 'Assign with zero stock',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post(`/routers/${targetRouterId}/assign`)
+        .set(auth)
+        .send(assignDto);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('Insufficient stock in warehouse');
     });
   });
 
