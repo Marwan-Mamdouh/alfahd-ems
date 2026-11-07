@@ -1108,6 +1108,166 @@ describe('RoutersService', () => {
         mockExternalTx,
       );
     });
+
+    it('rolls back completely when an injected failure occurs during assign', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue(mockRouter);
+      mockInventoryRepo.recordMovementWithDelta.mockRejectedValueOnce(
+        new Error('Injected stock reduction failure'),
+      );
+
+      await expect(
+        service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id'),
+      ).rejects.toThrow('Injected stock reduction failure');
+    });
+
+    it('executes transition entirely within externalTx when provided', async () => {
+      const mockExternalTx = {} as any;
+      const returnedRouter = { ...mockRouter, status: 'RETURNED' as const };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(returnedRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockRoutersRepo.updateRouter.mockResolvedValue({ ...returnedRouter, status: 'AVAILABLE' });
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockRoutersRepo.createStatusHistory.mockResolvedValue({} as any);
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(mockAssignment);
+
+      await service.transition(
+        mockRouter.id,
+        {
+          status: 'AVAILABLE',
+          reason: 'Inspection passed',
+          targetWarehouseId: mockWarehouse.id,
+        },
+        'admin-id',
+        mockExternalTx,
+      );
+
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.findByIdForUpdate).toHaveBeenCalledWith(mockRouter.id, mockExternalTx);
+      expect(mockWarehousesRepo.findByIdForUpdate).toHaveBeenCalledWith(
+        mockWarehouse.id,
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        1,
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.updateRouter).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.createStatusHistory).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+    });
+
+    it('rolls back completely when an injected failure occurs during transition', async () => {
+      const returnedRouter = { ...mockRouter, status: 'RETURNED' as const };
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(returnedRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockRoutersRepo.updateRouter.mockResolvedValue({ ...returnedRouter, status: 'AVAILABLE' });
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockRoutersRepo.createStatusHistory.mockRejectedValueOnce(
+        new Error('Injected status history audit failure'),
+      );
+
+      await expect(
+        service.transition(
+          mockRouter.id,
+          {
+            status: 'AVAILABLE',
+            reason: 'Inspection passed',
+            targetWarehouseId: mockWarehouse.id,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow('Injected status history audit failure');
+    });
+
+    it('executes updateCondition entirely within externalTx when provided', async () => {
+      const mockExternalTx = {} as any;
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockRoutersRepo.createConditionHistory.mockResolvedValue({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'DAMAGED',
+      });
+      mockRoutersRepo.findActiveAssignment.mockResolvedValue(null);
+
+      await service.updateCondition(
+        mockRouter.id,
+        {
+          physicalCondition: 'DAMAGED',
+          reason: 'Dropped during inspection',
+        },
+        'admin-id',
+        mockExternalTx,
+      );
+
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.findByIdForUpdate).toHaveBeenCalledWith(mockRouter.id, mockExternalTx);
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        -1,
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.releaseActiveAssignment).toHaveBeenCalledWith(
+        mockRouter.id,
+        expect.any(Date),
+        mockExternalTx,
+      );
+    });
+
+    it('rolls back completely when an injected failure occurs during updateCondition', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockRoutersRepo.createConditionHistory.mockRejectedValueOnce(
+        new Error('Injected condition history audit failure'),
+      );
+
+      await expect(
+        service.updateCondition(
+          mockRouter.id,
+          {
+            physicalCondition: 'DAMAGED',
+            reason: 'Dropped during inspection',
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow('Injected condition history audit failure');
+    });
+
+    it('rejects and aborts when inventory recordMovementWithDelta throws BadRequestException (insufficient stock)', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockRoutersRepo.updateRouter.mockResolvedValue(mockRouter);
+      mockInventoryRepo.recordMovementWithDelta.mockRejectedValueOnce(
+        new BadRequestException('Insufficient stock in warehouse: available 0, requested 1'),
+      );
+
+      await expect(
+        service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('exportRouterReport', () => {

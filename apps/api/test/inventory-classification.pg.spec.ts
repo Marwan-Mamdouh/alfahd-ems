@@ -965,4 +965,81 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
     expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('TECHNICIAN');
     expect(await repo.routers.findStatusHistory(router.id)).toHaveLength(0);
   });
+
+  it('rolls back assignment, stock and custody when assignment audit or late step fails', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    const original = repo.routers.createAssignment.bind(repo.routers);
+    repo.routers.createAssignment = async () => {
+      throw new Error('synthetic assignment failure');
+    };
+    try {
+      await expect(routers.assign(router.id, { technicianId }, actorId)).rejects.toThrow(
+        'synthetic assignment failure',
+      );
+    } finally {
+      repo.routers.createAssignment = original;
+    }
+    expect((await routers.findById(router.id)).status).toBe('AVAILABLE');
+    expect((await repo.routers.findActiveAssignment(router.id))?.holderType).toBe('WAREHOUSE');
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+    expect(await repo.routers.findAssignmentsByRouter(router.id)).toHaveLength(1);
+  });
+
+  it('rolls back condition change, location and custody when condition audit fails', async () => {
+    const productId = await product();
+    const router = await routers.create(
+      { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    const original = repo.routers.createConditionHistory.bind(repo.routers);
+    repo.routers.createConditionHistory = async () => {
+      throw new Error('synthetic condition audit failure');
+    };
+    try {
+      await expect(
+        routers.updateCondition(
+          router.id,
+          { physicalCondition: 'DAMAGED', reason: 'Synthetic damage' },
+          actorId,
+        ),
+      ).rejects.toThrow('synthetic condition audit failure');
+    } finally {
+      repo.routers.createConditionHistory = original;
+    }
+    expect((await routers.findById(router.id)).physicalCondition).toBe('SERVICEABLE');
+    expect(await repo.routers.findConditionHistory(router.id)).toHaveLength(0);
+    expect((await inventoryRepo.getStock(warehouseId, productId))?.quantity).toBe(1);
+  });
+
+  it('rejects outbound movement on insufficient stock without recording movement or zero-stock row', async () => {
+    const productId = await product();
+    const targetWh = randomUUID();
+    await db.insert(schema.warehouses).values({ id: targetWh, name: 'Synthetic zero stock' });
+
+    await expect(
+      inventoryRepo.recordMovementWithDelta(
+        {
+          warehouseId: targetWh,
+          productId,
+          movementType: 'OUTBOUND_TECHNICIAN',
+          quantity: 1,
+          responsibleUserId: actorId,
+        },
+        -1,
+      ),
+    ).rejects.toThrow(/Insufficient stock in warehouse/);
+
+    const stock = await inventoryRepo.getStock(targetWh, productId);
+    expect(stock).toBeUndefined();
+
+    const movements = await db
+      .select()
+      .from(schema.stockMovements)
+      .where(eq(schema.stockMovements.warehouseId, targetWh));
+    expect(movements).toHaveLength(0);
+  });
 });

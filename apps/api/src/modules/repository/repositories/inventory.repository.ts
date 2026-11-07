@@ -225,21 +225,79 @@ export class InventoryRepository extends BaseRepository<
         );
       }
 
-      const [inventory] = await client
-        .insert(schema.warehouseInventory)
-        .values({
+      let inventory: WarehouseInventory;
+
+      if (delta < 0) {
+        // Outbound movement: lock inventory row and strictly enforce sufficient stock
+        const [existing] = await client
+          .select()
+          .from(schema.warehouseInventory)
+          .where(
+            and(
+              eq(schema.warehouseInventory.warehouseId, movement.warehouseId),
+              eq(schema.warehouseInventory.productId, movement.productId),
+            ),
+          )
+          .for('update')
+          .limit(1);
+
+        const currentQty = existing?.quantity ?? 0;
+        if (!existing || currentQty + delta < 0) {
+          throw new BadRequestException(
+            `Insufficient stock in warehouse: available ${currentQty}, requested ${Math.abs(delta)}`,
+          );
+        }
+
+        const [updated] = await client
+          .update(schema.warehouseInventory)
+          .set({
+            quantity: sql`${schema.warehouseInventory.quantity} + ${delta}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.warehouseInventory.id, existing.id))
+          .returning();
+
+        inventory = updated;
+      } else if (delta > 0) {
+        // Inbound movement: atomic upsert with relative delta
+        const [upserted] = await client
+          .insert(schema.warehouseInventory)
+          .values({
+            warehouseId: movement.warehouseId,
+            productId: movement.productId,
+            quantity: delta,
+          })
+          .onConflictDoUpdate({
+            target: [schema.warehouseInventory.warehouseId, schema.warehouseInventory.productId],
+            set: {
+              quantity: sql`${schema.warehouseInventory.quantity} + ${delta}`,
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+
+        inventory = upserted;
+      } else {
+        // Delta 0: keep current inventory
+        const [existing] = await client
+          .select()
+          .from(schema.warehouseInventory)
+          .where(
+            and(
+              eq(schema.warehouseInventory.warehouseId, movement.warehouseId),
+              eq(schema.warehouseInventory.productId, movement.productId),
+            ),
+          )
+          .limit(1);
+
+        inventory = existing ?? {
+          id: 'temp',
           warehouseId: movement.warehouseId,
           productId: movement.productId,
-          quantity: Math.max(0, delta),
-        })
-        .onConflictDoUpdate({
-          target: [schema.warehouseInventory.warehouseId, schema.warehouseInventory.productId],
-          set: {
-            quantity: sql`GREATEST(0, ${schema.warehouseInventory.quantity} + ${delta})`,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
+          quantity: 0,
+          updatedAt: new Date(),
+        };
+      }
 
       const [createdMovement] = await client
         .insert(schema.stockMovements)
