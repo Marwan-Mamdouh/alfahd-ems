@@ -301,6 +301,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     };
 
     const dbStub = {
+      transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbStub)),
       select: vi.fn((fields?: any) => ({
         from: vi.fn((table: any) => ({
           innerJoin: vi.fn(() => ({
@@ -314,32 +315,36 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
                 }));
             }),
           })),
-          where: vi.fn((whereClause: any) => ({
-            limit: vi.fn(async (count?: number) => {
+          where: vi.fn((whereClause: any) => {
+            const limitFn = vi.fn(async (count?: number) => {
               const conditions = extractConditions(whereClause);
               const store = getTargetStore(table);
               const rows = store.filter((item) => matchesRow(item, conditions));
               return count !== undefined ? rows.slice(0, count) : rows;
-            }),
-            orderBy: vi.fn(() => ({
-              limit: vi.fn((limit: number) => ({
-                offset: vi.fn(async () => {
-                  const conditions = extractConditions(whereClause);
-                  return usersStore.filter((u) => matchesRow(u, conditions)).slice(0, limit);
-                }),
+            });
+            return {
+              limit: limitFn,
+              for: vi.fn(() => ({ limit: limitFn })),
+              orderBy: vi.fn(() => ({
+                limit: vi.fn((limit: number) => ({
+                  offset: vi.fn(async () => {
+                    const conditions = extractConditions(whereClause);
+                    return usersStore.filter((u) => matchesRow(u, conditions)).slice(0, limit);
+                  }),
+                })),
               })),
-            })),
-            then: async (resolve: (r: any[]) => void) => {
-              const conditions = extractConditions(whereClause);
-              if (fields && fields.value) {
-                return resolve([
-                  { value: usersStore.filter((u) => matchesRow(u, conditions)).length },
-                ]);
-              }
-              const store = getTargetStore(table);
-              return resolve(store.filter((item) => matchesRow(item, conditions)));
-            },
-          })),
+              then: async (resolve: (r: any[]) => void) => {
+                const conditions = extractConditions(whereClause);
+                if (fields && fields.value) {
+                  return resolve([
+                    { value: usersStore.filter((u) => matchesRow(u, conditions)).length },
+                  ]);
+                }
+                const store = getTargetStore(table);
+                return resolve(store.filter((item) => matchesRow(item, conditions)));
+              },
+            };
+          }),
           limit: vi.fn(async (count?: number) => {
             const store = getTargetStore(table);
             return count !== undefined ? store.slice(0, count) : store;

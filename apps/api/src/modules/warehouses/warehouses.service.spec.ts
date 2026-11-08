@@ -215,5 +215,28 @@ describe('WarehousesService', () => {
       await expect(service.remove(mockWarehouse.id)).rejects.toThrow(ConflictException);
       expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
     });
+
+    it('should throw ConflictException if warehouse has assigned staff or technicians', async () => {
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockWarehousesRepo.canDeleteWarehouse.mockResolvedValue({
+        canDelete: false,
+        reason: 'Cannot delete warehouse with 3 assigned employee(s). Reassign staff first.',
+      });
+
+      await expect(service.remove(mockWarehouse.id)).rejects.toThrow(ConflictException);
+      expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException if warehouse has active router custody assignments', async () => {
+      mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
+      mockWarehousesRepo.canDeleteWarehouse.mockResolvedValue({
+        canDelete: false,
+        reason:
+          'Cannot deactivate warehouse with 1 active router custody assignment(s). Release custody first.',
+      });
+
+      await expect(service.remove(mockWarehouse.id)).rejects.toThrow(ConflictException);
+      expect(mockWarehousesRepo.softDeactivate).not.toHaveBeenCalled();
+    });
   });
 });

@@ -20,7 +20,7 @@ Derived from **SOW Section 2.1.6, Section 4.1, Section 6** and **CRM SRS Section
 * **Cross-Module Integration (M2b Routers & Atomic Writes):**
   * In Milestone M2b (Issues #51 & #52), `RoutersService` integrates with `InventoryRepository` using caller-owned transactions (`tx`).
   * `getStockForUpdate(warehouseId, productId, tx)` acquires pessimistic row locks (`FOR UPDATE`) on inventory balances during router onboarding, assignment, and condition updates.
-  * `recordMovementWithDelta(movement, delta, tx)` atomically applies relative stock deltas using SQL `GREATEST(0, warehouse_inventory.quantity + delta)` alongside `stock_movements` ledger inserts within the same transaction. This guarantees asset creation, custody assignments, condition history, and stock movements commit or roll back together atomically.
+  * `recordMovementWithDelta(movement, delta, tx)` locks the warehouse row (`FOR UPDATE`) to validate active status against concurrent deactivation, locks the inventory row on outbound operations (`delta < 0`), strictly rejects insufficient stock with `BadRequestException` (no negative clamping), and atomically updates inventory balances alongside `stock_movements` ledger inserts within the same transaction. This guarantees asset creation, custody assignments, condition history, and stock movements commit or roll back together atomically.
 * **Protection of Serialized SKUs from Quantity-Only Operations (Issue #56):**
   * In accordance with `docs/contracts/m2b-supply-implementation.md` (§5.3 line 171), serialized router products are strictly protected from generic quantity-only inventory operations (`receiveInbound`, `issueOutbound`, `receiveReturn`, `transferStock`, and `adjustStock`).
   * Classification is authoritative: products are identified as serialized via category (`Routers`, `Router`), SKU prefix/naming (`RTR-`), or presence of registered router assets in the database (`countByProductId > 0`).
@@ -111,7 +111,7 @@ export type NewStockMovement = typeof stockMovements.$inferInsert;
 * `getStockForUpdate(warehouseId, productId, tx?)`: Fetches stock row with pessimistic row-level locking (`FOR UPDATE`) inside an active transaction.
 * `findManyInventory(params)`: Returns paginated stock balances joined with product details (SKU, name, category, lowStockThreshold) and warehouse details.
 * `recordMovementInTransaction(movement, newQuantity, tx?)`: Atomically upserts `warehouse_inventory` and inserts into `stock_movements`, supporting caller-owned transactions.
-* `recordMovementWithDelta(movement, delta, tx?)`: Atomically modifies `warehouse_inventory` using relative SQL deltas (`GREATEST(0, quantity + delta)`) on conflict, preventing race conditions, and inserts into `stock_movements`.
+* `recordMovementWithDelta(movement, delta, tx?)`: Atomically verifies active warehouse status under row lock, strictly enforces available stock on outbound movements without negative clamping, updates `warehouse_inventory`, and inserts into `stock_movements`.
 * `executeTransferInTransaction(...)`: Atomically deducts from source warehouse, adds to destination warehouse, and records two transfer movements.
 * `findManyMovements(params)`: Queries paginated movement audit logs with filters (`warehouseId`, `productId`, `movementType`, `technicianId`).
 * `findMovementById(id)`: Fetches a single audit transaction record.
