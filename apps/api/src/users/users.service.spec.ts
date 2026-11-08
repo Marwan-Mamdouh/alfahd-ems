@@ -51,6 +51,9 @@ describe('UsersService', () => {
         from: vi.fn(() => ({
           where: vi.fn(() => ({
             limit: vi.fn().mockResolvedValue([baseUser]),
+            for: vi.fn(() => ({
+              limit: vi.fn().mockResolvedValue([{ id: 'warehouse-123', isActive: true }]),
+            })),
             orderBy: vi.fn(() => ({
               limit: vi.fn(() => ({ offset: vi.fn().mockResolvedValue([baseUser]) })),
             })),
@@ -58,6 +61,7 @@ describe('UsersService', () => {
           })),
         })),
       })),
+      transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbMock)),
       insert: vi.fn(() => ({
         values: vi.fn((vals: Record<string, unknown>) => ({
           returning: vi.fn().mockResolvedValue([{ ...baseUser, ...vals }]),
@@ -181,6 +185,65 @@ describe('UsersService', () => {
       ).rejects.toThrow('Old password is incorrect');
 
       expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('employee warehouse assignment validation', () => {
+    it('rejects createEmployee with BadRequestException when assigned warehouse is inactive', async () => {
+      // First select: duplicate email check (returns empty [])
+      // Second select: warehouse check (returns inactive warehouse)
+      let selectCount = 0;
+      dbMock.select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => {
+            selectCount++;
+            if (selectCount === 1) {
+              return { limit: vi.fn().mockResolvedValue([]) };
+            }
+            return {
+              for: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue([{ id: 'wh-inactive', isActive: false }]),
+              })),
+            };
+          }),
+        })),
+      }));
+
+      await expect(
+        service.createEmployee({
+          name: 'Technician Test',
+          email: 'tech@alfahd.local',
+          role: Role.TECHNICIAN,
+          assignedWarehouseId: 'wh-inactive',
+        }),
+      ).rejects.toThrow('Cannot assign employee to a deactivated warehouse');
+    });
+
+    it('rejects updateEmployee with BadRequestException when assigned warehouse is inactive', async () => {
+      // First select: findRowOrThrow (returns user)
+      // Second select: warehouse check (returns inactive warehouse)
+      let selectCount = 0;
+      dbMock.select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => {
+            selectCount++;
+            if (selectCount === 1) {
+              return { limit: vi.fn().mockResolvedValue([baseUser]) };
+            }
+            return {
+              for: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue([{ id: 'wh-inactive', isActive: false }]),
+              })),
+            };
+          }),
+        })),
+      }));
+
+      await expect(
+        service.updateEmployee('user-1', {
+          assignedWarehouseId: 'wh-inactive',
+        }),
+      ).rejects.toThrow('Cannot assign employee to a deactivated warehouse');
     });
   });
 });

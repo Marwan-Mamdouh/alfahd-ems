@@ -15,6 +15,7 @@ import { InventoryService } from '../src/modules/inventory/inventory.service.js'
 import { RoutersService } from '../src/modules/routers/routers.service.js';
 import { IpService } from '../src/modules/ip-management/ip.service.js';
 import { WarehousesService } from '../src/modules/warehouses/warehouses.service.js';
+import { UsersService } from '../src/users/users.service.js';
 
 // Only point this at a migrated, disposable database; the suite writes fixtures.
 const url = process.env.INVENTORY_TEST_DATABASE_URL;
@@ -35,6 +36,11 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
   const routers = new RoutersService(repo, {} as never);
   const ips = new IpService(repo);
   const warehouses = new WarehousesService(repo);
+  const users = new UsersService(
+    db,
+    { send: async () => {} } as never,
+    { revokeAllSessions: async () => 0 } as never,
+  );
   const warehouseId = randomUUID();
   const actorId = randomUUID();
   const technicianId = randomUUID();
@@ -770,36 +776,226 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
     },
   );
 
-  it('protects warehouses with stock, assigned staff or damaged routers', async () => {
+  it('protects warehouses with stock, assigned staff, technicians, damaged/repair routers, or active custody', async () => {
     const stockWh = randomUUID();
     const staffWh = randomUUID();
+    const techWh = randomUUID();
     const damagedWh = randomUUID();
+    const underRepairWh = randomUUID();
+    const custodyWh = randomUUID();
+
     await db.insert(schema.warehouses).values([
       { id: stockWh, name: 'Synthetic stock blocker' },
       { id: staffWh, name: 'Synthetic staff blocker' },
+      { id: techWh, name: 'Synthetic tech blocker' },
       { id: damagedWh, name: 'Synthetic damaged blocker' },
+      { id: underRepairWh, name: 'Synthetic under repair blocker' },
+      { id: custodyWh, name: 'Synthetic custody blocker' },
     ]);
     const productId = await product();
     await db
       .insert(schema.warehouseInventory)
       .values({ warehouseId: stockWh, productId, quantity: 1 });
-    await db.insert(schema.users).values({
-      email: `${randomUUID()}@example.invalid`,
-      passwordHash: 'synthetic',
-      role: 'TECHNICIAN',
-      assignedWarehouseId: staffWh,
-    });
-    await db.insert(schema.routers).values({
-      productId,
-      warehouseId: damagedWh,
-      serialNumber: randomUUID(),
-      status: 'AVAILABLE',
-      physicalCondition: 'DAMAGED',
-    });
-    for (const id of [stockWh, staffWh, damagedWh]) {
+    await db.insert(schema.users).values([
+      {
+        email: `${randomUUID()}@example.invalid`,
+        passwordHash: 'synthetic',
+        role: 'WAREHOUSE_STAFF',
+        assignedWarehouseId: staffWh,
+      },
+      {
+        email: `${randomUUID()}@example.invalid`,
+        passwordHash: 'synthetic',
+        role: 'TECHNICIAN',
+        assignedWarehouseId: techWh,
+      },
+    ]);
+    await db.insert(schema.routers).values([
+      {
+        productId,
+        warehouseId: damagedWh,
+        serialNumber: randomUUID(),
+        status: 'AVAILABLE',
+        physicalCondition: 'DAMAGED',
+      },
+      {
+        productId,
+        warehouseId: underRepairWh,
+        serialNumber: randomUUID(),
+        status: 'AVAILABLE',
+        physicalCondition: 'UNDER_REPAIR',
+      },
+    ]);
+    const custodyRouter = await routers.create(
+      { productId, warehouseId: custodyWh, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+    expect(custodyRouter.currentHolderType).toBe('WAREHOUSE');
+
+    for (const id of [stockWh, staffWh, techWh, damagedWh, underRepairWh, custodyWh]) {
       await expect(warehouses.remove(id)).rejects.toMatchObject({ status: 409 });
       expect((await repo.warehouses.findById(id))?.isActive).toBe(true);
     }
+  });
+
+  it.each([
+    'receipt',
+    'return',
+    'condition',
+    'inbound',
+    'transfer',
+    'employeeCreate',
+    'employeeUpdate',
+  ] as const)('rejects %s targeting an already deactivated warehouse', async (operation) => {
+    const target = randomUUID();
+    await db.insert(schema.warehouses).values({ id: target, name: 'Synthetic deactivated target' });
+    await warehouses.remove(target);
+    expect((await repo.warehouses.findById(target))?.isActive).toBe(false);
+
+    const productId = await product();
+    let routerId = '';
+    if (operation === 'return' || operation === 'condition') {
+      const router = await routers.create(
+        { productId, warehouseId, serialNumber: randomUUID(), isNewReceipt: true },
+        actorId,
+      );
+      routerId = router.id;
+      if (operation === 'return') await routers.assign(router.id, { technicianId }, actorId);
+    }
+
+    if (operation === 'receipt') {
+      await expect(
+        routers.create(
+          { productId, warehouseId: target, serialNumber: randomUUID(), isNewReceipt: true },
+          actorId,
+        ),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'return') {
+      await expect(
+        routers.transition(
+          routerId,
+          { status: 'RETURNED', reason: 'Return', targetWarehouseId: target },
+          actorId,
+        ),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'condition') {
+      await expect(
+        routers.updateCondition(
+          routerId,
+          { physicalCondition: 'SERVICEABLE', warehouseId: target, reason: 'Move' },
+          actorId,
+        ),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'inbound') {
+      await expect(
+        inventory.receiveInbound({
+          productId,
+          warehouseId: target,
+          quantity: 1,
+          supplierName: 'Synthetic Supplier',
+          responsibleUserId: actorId,
+        }),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'transfer') {
+      await inventory.adjustStock({
+        productId,
+        warehouseId,
+        newQuantity: 5,
+        notes: 'Source stock',
+        responsibleUserId: actorId,
+      });
+      await expect(
+        inventory.transferStock({
+          productId,
+          fromWarehouseId: warehouseId,
+          toWarehouseId: target,
+          quantity: 1,
+          responsibleUserId: actorId,
+        }),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'employeeCreate') {
+      await expect(
+        users.createEmployee({
+          name: 'Synthetic Tech',
+          email: `${randomUUID()}@example.invalid`,
+          role: 'TECHNICIAN',
+          assignedWarehouseId: target,
+        }),
+      ).rejects.toThrow(/deactivated warehouse/);
+    } else if (operation === 'employeeUpdate') {
+      await expect(
+        users.updateEmployee(technicianId, {
+          assignedWarehouseId: target,
+        }),
+      ).rejects.toThrow(/deactivated warehouse/);
+    }
+  });
+
+  it('serializes concurrent user assignment against warehouse deactivation', async () => {
+    const target = randomUUID();
+    await db
+      .insert(schema.warehouses)
+      .values({ id: target, name: 'Synthetic user assignment race' });
+
+    const outcomes = await Promise.allSettled([
+      warehouses.remove(target),
+      users.createEmployee({
+        name: 'Concurrent Staff',
+        email: `${randomUUID()}@example.invalid`,
+        role: 'WAREHOUSE_STAFF',
+        assignedWarehouseId: target,
+      }),
+    ]);
+
+    expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((o) => o.status === 'rejected')).toHaveLength(1);
+
+    const deactivationOutcome = outcomes[0];
+    const assignmentOutcome = outcomes[1];
+
+    if (deactivationOutcome.status === 'fulfilled') {
+      // Deactivation won: warehouse is inactive, employee creation was rejected with 400
+      expect((await repo.warehouses.findById(target))?.isActive).toBe(false);
+      expect((assignmentOutcome as PromiseRejectedResult).reason).toMatchObject({ status: 400 });
+    } else {
+      // User assignment won: warehouse remains active, deactivation was rejected with 409
+      expect((await repo.warehouses.findById(target))?.isActive).toBe(true);
+      expect((deactivationOutcome as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+    }
+  });
+
+  it('preserves historical movements, closed custody, and audit trails after deactivation', async () => {
+    const target = randomUUID();
+    await db
+      .insert(schema.warehouses)
+      .values({ id: target, name: 'Synthetic historical preservation' });
+    const productId = await product();
+
+    // 1. Inbound receipt into target warehouse
+    const router = await routers.create(
+      { productId, warehouseId: target, serialNumber: randomUUID(), isNewReceipt: true },
+      actorId,
+    );
+
+    // 2. Assign to technician (closes warehouse custody, stock -1)
+    await routers.assign(router.id, { technicianId }, actorId);
+
+    // 3. Deactivate warehouse (no stock, no staff, no physical routers, no active custody)
+    await warehouses.remove(target);
+    expect((await repo.warehouses.findById(target))?.isActive).toBe(false);
+
+    // 4. Verify historical stock movement referencing target warehouse remains intact
+    const movements = await db
+      .select()
+      .from(schema.stockMovements)
+      .where(eq(schema.stockMovements.warehouseId, target));
+    expect(movements.length).toBeGreaterThanOrEqual(1);
+
+    // 5. Verify historical closed custody assignment referencing target warehouse remains intact
+    const historicalCustody = await repo.routers.findAssignmentsByRouter(router.id);
+    const targetAssignment = historicalCustody.find((a) => a.warehouseId === target);
+    expect(targetAssignment).toBeDefined();
+    expect(targetAssignment?.releasedAt).toBeInstanceOf(Date);
   });
 
   it('retains both concurrent receipts when a stock row already exists', async () => {

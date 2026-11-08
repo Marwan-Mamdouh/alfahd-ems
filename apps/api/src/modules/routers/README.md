@@ -21,13 +21,13 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   * When receiving new stock (`isNewReceipt: true`), the warehouse consumable inventory is atomically incremented (+1 `INBOUND_SUPPLIER`).
   * When assigned to a technician, warehouse stock is decremented (-1 `OUTBOUND_TECHNICIAN`).
   * When a warehouse unit suffers physical damage, warehouse stock is decremented (-1 `ADJUSTMENT`) while retaining the router asset record.
-  * **Caller-Owned Transactions & Atomic Relative Deltas (Issue #51):** All mutations support an optional caller-owned `externalTx`. Conflicting operations serialize via row-level locks (`findByIdForUpdate`), and inventory changes use atomic relative SQL deltas (`GREATEST(0, quantity + delta)`) rather than unprotected read-modify-write.
+  * **Caller-Owned Transactions & Atomic Relative Deltas (Issue #51):** All mutations support an optional caller-owned `externalTx`. Conflicting operations serialize via row-level locks (`findByIdForUpdate`), and inventory changes lock inventory rows and strictly reject insufficient stock with `BadRequestException` rather than negative clamping or unprotected read-modify-write.
 * **Audited Existing-Stock Onboarding Capacity (Issue #52):**
   * When onboarding existing warehouse stock (`isNewReceipt: false`), registration consumes pre-existing physical inventory without generating an inbound movement.
-  * Enforces capacity: verifies that recorded stock is greater than zero and exceeds currently registered serviceable units in the warehouse (`availableCapacity = currentStock - registeredCount > 0`). If stock is 0 or all stock already has serial numbers assigned, throws `409 Conflict`.
+  * Enforces capacity: verifies that recorded stock is greater than zero and exceeds currently registered usable units in the warehouse (`availableCapacity = currentStock - registeredUsableInWarehouse > 0`). If capacity is exhausted, throws `409 Conflict`. Serials violating unique constraints (PostgreSQL code 23505) are safely caught and remapped to `409 Conflict`.
   * Reconciles damaged opening stock: registering a damaged unit (`isNewReceipt: false`, `DAMAGED`) records a -1 `ADJUSTMENT` movement and writes an explicit reconciliation record in `router_condition_history`.
 * **Warehouse Deactivation Serialization & Placement Invariants (Issue #57 - T07):**
-  * All placement paths (`create`, `transition` to `RETURNED`, `transition` to `AVAILABLE`, and `updateCondition`) validate the target warehouse active status under a pessimistic row lock (`findByIdForUpdate(warehouseId, tx)`).
+  * All placement paths (`create`, `transition` to `RETURNED`, `transition` to `AVAILABLE`, and `updateCondition`) as well as user warehouse assignments validate the target warehouse active status under a pessimistic row lock (`findByIdForUpdate(warehouseId, tx)`).
   * Inactive target warehouses are strictly rejected with `BadRequestException` (400).
   * In `updateCondition`, multi-warehouse operations (transfers) lock involved warehouses in deterministic alphabetical order to prevent AB-BA transaction deadlocks.
   * During warehouse deactivation, active inventory, assigned staff/technicians, physically present routers (including damaged/under-repair devices without active custody), and active custody records strictly block deactivation with `409 Conflict`.
@@ -210,7 +210,7 @@ Guards: `JwtAuthGuard`, `RolesGuard`
 ## 6. Testing & Quality Assurance
 
 * **Unit Tests**:
-  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (**22 tests**): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, atomic writes, rollback on injected failure, competing assignment serialization, existing stock capacity limits, damaged opening unit reconciliation, A-to-B inter-warehouse moves, direct UNDER_REPAIR stock/custody removals, external repair clearing, and conditional serviceability restoration.
+  * [`routers.service.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.service.spec.ts) (**47 tests**): Verifies receipt stock deltas, assignment custody, whitelist state transitions, warehouse damage adjustment, atomic writes, rollback on injected failure, competing assignment serialization, existing stock capacity limits, damaged opening unit reconciliation, unique constraint conflict remapping, A-to-B inter-warehouse moves, direct UNDER_REPAIR stock/custody removals, external repair clearing, and conditional serviceability restoration.
   * [`routers.controller.spec.ts`](file:///e:/alfahd-ems/apps/api/src/modules/routers/routers.controller.spec.ts) (**10 tests**): Verifies HTTP delegation and DTO validation.
 
 * **Integration & E2E Test Suite**:

@@ -1078,6 +1078,23 @@ describe('Routers (e2e)', () => {
 
       expect(res.body.message).toContain('Invalid status transition');
     });
+
+    it('returns 400 Bad Request when returning router to a deactivated warehouse', async () => {
+      const auth = getAuthHeader(jwtService, Role.ADMIN);
+      const dto = makeTransitionRouterDto({
+        status: 'AVAILABLE',
+        reason: 'Inspection completed, attempting to place in inactive hub',
+        targetWarehouseId: WAREHOUSE_INACTIVE_ID,
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_ASSIGNED_ID}/transition`)
+        .set(auth)
+        .send(dto)
+        .expect(400);
+
+      expect(res.body.message).toContain('deactivated warehouse');
+    });
   });
 
   describe('Physical Condition & Warehouse Stock Delta', () => {
@@ -1334,6 +1351,24 @@ describe('Routers (e2e)', () => {
 
       // Added back to usable stock in Secondary Hub
       expect(stockB.quantity).toBe(initialStockB + 1);
+    });
+
+    it('returns 400 Bad Request when moving router to a deactivated warehouse', async () => {
+      const auth = getAuthHeader(jwtService, Role.WAREHOUSE_STAFF);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/routers/${ROUTER_1_ID}/condition`)
+        .set(auth)
+        .send(
+          makeUpdateRouterConditionDto({
+            physicalCondition: 'SERVICEABLE',
+            warehouseId: WAREHOUSE_INACTIVE_ID,
+            reason: 'Relocation attempt to inactive hub',
+          }),
+        )
+        .expect(400);
+
+      expect(res.body.message).toContain('deactivated warehouse');
     });
   });
 

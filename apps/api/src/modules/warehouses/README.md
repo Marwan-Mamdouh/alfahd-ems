@@ -19,7 +19,7 @@ Derived from **SOW Section 2.1.4, Section 2.1.5**, **CRM SRS Section 5**, and **
      - Active staff or technicians are assigned to it (`users.assignedWarehouseId`).
      - Routers are physically located at the warehouse (`routers.warehouseId = id`), including damaged or under-repair units without active custody.
      - Active router custody assignments remain (`router_assignments.warehouseId = id AND released_at IS NULL`).
-  3. Every placement path (router registration, return, inspection to AVAILABLE, condition update, and stock inbound/transfer) validates target warehouse active status under a row lock, rejecting inactive warehouses with `BadRequestException` (400).
+  3. Every placement and assignment path (router registration, return, inspection to AVAILABLE, condition update, stock inbound/transfer, and user/technician warehouse assignment) validates target warehouse active status under a row lock, rejecting inactive warehouses with `BadRequestException` (400).
 
 ---
 
@@ -100,7 +100,8 @@ export type NewWarehouse = typeof warehouses.$inferInsert;
 * `countActiveInventory(warehouseId: string)`: Aggregates total stock quantity across all products held in this warehouse using `sum().mapWith(Number)`.
 * `countAssignedStaff(warehouseId: string)`: Counts total employees assigned to this warehouse.
 * `countPhysicallyLocatedRouters(warehouseId: string)`: Counts routers physically located at this warehouse (`routers.warehouseId = warehouseId`).
-* `canDeleteWarehouse(warehouseId: string)`: Guard preventing deactivation if active stock ($> 0$), assigned staff ($> 0$), or physically located routers ($> 0$) exist.
+* `countActiveCustodyRouters(warehouseId: string)`: Counts active router custody assignments (`router_assignments.warehouseId = warehouseId AND released_at IS NULL`).
+* `canDeleteWarehouse(warehouseId: string)`: Guard preventing deactivation if active stock (> 0), assigned staff (> 0), physically located routers (> 0), or active custody assignments (> 0) exist.
 * `softDeactivate(warehouseId: string)`: Sets `isActive: false` on the warehouse record.
 
 ---
@@ -166,8 +167,8 @@ Base Route: `/warehouses`
 Unit testing conforms strictly to TDD and runs via Vitest:
 
 * **Service Unit Tests (`warehouses.service.spec.ts`)**:
-  * 12 comprehensive test cases mocking `RepositoryService.warehouses`.
-  * Verifies unique name collisions, 404 handling, pagination, update collision checks, and guarded soft-deactivation (checking active inventory, staff, and router assets).
+  * 15 comprehensive test cases mocking `RepositoryService.warehouses`.
+  * Verifies unique name collisions, 404 handling, pagination, update collision checks, and guarded soft-deactivation across all 5 blocker categories (active inventory, assigned staff, attached technicians, located routers, and active custody).
 * **Controller Unit Tests (`warehouses.controller.spec.ts`)**:
   * 6 test cases verifying HTTP handler delegation to `WarehousesService`.
 

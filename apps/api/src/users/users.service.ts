@@ -84,38 +84,49 @@ export class UsersService {
       });
     }
 
-    if (dto.assignedWarehouseId) {
-      const wh = await this.db
-        .select({ id: warehouses.id })
-        .from(warehouses)
-        .where(eq(warehouses.id, dto.assignedWarehouseId))
-        .limit(1);
-      if (wh.length === 0) {
-        throw new BadRequestException('Assigned warehouse not found');
-      }
-    }
-
     const tempPassword = `Temp-${randomBytes(6).toString('hex')}!Aa1`;
     const passwordHash = await hash(tempPassword, ARGON2_OPTIONS);
 
-    const rows = await this.db
-      .insert(users)
-      .values({
-        name: dto.name,
-        email: dto.email.toLowerCase(),
-        passwordHash,
-        role: dto.role,
-        department: dto.department,
-        phone: dto.phone,
-        nationalId: dto.nationalId,
-        hireDate: dto.hireDate,
-        assignedWarehouseId: dto.assignedWarehouseId,
-        status: 'ACTIVE',
-        isActive: true,
-      })
-      .returning();
+    const values = {
+      name: dto.name,
+      email: dto.email.toLowerCase(),
+      passwordHash,
+      role: dto.role,
+      department: dto.department,
+      phone: dto.phone,
+      nationalId: dto.nationalId,
+      hireDate: dto.hireDate,
+      assignedWarehouseId: dto.assignedWarehouseId,
+      status: 'ACTIVE' as const,
+      isActive: true,
+    };
 
-    const created = rows[0];
+    let created: User | undefined;
+
+    if (dto.assignedWarehouseId) {
+      created = await this.db.transaction(async (tx) => {
+        const [wh] = await tx
+          .select({ id: warehouses.id, isActive: warehouses.isActive })
+          .from(warehouses)
+          .where(eq(warehouses.id, dto.assignedWarehouseId!))
+          .for('update')
+          .limit(1);
+
+        if (!wh) {
+          throw new BadRequestException('Assigned warehouse not found');
+        }
+        if (!wh.isActive) {
+          throw new BadRequestException('Cannot assign employee to a deactivated warehouse');
+        }
+
+        const rows = await tx.insert(users).values(values).returning();
+        return rows[0];
+      });
+    } else {
+      const rows = await this.db.insert(users).values(values).returning();
+      created = rows[0];
+    }
+
     if (!created) {
       throw new BadRequestException('Failed to create employee');
     }
@@ -184,17 +195,6 @@ export class UsersService {
   async updateEmployee(id: string, dto: UpdateEmployeeDto): Promise<User> {
     const user = await this.findRowOrThrow(id);
 
-    if (dto.assignedWarehouseId) {
-      const wh = await this.db
-        .select({ id: warehouses.id })
-        .from(warehouses)
-        .where(eq(warehouses.id, dto.assignedWarehouseId))
-        .limit(1);
-      if (wh.length === 0) {
-        throw new BadRequestException('Assigned warehouse not found');
-      }
-    }
-
     if (user.role === Role.TECHNICIAN && dto.assignedWarehouseId === null) {
       throw new BadRequestException({
         code: 'TECHNICIAN_REQUIRES_WAREHOUSE',
@@ -202,21 +202,42 @@ export class UsersService {
       });
     }
 
-    const rows = await this.db
-      .update(users)
-      .set({
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.department !== undefined ? { department: dto.department } : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
-        ...(dto.assignedWarehouseId !== undefined
-          ? { assignedWarehouseId: dto.assignedWarehouseId }
-          : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, id))
-      .returning();
+    const updates = {
+      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.department !== undefined ? { department: dto.department } : {}),
+      ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+      ...(dto.assignedWarehouseId !== undefined
+        ? { assignedWarehouseId: dto.assignedWarehouseId }
+        : {}),
+      updatedAt: new Date(),
+    };
 
-    const updated = rows[0];
+    let updated: User | undefined;
+
+    if (dto.assignedWarehouseId) {
+      updated = await this.db.transaction(async (tx) => {
+        const [wh] = await tx
+          .select({ id: warehouses.id, isActive: warehouses.isActive })
+          .from(warehouses)
+          .where(eq(warehouses.id, dto.assignedWarehouseId!))
+          .for('update')
+          .limit(1);
+
+        if (!wh) {
+          throw new BadRequestException('Assigned warehouse not found');
+        }
+        if (!wh.isActive) {
+          throw new BadRequestException('Cannot assign employee to a deactivated warehouse');
+        }
+
+        const rows = await tx.update(users).set(updates).where(eq(users.id, id)).returning();
+        return rows[0];
+      });
+    } else {
+      const rows = await this.db.update(users).set(updates).where(eq(users.id, id)).returning();
+      updated = rows[0];
+    }
+
     if (!updated) {
       throw new NotFoundException('Employee not found');
     }
