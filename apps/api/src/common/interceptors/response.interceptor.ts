@@ -8,8 +8,8 @@ export interface ResponseShape<T> {
 }
 
 @Injectable()
-export class ResponseInterceptor<T> implements NestInterceptor<T, any> {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+export class ResponseInterceptor<T> implements NestInterceptor<T, ResponseShape<T>> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<ResponseShape<T>> {
     return next.handle().pipe(
       map((payload) => {
         if (

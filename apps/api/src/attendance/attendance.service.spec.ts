@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import type { Queue } from 'bullmq';
 import { AttendanceService } from './attendance.service.js';
 import type { User, Warehouse, AttendanceRecord } from '../database/schema/index.js';
+import type { Db } from '../database/database.module.js';
+import type { ClockService } from '../common/services/clock.service.js';
 
 describe('AttendanceService', () => {
   let service: AttendanceService;
-  let dbMock: any;
-  let configServiceMock: any;
-  let clockServiceMock: any;
-  let reportsQueueMock: any;
+  let dbMock: {
+    select: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+  let configServiceMock: { get: ReturnType<typeof vi.fn> };
+  let clockServiceMock: { now: ReturnType<typeof vi.fn> };
+  let reportsQueueMock: { add: ReturnType<typeof vi.fn> };
 
   const mockTechnician: User = {
     id: 'tech-123',
@@ -82,7 +90,12 @@ describe('AttendanceService', () => {
       update: vi.fn(),
     };
 
-    service = new AttendanceService(dbMock, configServiceMock, clockServiceMock, reportsQueueMock);
+    service = new AttendanceService(
+      dbMock as unknown as Db,
+      configServiceMock as unknown as ConfigService,
+      clockServiceMock as unknown as ClockService,
+      reportsQueueMock as unknown as Queue,
+    );
   });
 
   describe('checkIn', () => {
@@ -128,7 +141,11 @@ describe('AttendanceService', () => {
         expect(err).toBeInstanceOf(HttpException);
         const httpErr = err as HttpException;
         expect(httpErr.getStatus()).toBe(400);
-        const res = httpErr.getResponse() as any;
+        const res = httpErr.getResponse() as {
+          code: string;
+          message?: string;
+          details: { distanceM: number; allowedRadiusM?: number };
+        };
         expect(res.code).toBe('OUT_OF_RANGE');
         expect(res.details.distanceM).toBeGreaterThan(150);
         expect(res.details.allowedRadiusM).toBe(150);
@@ -199,7 +216,11 @@ describe('AttendanceService', () => {
         expect(err).toBeInstanceOf(HttpException);
         const httpErr = err as HttpException;
         expect(httpErr.getStatus()).toBe(400);
-        const res = httpErr.getResponse() as any;
+        const res = httpErr.getResponse() as {
+          code: string;
+          message?: string;
+          details: { distanceM: number; allowedRadiusM?: number };
+        };
         expect(res.code).toBe('OUT_OF_RANGE');
         // The reported distance is exactly the rounded value that was compared.
         expect(res.message).toContain('150.1m');

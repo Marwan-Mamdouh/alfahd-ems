@@ -190,11 +190,12 @@ export class RoutersService {
 
     try {
       return await (externalTx ? run(externalTx) : this.repo.transaction(run));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const dbError = err as { code?: string; cause?: { code?: string }; message?: string };
       if (
-        err?.code === '23505' ||
-        err?.cause?.code === '23505' ||
-        err?.message?.includes('duplicate key value violates unique constraint')
+        dbError?.code === '23505' ||
+        dbError?.cause?.code === '23505' ||
+        dbError?.message?.includes('duplicate key value violates unique constraint')
       ) {
         throw new ConflictException(
           `A router with serial number "${trimmedSerial}" already exists`,

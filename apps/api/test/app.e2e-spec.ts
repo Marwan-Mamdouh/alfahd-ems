@@ -74,12 +74,11 @@ describe('Swagger & App (e2e)', () => {
   it('Redis quit is called on shutdown', async () => {
     await app.close();
     expect(redisClient.quit).toHaveBeenCalledTimes(1);
-    app = null as any;
   });
 
   afterEach(async () => {
     if (app) {
-      await app.close();
+      await app.close().catch(() => {});
     }
   });
 });

@@ -126,29 +126,33 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       const conditions: Record<string, unknown> = {};
       if (!clause || typeof clause !== 'object') return conditions;
 
-      const walk = (node: any) => {
+      const walk = (node: unknown) => {
         if (!node || typeof node !== 'object') return;
-        const chunks = node.queryChunks;
+        const n = node as { queryChunks?: unknown[] };
+        const chunks = n.queryChunks;
         if (Array.isArray(chunks)) {
           let currentColumn: string | undefined;
           for (const chunk of chunks) {
             if (!chunk || typeof chunk !== 'object') continue;
-            if (Array.isArray(chunk.queryChunks)) {
-              walk(chunk);
-            } else if (
-              typeof chunk.name === 'string' &&
-              chunk.constructor?.name?.startsWith('Pg')
-            ) {
-              const camel = chunk.name.replace(/_([a-z])/g, (_: string, c: string) =>
-                c.toUpperCase(),
+            const c = chunk as {
+              queryChunks?: unknown[];
+              name?: string;
+              value?: unknown;
+              constructor?: { name?: string };
+            };
+            if (Array.isArray(c.queryChunks)) {
+              walk(c);
+            } else if (typeof c.name === 'string' && c.constructor?.name?.startsWith('Pg')) {
+              const camel = c.name.replace(/_([a-z])/g, (_: string, ch: string) =>
+                ch.toUpperCase(),
               );
               currentColumn = camel;
             } else if (
-              (chunk.constructor?.name === 'Param' || 'value' in chunk) &&
+              (c.constructor?.name === 'Param' || 'value' in c) &&
               currentColumn &&
-              chunk.constructor?.name !== 'StringChunk'
+              c.constructor?.name !== 'StringChunk'
             ) {
-              conditions[currentColumn] = chunk.value;
+              conditions[currentColumn] = c.value;
               currentColumn = undefined;
             }
           }
@@ -159,7 +163,10 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       return conditions;
     };
 
-    const matchesRow = (row: any, conditions: Record<string, unknown>): boolean => {
+    const matchesRow = (
+      row: Record<string, unknown>,
+      conditions: Record<string, unknown>,
+    ): boolean => {
       for (const [key, val] of Object.entries(conditions)) {
         if (val === undefined) continue;
         const rowVal = row[key];
@@ -292,20 +299,21 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       }),
     };
 
-    const getTargetStore = (table: any) => {
-      if (table === warehouses || table?._?.name === 'warehouses') return warehousesStore;
-      if (table === attendanceRecords || table?._?.name === 'attendance_records')
+    const getTargetStore = (table: unknown) => {
+      const t = table as { _?: { name?: string } } | undefined;
+      if (table === warehouses || t?._?.name === 'warehouses') return warehousesStore;
+      if (table === attendanceRecords || t?._?.name === 'attendance_records')
         return attendanceStore;
-      if (table === users || table?._?.name === 'users') return usersStore;
+      if (table === users || t?._?.name === 'users') return usersStore;
       return usersStore;
     };
 
     const dbStub = {
-      transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbStub)),
-      select: vi.fn((fields?: any) => ({
-        from: vi.fn((table: any) => ({
+      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(dbStub)),
+      select: vi.fn((fields?: { value?: unknown }) => ({
+        from: vi.fn((table: unknown) => ({
           innerJoin: vi.fn(() => ({
-            where: vi.fn(async (whereClause?: any) => {
+            where: vi.fn(async (whereClause?: unknown) => {
               const conditions = extractConditions(whereClause);
               return attendanceStore
                 .filter((att) => matchesRow(att, conditions))
@@ -315,7 +323,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
                 }));
             }),
           })),
-          where: vi.fn((whereClause: any) => {
+          where: vi.fn((whereClause: unknown) => {
             const limitFn = vi.fn(async (count?: number) => {
               const conditions = extractConditions(whereClause);
               const store = getTargetStore(table);
@@ -333,7 +341,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
                   }),
                 })),
               })),
-              then: async (resolve: (r: any[]) => void) => {
+              then: async (resolve: (r: unknown[]) => void) => {
                 const conditions = extractConditions(whereClause);
                 if (fields && fields.value) {
                   return resolve([
@@ -351,8 +359,8 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
           }),
         })),
       })),
-      insert: vi.fn((table: any) => ({
-        values: vi.fn((vals: any) => ({
+      insert: vi.fn((table: unknown) => ({
+        values: vi.fn((vals: Record<string, unknown>) => ({
           returning: vi.fn(async () => {
             const row = {
               id: vals.id ?? `id-${Date.now()}`,
@@ -360,29 +368,31 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
               createdAt: new Date(),
               updatedAt: new Date(),
             };
+            const t = table as { _?: { name?: string } } | undefined;
             if (
               table === attendanceRecords ||
-              table?._?.name === 'attendance_records' ||
+              t?._?.name === 'attendance_records' ||
               vals.workDate
             ) {
-              attendanceStore.push(row);
-            } else if (table === warehouses || table?._?.name === 'warehouses') {
-              warehousesStore.push(row);
+              attendanceStore.push(row as unknown as (typeof attendanceStore)[0]);
+            } else if (table === warehouses || t?._?.name === 'warehouses') {
+              warehousesStore.push(row as unknown as (typeof warehousesStore)[0]);
             } else {
-              usersStore.push(row);
+              usersStore.push(row as unknown as (typeof usersStore)[0]);
             }
             return [row];
           }),
         })),
       })),
-      update: vi.fn((table: any) => ({
-        set: vi.fn((vals: any) => ({
-          where: vi.fn((whereClause: any) => ({
+      update: vi.fn((table: unknown) => ({
+        set: vi.fn((vals: Record<string, unknown>) => ({
+          where: vi.fn((whereClause: unknown) => ({
             returning: vi.fn(async () => {
               const conditions = extractConditions(whereClause);
+              const t = table as { _?: { name?: string } } | undefined;
               if (
                 table === attendanceRecords ||
-                table?._?.name === 'attendance_records' ||
+                t?._?.name === 'attendance_records' ||
                 vals.checkOutAt !== undefined ||
                 vals.overrideReason !== undefined
               ) {

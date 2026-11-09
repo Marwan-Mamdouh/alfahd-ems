@@ -10,7 +10,12 @@ import type { User } from '../database/schema/index.js';
 
 describe('UsersService', () => {
   let service: UsersService;
-  let dbMock: any;
+  let dbMock: {
+    select: ReturnType<typeof vi.fn>;
+    transaction: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
   let emailServiceMock: { send: ReturnType<typeof vi.fn> };
   let sessionServiceMock: {
     revokeAllSessions: ReturnType<typeof vi.fn>;
@@ -61,7 +66,7 @@ describe('UsersService', () => {
           })),
         })),
       })),
-      transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbMock)),
+      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(dbMock)),
       insert: vi.fn(() => ({
         values: vi.fn((vals: Record<string, unknown>) => ({
           returning: vi.fn().mockResolvedValue([{ ...baseUser, ...vals }]),
@@ -70,7 +75,7 @@ describe('UsersService', () => {
       update: vi.fn(() => ({ set: setSpy })),
     };
     service = new UsersService(
-      dbMock as Db,
+      dbMock as unknown as Db,
       emailServiceMock as unknown as EmailService,
       sessionServiceMock as unknown as SessionService,
     );

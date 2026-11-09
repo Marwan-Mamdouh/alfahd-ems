@@ -88,7 +88,7 @@ describe('InventoryService', () => {
   };
 
   const mockRepositoryService = {
-    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
     inventory: mockInventoryRepo,
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,

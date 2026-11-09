@@ -18,6 +18,7 @@ import { RepositoryService } from '../src/modules/repository/repository.service.
 import { StorageService } from '../src/storage/storage.interface.js';
 import { FakeStorageService } from '../src/storage/fake-storage.service.js';
 import { AttendanceReportWorker } from '../src/attendance/attendance.worker.js';
+import type { Db } from '../src/database/database.module.js';
 import type {
   Router,
   RouterAssignment,
@@ -51,10 +52,10 @@ describe('Routers (e2e)', () => {
   let stockStore: WarehouseInventory[] = [];
 
   const fakeStorage = new FakeStorageService();
-  let latestReportJobResult: any = null;
+  let latestReportJobResult: Record<string, unknown> | null = null;
 
   const mockReportsQueue = {
-    add: vi.fn(async (_name: string, data: any) => ({
+    add: vi.fn(async (_name: string, data: unknown) => ({
       id: 'mock-report-job-id',
       data,
     })),
@@ -80,7 +81,7 @@ describe('Routers (e2e)', () => {
   };
 
   const mockRepositoryService = {
-    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({}),
     routers: {
       findBySerialNumber: async (serial: string) => {
         return routerStore.find((r) => r.serialNumber.toLowerCase() === serial.toLowerCase());
@@ -123,10 +124,12 @@ describe('Routers (e2e)', () => {
           (r) => r.serialNumber.toLowerCase() === data.serialNumber!.toLowerCase(),
         );
         if (existing) {
-          const err = new Error(
-            'duplicate key value violates unique constraint "routers_serial_number_unique"',
+          const err = Object.assign(
+            new Error(
+              'duplicate key value violates unique constraint "routers_serial_number_unique"',
+            ),
+            { code: '23505' },
           );
-          (err as any).code = '23505';
           throw err;
         }
         const created: Router = {
@@ -596,7 +599,7 @@ describe('Routers (e2e)', () => {
       ];
 
       let callCount = 0;
-      const dbMock: any = {
+      const dbMock = {
         select: vi.fn().mockImplementation(() => {
           callCount++;
           if (callCount === 1) {
@@ -628,13 +631,13 @@ describe('Routers (e2e)', () => {
         }),
       };
 
-      const worker = new AttendanceReportWorker(dbMock, fakeStorage);
+      const worker = new AttendanceReportWorker(dbMock as unknown as Db, fakeStorage);
       const jobResult = await worker.process({
         data: {
           type: 'ROUTER_INVENTORY_REPORT',
           params: {},
         },
-      } as any);
+      } as unknown as Parameters<typeof worker.process>[0]);
 
       expect(jobResult.downloadUrl).toBeDefined();
       expect(jobResult.totalRows).toBe(2);
@@ -649,7 +652,7 @@ describe('Routers (e2e)', () => {
 
       // Verify Excel structure and data integrity
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(storedFile!.buffer as any);
+      await workbook.xlsx.load(storedFile!.buffer as unknown as ArrayBuffer);
 
       // Sheet 1: Warehouse Summary
       const summarySheet = workbook.getWorksheet('Warehouse Summary');
@@ -705,7 +708,7 @@ describe('Routers (e2e)', () => {
     });
 
     it('retains backward compatibility with ATTENDANCE_SUMMARY reports', async () => {
-      const dbMock: any = {
+      const dbMock = {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
             innerJoin: vi.fn().mockReturnValue({
@@ -717,13 +720,13 @@ describe('Routers (e2e)', () => {
         }),
       };
 
-      const worker = new AttendanceReportWorker(dbMock, fakeStorage);
+      const worker = new AttendanceReportWorker(dbMock as unknown as Db, fakeStorage);
       const jobResult = await worker.process({
         data: {
           type: 'ATTENDANCE_SUMMARY',
           params: {},
         },
-      } as any);
+      } as unknown as Parameters<typeof worker.process>[0]);
 
       expect(jobResult.downloadUrl).toBeDefined();
       expect(jobResult.totalRows).toBe(0);
@@ -746,7 +749,7 @@ describe('Routers (e2e)', () => {
         .send(dto)
         .expect(201);
 
-      const data = envelopeData<any>(res);
+      const data = envelopeData<Router>(res);
       expect(data).toMatchObject({
         serialNumber: 'SN-NEW-999',
         status: 'AVAILABLE',
@@ -895,7 +898,7 @@ describe('Routers (e2e)', () => {
         )
         .expect(201);
 
-      const data = envelopeData<any>(res);
+      const data = envelopeData<Router>(res);
       expect(data.physicalCondition).toBe('DAMAGED');
       expect(data.status).toBe('AVAILABLE');
 
@@ -1052,7 +1055,7 @@ describe('Routers (e2e)', () => {
         .set(auth)
         .expect(200);
 
-      const history = envelopeData<any[]>(res);
+      const history = envelopeData<RouterStatusHistory[]>(res);
       expect(Array.isArray(history)).toBe(true);
       expect(history.length).toBeGreaterThanOrEqual(1);
       const latest = history[history.length - 1];

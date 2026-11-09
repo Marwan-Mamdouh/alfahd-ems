@@ -48,7 +48,7 @@ describe('IpService', () => {
   };
 
   const mockRepositoryService = {
-    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
     ip: mockIpRepo,
   };
 

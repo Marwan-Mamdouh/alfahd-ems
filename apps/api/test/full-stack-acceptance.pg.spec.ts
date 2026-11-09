@@ -71,7 +71,7 @@ describe.skipIf(!dbUrl || !redisUrl)('Nest workers and real authentication', () 
       .expect(200);
     const jobId = submitted.body.jobId;
     expect(jobId).toBeTruthy();
-    let status: any;
+    let status: { status?: string; downloadUrl?: string; [key: string]: unknown } = {};
     for (let i = 0; i < 150; i++) {
       status = (
         await request(app.getHttpServer())
@@ -83,13 +83,15 @@ describe.skipIf(!dbUrl || !redisUrl)('Nest workers and real authentication', () 
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     expect(status.status).toBe('COMPLETED');
-    await request(app.getHttpServer()).get(status.downloadUrl).expect(401);
     await request(app.getHttpServer())
-      .get(status.downloadUrl)
+      .get(status.downloadUrl as string)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(status.downloadUrl as string)
       .set('Authorization', `Bearer ${technicianToken}`)
       .expect(404);
     const download = await request(app.getHttpServer())
-      .get(status.downloadUrl)
+      .get(status.downloadUrl as string)
       .set('Authorization', `Bearer ${adminToken}`)
       .buffer(true)
       .parse((res, done) => {
@@ -158,7 +160,7 @@ describe.skipIf(!dbUrl || !redisUrl)('Nest workers and real authentication', () 
       .get(`/jobs/${jobId}`)
       .set('Authorization', `Bearer ${technicianToken}`)
       .expect(404);
-    let status: any;
+    let status: { status?: string; [key: string]: unknown } = {};
     for (let i = 0; i < 150; i++) {
       status = (
         await request(app.getHttpServer())

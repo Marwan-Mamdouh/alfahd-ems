@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Queue, QueueEvents, Worker } from 'bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import type { ExecutionContext } from '@nestjs/common';
 import request from 'supertest';
 import ExcelJS from 'exceljs';
 import { join } from 'node:path';
@@ -176,7 +177,7 @@ describe.skipIf(!dbUrl || !redisUrl)('IP import (PostgreSQL and Redis)', () => {
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
-        canActivate: (context: any) => {
+        canActivate: (context: ExecutionContext) => {
           context.switchToHttp().getRequest().user = currentUser;
           return true;
         },

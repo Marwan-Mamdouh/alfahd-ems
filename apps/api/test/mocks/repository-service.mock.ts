@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-type AnyFn = (...args: any[]) => any;
+type AnyFn = (...args: unknown[]) => unknown;
 
 export interface MockRepositoryService {
   products: {
@@ -64,12 +64,12 @@ export interface MockRepositoryService {
     findHistoryByIp: ReturnType<typeof vi.fn<AnyFn>>;
     findManyWithPagination: ReturnType<typeof vi.fn<AnyFn>>;
   };
-  transaction: ReturnType<typeof vi.fn<AnyFn>>;
+  transaction: ReturnType<typeof vi.fn>;
 }
 
 export function createMockRepositoryService(): MockRepositoryService {
   return {
-    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
     products: {
       findBySku: vi.fn(),
       findById: vi.fn(),

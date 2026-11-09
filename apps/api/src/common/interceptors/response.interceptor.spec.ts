@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { of, lastValueFrom } from 'rxjs';
+import type { ExecutionContext, CallHandler } from '@nestjs/common';
 import { ResponseInterceptor } from './response.interceptor.js';
 
 describe('ResponseInterceptor', () => {
   const interceptor = new ResponseInterceptor();
 
-  const createMockContext = () => ({}) as any;
-  const createMockHandler = (data: any) => ({
+  const createMockContext = () => ({}) as unknown as ExecutionContext;
+  const createMockHandler = (data: unknown): CallHandler => ({
     handle: () => of(data),
   });
 
