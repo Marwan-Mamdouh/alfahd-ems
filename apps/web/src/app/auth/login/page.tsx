@@ -2,7 +2,7 @@
 
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
@@ -64,9 +64,26 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (retryAt === null) return;
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+      setRetryAfter(remaining);
+      if (remaining === 0) {
+        setRetryAt(null);
+        setError(null);
+      }
+    };
+    const timer = window.setInterval(update, 250);
+    return () => window.clearInterval(timer);
+  }, [retryAt]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (retryAt !== null && Date.now() < retryAt) return;
 
     setLoading(true);
     setError(null);
@@ -89,7 +106,9 @@ function LoginForm() {
 
       if (status === 429) {
         setError("تم تجاوز عدد محاولات الدخول المسموح بها. يرجى المحاولة مرة أخرى بعد قليل.");
-        setRetryAfter(retryAfterSeconds(err));
+        const seconds = retryAfterSeconds(err);
+        setRetryAfter(seconds);
+        setRetryAt(seconds === null ? null : Date.now() + seconds * 1000);
       } else if (status === 401) {
         // Intentionally the same text as every other 401 — never branch further.
         setError(INVALID_CREDENTIALS_MESSAGE);
@@ -206,7 +225,7 @@ function LoginForm() {
                   className="rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
                 >
                   {error}
-                  {retryAfter !== null && (
+                  {retryAfter !== null && retryAfter > 0 && (
                     <span className="mt-1 block text-xs font-normal opacity-80">
                       يمكنك المحاولة بعد {retryAfter} ثانية
                     </span>
@@ -217,7 +236,7 @@ function LoginForm() {
               {/* Login Button */}
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (retryAfter !== null && retryAfter > 0)}
                 className="h-11 w-full rounded-xl bg-gradient-to-l from-teal-700 to-teal-600 font-semibold text-white shadow-md shadow-teal-700/15 transition-all hover:from-teal-800 hover:to-teal-700 hover:shadow-lg disabled:opacity-70"
               >
                 {loading ? (
@@ -245,4 +264,3 @@ function LoginForm() {
     </div>
   );
 }
-

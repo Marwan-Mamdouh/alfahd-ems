@@ -171,6 +171,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     };
 
     const redisStub = {
+      eval: vi.fn(async () => 0),
       set: vi.fn(async (key: string, value: string) => {
         redisKeys.set(key, value);
         return 'OK';

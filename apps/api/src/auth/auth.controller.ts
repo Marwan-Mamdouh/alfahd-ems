@@ -13,6 +13,7 @@ import {
   ApiBadRequestResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -46,6 +47,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly rateLimitGuard: RateLimitGuard,
   ) {}
 
   @Post('login')
@@ -55,11 +57,28 @@ export class AuthController {
   @ApiOkResponse({ description: 'Authentication successful', type: LoginResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid email or password input' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many failed login attempts; Retry-After is in seconds',
+  })
   async login(
     @Body() dto: LoginRequestDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginResponseDto> {
-    const result = await this.authService.login(dto.email, dto.password);
+    let result: LoginResponseDto;
+    try {
+      result = await this.authService.login(dto.email, dto.password);
+    } catch (error) {
+      // Only real credential rejections count toward the brute-force window:
+      // 500-class surprises (Redis/DB) must not silently double as failures.
+      if (error instanceof UnauthorizedException) {
+        // Best-effort and non-throwing: a Redis blip at this point must not
+        // convert the client's 401 into a 500 (see recordFailure).
+        await this.rateLimitGuard.recordFailure(req);
+      }
+      throw error;
+    }
 
     // Deliver the refresh token as an HTTP-only cookie so it is unreachable from
     // JavaScript. The body copy stays for mobile clients, which have no cookie

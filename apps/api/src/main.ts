@@ -31,7 +31,7 @@ async function bootstrap() {
     }),
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'X-Request-Id'],
-    exposedHeaders: ['x-request-id', 'X-Request-Id'],
+    exposedHeaders: ['x-request-id', 'X-Request-Id', 'Retry-After'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 

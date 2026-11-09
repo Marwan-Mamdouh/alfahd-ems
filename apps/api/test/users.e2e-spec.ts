@@ -188,6 +188,7 @@ describe('Users (e2e)', () => {
     redisSets = new Map<string, Set<string>>();
     redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
+      eval: vi.fn(async () => 0),
       set: vi.fn(async (key: string, value: string) => {
         redisKeys.set(key, value);
         return 'OK';

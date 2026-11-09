@@ -7,6 +7,7 @@ import { vi } from 'vitest';
 import { AppModule } from './../src/app.module.js';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter.js';
 import { ResponseInterceptor } from './../src/common/interceptors/response.interceptor.js';
+import { RateLimitGuard } from './../src/auth/guards/rate-limit.guard.js';
 import { DRIZZLE } from './../src/database/database.module.js';
 import { ARGON2_OPTIONS } from './../src/database/schema/mappers.js';
 import { corsOrigins } from './../src/config/refresh-cookie.js';
@@ -40,6 +41,54 @@ describe('Auth (e2e) — refresh cookie transport', () => {
   let redisKeys: Map<string, string>;
   let redisSetArgs: Map<string, string>;
   let redisSets: Map<string, Set<string>>;
+
+  it('does not rate-limit repeated successful logins', async () => {
+    for (let i = 0; i < 6; i++) {
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(200);
+    }
+  });
+
+  it('limits failed credentials, does not extend blocked retries, and recovers', async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      for (let i = 0; i < 60; i++) {
+        await request(app.getHttpServer())
+          .post('/auth/login')
+          .send({ email: admin.email, password: 'wrong-password' })
+          .expect(401);
+      }
+      // From here on, recordFailure must stay silent: a blocked request never
+      // reaches the controller, and asserted outcomes (Retry-After decay 600 →
+      // 570, recovery) would hold even under a record-before-check regression,
+      // so the spy is what actually pins "blocked retries add nothing".
+      const guard = app.get(RateLimitGuard);
+      const recordFailure = vi.spyOn(guard, 'recordFailure');
+      const blocked = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(429);
+      expect(blocked.headers['retry-after']).toBe('600');
+      now += 30_000;
+      const retry = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(429);
+      expect(retry.headers['retry-after']).toBe('570');
+      now += 570_000;
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(200);
+      // One final success (and the two 429s above) must never have recorded.
+      expect(recordFailure).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  }, 30000);
 
   const admin: FakeUser = {
     id: ADMIN_ID,
@@ -79,6 +128,25 @@ describe('Auth (e2e) — refresh cookie transport', () => {
     // expiry). SessionService is O(1) per op — no SCAN is ever issued.
     const redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
+      eval: vi.fn(
+        async (
+          _script: string,
+          _keys: number,
+          key: string,
+          now: number,
+          window: number,
+          max: number,
+        ) => {
+          const zset = redisZsets.get(key);
+          if (!zset) return 0;
+          for (const [member, score] of zset) {
+            if (score <= now - window) zset.delete(member);
+          }
+          if (zset.size < max) return 0;
+          const expiryScore = [...zset.values()].sort((a, b) => a - b)[zset.size - max];
+          return Math.max(1, Math.ceil((expiryScore + window - now) / 1000));
+        },
+      ),
       set: vi.fn(async (key: string, value: string, _mode: string, _ttl?: number) => {
         redisKeys.set(key, value);
         redisSetArgs.set(key, value);
@@ -142,11 +210,11 @@ describe('Auth (e2e) — refresh cookie transport', () => {
             }
             return pipeline;
           }),
-          zcard: vi.fn(() => {
-            // Rate-limit guard reads results[2] for the count.
-            return Promise.resolve([null, zcard]);
+          zcard: vi.fn((key: string) => {
+            zcard = redisZsets.get(key)?.size ?? 0;
+            return pipeline;
           }),
-          expire: vi.fn(),
+          expire: vi.fn(() => pipeline),
           exec: vi.fn(async () => {
             return [
               [null, 0],
