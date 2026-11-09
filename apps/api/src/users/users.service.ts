@@ -67,6 +67,25 @@ export class UsersService {
     return toUserDto(created);
   }
 
+  private async assertActiveWarehouseForAssignment(
+    warehouseId: string,
+    tx: Db,
+  ): Promise<void> {
+    const [wh] = await tx
+      .select({ id: warehouses.id, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .for('update')
+      .limit(1);
+
+    if (!wh) {
+      throw new BadRequestException('Assigned warehouse not found');
+    }
+    if (!wh.isActive) {
+      throw new BadRequestException('Cannot assign employee to a deactivated warehouse');
+    }
+  }
+
   async createEmployee(dto: CreateEmployeeDto): Promise<User> {
     const existing = await this.db
       .select({ id: users.id })
@@ -105,20 +124,7 @@ export class UsersService {
 
     if (dto.assignedWarehouseId) {
       created = await this.db.transaction(async (tx) => {
-        const [wh] = await tx
-          .select({ id: warehouses.id, isActive: warehouses.isActive })
-          .from(warehouses)
-          .where(eq(warehouses.id, dto.assignedWarehouseId!))
-          .for('update')
-          .limit(1);
-
-        if (!wh) {
-          throw new BadRequestException('Assigned warehouse not found');
-        }
-        if (!wh.isActive) {
-          throw new BadRequestException('Cannot assign employee to a deactivated warehouse');
-        }
-
+        await this.assertActiveWarehouseForAssignment(dto.assignedWarehouseId!, tx);
         const rows = await tx.insert(users).values(values).returning();
         return rows[0];
       });
@@ -216,20 +222,7 @@ export class UsersService {
 
     if (dto.assignedWarehouseId) {
       updated = await this.db.transaction(async (tx) => {
-        const [wh] = await tx
-          .select({ id: warehouses.id, isActive: warehouses.isActive })
-          .from(warehouses)
-          .where(eq(warehouses.id, dto.assignedWarehouseId!))
-          .for('update')
-          .limit(1);
-
-        if (!wh) {
-          throw new BadRequestException('Assigned warehouse not found');
-        }
-        if (!wh.isActive) {
-          throw new BadRequestException('Cannot assign employee to a deactivated warehouse');
-        }
-
+        await this.assertActiveWarehouseForAssignment(dto.assignedWarehouseId!, tx);
         const rows = await tx.update(users).set(updates).where(eq(users.id, id)).returning();
         return rows[0];
       });
