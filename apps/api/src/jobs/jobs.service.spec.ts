@@ -1,12 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
+import type { Queue } from 'bullmq';
+import { Role } from '@alfahd/types';
 import { JobsService } from './jobs.service.js';
+import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
 
 describe('JobsService', () => {
   it('throws NotFoundException when job does not exist', async () => {
     const queueMock = {
       getJob: vi.fn().mockResolvedValue(null),
-    } as any;
+    } as unknown as Queue;
 
     const service = new JobsService(queueMock);
     await expect(service.getJobStatus('missing-id')).rejects.toThrow(NotFoundException);
@@ -20,7 +23,7 @@ describe('JobsService', () => {
         returnvalue: { downloadUrl: 'https://cdn.example.com/report.xlsx' },
         failedReason: null,
       }),
-    } as any;
+    } as unknown as Queue;
 
     const service = new JobsService(queueMock);
     const result = await service.getJobStatus('job-123');
@@ -53,7 +56,7 @@ describe('JobsService', () => {
         if (id === 'failed') return Promise.resolve(failedJobMock);
         return Promise.resolve(null);
       }),
-    } as any;
+    } as unknown as Queue;
 
     const service = new JobsService(queueMock);
 
@@ -75,7 +78,7 @@ describe('JobsService', () => {
         returnvalue: null,
         failedReason: leakyReason,
       }),
-    } as any;
+    } as unknown as Queue;
 
     const service = new JobsService(queueMock);
     const res = await service.getJobStatus('job-leaky');
@@ -96,7 +99,7 @@ describe('JobsService', () => {
         returnvalue: null,
         failedReason: null,
       }),
-    } as any;
+    } as unknown as Queue;
 
     const service = new JobsService(queueMock);
     const res = await service.getJobStatus('job-no-reason');
@@ -116,14 +119,14 @@ describe('JobsService', () => {
 
     const queueMock = {
       getJob: vi.fn().mockResolvedValue(jobMock),
-    } as any;
+    } as unknown as Queue;
 
     it('allows Admin to query any job', async () => {
       const service = new JobsService(queueMock);
       const res = await service.getJobStatus('job-auth', {
         userId: 'admin-id',
-        role: 'ADMIN',
-      } as any);
+        role: Role.ADMIN,
+      } as unknown as JwtUser);
       expect(res.id).toBe('job-auth');
     });
 
@@ -131,8 +134,8 @@ describe('JobsService', () => {
       const service = new JobsService(queueMock);
       const res = await service.getJobStatus('job-auth', {
         userId: 'user-owner',
-        role: 'TECHNICIAN',
-      } as any);
+        role: Role.TECHNICIAN,
+      } as unknown as JwtUser);
       expect(res.id).toBe('job-auth');
     });
 
@@ -141,8 +144,8 @@ describe('JobsService', () => {
       await expect(
         service.getJobStatus('job-auth', {
           userId: 'user-other',
-          role: 'TECHNICIAN',
-        } as any),
+          role: Role.TECHNICIAN,
+        } as unknown as JwtUser),
       ).rejects.toThrow(NotFoundException);
     });
   });

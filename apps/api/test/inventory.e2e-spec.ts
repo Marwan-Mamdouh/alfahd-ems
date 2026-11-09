@@ -29,7 +29,7 @@ describe('Inventory (e2e)', () => {
   let movementsStore: StockMovement[] = [];
 
   const mockRepositoryService = {
-    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({}),
     warehouses: {
       findById: async (id: string) => {
         if (id === WAREHOUSE_A_ID || id === WAREHOUSE_B_ID) {

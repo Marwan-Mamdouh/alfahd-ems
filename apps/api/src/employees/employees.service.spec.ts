@@ -3,12 +3,28 @@ import { BadRequestException } from '@nestjs/common';
 import { Role } from '@alfahd/types';
 import { EmployeesService } from './employees.service.js';
 import type { User } from '../database/schema/index.js';
+import type { UsersService } from '../users/users.service.js';
+import type { StorageService } from '../storage/storage.interface.js';
+import type { SessionService } from '../redis/session.service.js';
 
 describe('EmployeesService', () => {
   let service: EmployeesService;
-  let usersServiceMock: any;
-  let storageServiceMock: any;
-  let sessionServiceMock: any;
+  let usersServiceMock: {
+    createEmployee: ReturnType<typeof vi.fn>;
+    findEmployees: ReturnType<typeof vi.fn>;
+    findEmployeeById: ReturnType<typeof vi.fn>;
+    updateEmployee: ReturnType<typeof vi.fn>;
+    updateEmployeeStatus: ReturnType<typeof vi.fn>;
+    updateProfilePhotoKey: ReturnType<typeof vi.fn>;
+  };
+  let storageServiceMock: {
+    uploadFile: ReturnType<typeof vi.fn>;
+    deleteFile: ReturnType<typeof vi.fn>;
+    getOptimizedUrl: ReturnType<typeof vi.fn>;
+  };
+  let sessionServiceMock: {
+    revokeAllSessions: ReturnType<typeof vi.fn>;
+  };
 
   const mockUser: User = {
     id: 'user-123',
@@ -51,7 +67,11 @@ describe('EmployeesService', () => {
       revokeAllSessions: vi.fn().mockResolvedValue(2),
     };
 
-    service = new EmployeesService(usersServiceMock, storageServiceMock, sessionServiceMock);
+    service = new EmployeesService(
+      usersServiceMock as unknown as UsersService,
+      storageServiceMock as unknown as StorageService,
+      sessionServiceMock as unknown as SessionService,
+    );
   });
 
   describe('create', () => {

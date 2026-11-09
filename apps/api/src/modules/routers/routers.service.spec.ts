@@ -2,9 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { RoutersService } from './routers.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
-import type { Router, RouterAssignment } from '../../database/schema/index.js';
+import type * as schema from '../../database/schema/index.js';
+import type {
+  Router,
+  RouterAssignment,
+  RouterConditionHistory,
+  RouterStatusHistory,
+  StockMovement,
+  WarehouseInventory,
+} from '../../database/schema/index.js';
+import type { TransitionRouterDto } from './dto/transition-router.dto.js';
 
 describe('RoutersService', () => {
   let service: RoutersService;
@@ -87,8 +97,37 @@ describe('RoutersService', () => {
     add: vi.fn(),
   };
 
+  const mockExternalTx = {} as unknown as NodePgDatabase<typeof schema>;
+  const mockMovementResult = {
+    inventory: {} as WarehouseInventory,
+    movement: {} as StockMovement,
+  };
+  const mockStatusHistory: RouterStatusHistory = {
+    id: 'hist-1',
+    routerId: mockRouter.id,
+    fromStatus: 'RETURNED',
+    toStatus: 'AVAILABLE',
+    reason: 'Inspection passed',
+    changedBy: 'admin-id',
+    createdAt: new Date(),
+  };
+  const mockConditionHistory: RouterConditionHistory = {
+    id: 'cond-1',
+    routerId: mockRouter.id,
+    fromCondition: 'SERVICEABLE',
+    toCondition: 'DAMAGED',
+    fromWarehouseId: mockWarehouse.id,
+    toWarehouseId: null,
+    externalLocation: null,
+    reason: 'Dropped during inspection',
+    changedBy: 'admin-id',
+    createdAt: new Date(),
+  };
+
   const mockRepositoryService = {
-    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
+    transaction: vi.fn(async (cb: (tx: NodePgDatabase<typeof schema>) => Promise<unknown>) =>
+      cb(mockExternalTx),
+    ),
     routers: mockRoutersRepo,
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,
@@ -539,7 +578,10 @@ describe('RoutersService', () => {
       await expect(
         service.transition(
           mockRouter.id,
-          { status: 'RETURNED', targetWarehouseId: mockWarehouse.id } as any,
+          {
+            status: 'RETURNED',
+            targetWarehouseId: mockWarehouse.id,
+          } as unknown as TransitionRouterDto,
           'admin-id',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -1116,7 +1158,6 @@ describe('RoutersService', () => {
 
   describe('transaction atomicity & caller-owned externalTx', () => {
     it('executes create entirely within externalTx when provided', async () => {
-      const mockExternalTx = {} as any;
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
@@ -1173,12 +1214,11 @@ describe('RoutersService', () => {
     });
 
     it('executes assign entirely within externalTx when provided', async () => {
-      const mockExternalTx = {} as any;
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.updateRouter.mockResolvedValue(mockRouter);
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
 
       await service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id', mockExternalTx);
 
@@ -1215,14 +1255,13 @@ describe('RoutersService', () => {
     });
 
     it('executes transition entirely within externalTx when provided', async () => {
-      const mockExternalTx = {} as any;
       const returnedRouter = { ...mockRouter, status: 'RETURNED' as const };
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(returnedRouter);
       mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
       mockRoutersRepo.updateRouter.mockResolvedValue({ ...returnedRouter, status: 'AVAILABLE' });
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
-      mockRoutersRepo.createStatusHistory.mockResolvedValue({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
+      mockRoutersRepo.createStatusHistory.mockResolvedValue(mockStatusHistory);
       mockRoutersRepo.findActiveAssignment.mockResolvedValue(mockAssignment);
 
       await service.transition(
@@ -1268,7 +1307,7 @@ describe('RoutersService', () => {
       mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
       mockRoutersRepo.updateRouter.mockResolvedValue({ ...returnedRouter, status: 'AVAILABLE' });
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
       mockRoutersRepo.createStatusHistory.mockRejectedValueOnce(
         new Error('Injected status history audit failure'),
       );
@@ -1287,11 +1326,10 @@ describe('RoutersService', () => {
     });
 
     it('executes updateCondition entirely within externalTx when provided', async () => {
-      const mockExternalTx = {} as any;
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
       mockWarehousesRepo.findByIdForUpdate.mockResolvedValue(mockWarehouse);
-      mockRoutersRepo.createConditionHistory.mockResolvedValue({} as any);
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockRoutersRepo.createConditionHistory.mockResolvedValue(mockConditionHistory);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.updateRouter.mockResolvedValue({
         ...mockRouter,

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { Role } from '@alfahd/types';
 import { RoutersController } from './routers.controller.js';
 import { RoutersService } from './routers.service.js';
 import type { JwtUser } from '../../auth/strategies/jwt.strategy.js';
@@ -25,7 +26,7 @@ describe('RoutersController', () => {
     userId: '11111111-1111-1111-1111-111111111111',
     email: 'admin@alfahd.local',
     tokenId: 'token-123',
-    role: 'ADMIN' as any,
+    role: Role.ADMIN,
   };
 
   const mockRouter: RouterDto = {

@@ -8,6 +8,7 @@ import { setupTestApp, getAuthHeader } from './test-utils.js';
 import { makeIpAddress, makeCreateIpDto, makeUpdateIpDto } from './fakers/index.js';
 import { envelopeData } from './utils/supertest.util.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
+import { IpService } from '../src/modules/ip-management/ip.service.js';
 import type { IpAddress, IpHistory } from '../src/database/schema/index.js';
 
 describe('IP Management (e2e)', () => {
@@ -111,7 +112,7 @@ describe('IP Management (e2e)', () => {
   }
 
   const mockRepositoryService = {
-    transaction: async (cb: (tx: any) => Promise<any>) => {
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
       const txId = nextTxId++;
       const tx: MockTx = {
         txId,
@@ -155,9 +156,10 @@ describe('IP Management (e2e)', () => {
       findById: async (id: string) => {
         return ipStore.find((i) => i.id === id);
       },
-      findByIdForUpdate: async (id: string, tx?: any) => {
-        if (tx?.txId) {
-          await acquireLock(id, tx.txId);
+      findByIdForUpdate: async (id: string, tx?: MockTx | unknown) => {
+        const mockTx = tx as MockTx | undefined;
+        if (mockTx?.txId) {
+          await acquireLock(id, mockTx.txId);
         }
         await new Promise((resolve) => setImmediate(resolve));
         return ipStore.find((i) => i.id === id) ?? null;
@@ -217,11 +219,12 @@ describe('IP Management (e2e)', () => {
         ipStore.push(created);
         return created;
       },
-      updateIp: async (id: string, updates: Partial<IpAddress>, tx?: any) => {
+      updateIp: async (id: string, updates: Partial<IpAddress>, tx?: MockTx | unknown) => {
         const idx = ipStore.findIndex((i) => i.id === id);
         if (idx === -1) return undefined;
-        if (tx && tx.modifiedIps && !tx.modifiedIps.has(id)) {
-          tx.modifiedIps.set(id, { ...ipStore[idx] });
+        const mockTx = tx as MockTx | undefined;
+        if (mockTx && mockTx.modifiedIps && !mockTx.modifiedIps.has(id)) {
+          mockTx.modifiedIps.set(id, { ...ipStore[idx] });
         }
         const candidate = {
           ...ipStore[idx],
@@ -234,7 +237,7 @@ describe('IP Management (e2e)', () => {
         ipStore[idx] = candidate;
         return ipStore[idx];
       },
-      createHistory: async (data: Partial<IpHistory>, tx?: any) => {
+      createHistory: async (data: Partial<IpHistory>, tx?: MockTx | unknown) => {
         const created: IpHistory = {
           id: 'hist-' + Math.random().toString(36).substring(2, 9),
           ipId: data.ipId!,
@@ -248,8 +251,9 @@ describe('IP Management (e2e)', () => {
           createdAt: new Date(),
         };
         historyStore.push(created);
-        if (tx && tx.createdHistoryIds) {
-          tx.createdHistoryIds.add(created.id);
+        const mockTx = tx as MockTx | undefined;
+        if (mockTx && mockTx.createdHistoryIds) {
+          mockTx.createdHistoryIds.add(created.id);
         }
         return created;
       },
@@ -398,7 +402,7 @@ describe('IP Management (e2e)', () => {
         .send(dto)
         .expect(201);
 
-      const data = envelopeData<any>(res);
+      const data = envelopeData<IpAddress>(res);
       expect(data).toMatchObject({
         address: '172.16.0.1',
         status: 'FREE',
@@ -564,7 +568,9 @@ describe('IP Management (e2e)', () => {
         .set(auth)
         .expect(200);
 
-      const updateHistory = histRes.body.data.find((h: any) => h.action === 'UPDATE_METADATA');
+      const updateHistory = histRes.body.data.find(
+        (h: IpHistory) => h.action === 'UPDATE_METADATA',
+      );
       expect(updateHistory).toBeDefined();
       expect(updateHistory.metadataBefore).toEqual({ notes: 'Free pool host' });
       expect(updateHistory.metadataAfter).toEqual({ notes: 'Updated notes via test' });
@@ -615,7 +621,7 @@ describe('IP Management (e2e)', () => {
         .expect(200);
 
       const clearHistory = histRes.body.data.find(
-        (h: any) =>
+        (h: IpHistory) =>
           h.action === 'UPDATE_METADATA' &&
           h.metadataBefore?.notes === 'Updated notes via test' &&
           h.metadataAfter?.notes === null,
@@ -661,7 +667,7 @@ describe('IP Management (e2e)', () => {
 
       expect(Array.isArray(res.body.data)).toBe(true);
       expect(res.body.data.length).toBeGreaterThan(0);
-      expect(res.body.data.some((h: any) => h.action === 'CREATE')).toBe(true);
+      expect(res.body.data.some((h: IpHistory) => h.action === 'CREATE')).toBe(true);
     });
   });
 
@@ -750,9 +756,7 @@ invalid-ip,Broken row`;
       const csvContent = rows.join('\n');
 
       // Verify directly on the service's processImportJob
-      const ipServiceObj = (app as any).get(
-        (await import('../src/modules/ip-management/ip.service.js')).IpService,
-      );
+      const ipServiceObj = app.get(IpService);
 
       const outcome = await ipServiceObj.processImportJob(
         csvContent,

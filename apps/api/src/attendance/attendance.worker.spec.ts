@@ -25,10 +25,17 @@ function firstColumnName(node: unknown): string | undefined {
   return names[0];
 }
 
+import type { Db } from '../database/database.module.js';
+import type { StorageService } from '../storage/storage.interface.js';
+
 describe('AttendanceReportWorker', () => {
   let worker: AttendanceReportWorker;
-  let dbMock: any;
-  let storageServiceMock: any;
+  let dbMock: {
+    select: ReturnType<typeof vi.fn>;
+  };
+  let storageServiceMock: {
+    uploadFile: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     dbMock = {
@@ -42,7 +49,10 @@ describe('AttendanceReportWorker', () => {
       }),
     };
 
-    worker = new AttendanceReportWorker(dbMock, storageServiceMock);
+    worker = new AttendanceReportWorker(
+      dbMock as unknown as Db,
+      storageServiceMock as unknown as StorageService,
+    );
   });
 
   it('generates an excel workbook, uploads it, and returns downloadUrl and totalRows', async () => {
@@ -85,7 +95,7 @@ describe('AttendanceReportWorker', () => {
           to: '2026-10-31',
         },
       },
-    } as any;
+    } as unknown as Parameters<typeof worker.process>[0];
 
     const result = await worker.process(job);
 
@@ -162,7 +172,7 @@ describe('AttendanceReportWorker', () => {
           department: 'TECHNICAL',
         },
       },
-    } as any;
+    } as unknown as Parameters<typeof worker.process>[0];
 
     const result = await worker.process(job);
 
@@ -211,7 +221,7 @@ describe('AttendanceReportWorker', () => {
 
     const job = {
       data: { type: 'ATTENDANCE_SUMMARY', params: { from: '2026-10-01', to: '2026-10-31' } },
-    } as any;
+    } as unknown as Parameters<typeof worker.process>[0];
 
     await worker.process(job);
 
@@ -249,7 +259,7 @@ describe('AttendanceReportWorker', () => {
 
     const job = {
       data: { type: 'ATTENDANCE_SUMMARY', params: { from: '2026-10-01', to: '2026-10-31' } },
-    } as any;
+    } as unknown as Parameters<typeof worker.process>[0];
 
     await worker.process(job);
 
@@ -264,7 +274,7 @@ describe('AttendanceReportWorker', () => {
   it('throws an error and refuses to process IP_CSV_IMPORT jobs (cannot silently consume imports as reports)', async () => {
     const job = {
       data: { type: 'IP_CSV_IMPORT', csvContent: 'address\n10.0.0.1' },
-    } as any;
+    } as unknown as Parameters<typeof worker.process>[0];
 
     await expect(worker.process(job)).rejects.toThrow('Unsupported report job type: IP_CSV_IMPORT');
   });
@@ -394,7 +404,7 @@ describe('AttendanceReportWorker', () => {
           type: 'ROUTER_INVENTORY_REPORT',
           params: {},
         },
-      } as any;
+      } as unknown as Parameters<typeof worker.process>[0];
 
       const result = await worker.process(job);
 
@@ -528,7 +538,7 @@ describe('AttendanceReportWorker', () => {
           type: 'ROUTER_INVENTORY_REPORT',
           params: {},
         },
-      } as any;
+      } as unknown as Parameters<typeof worker.process>[0];
 
       await worker.process(job);
 

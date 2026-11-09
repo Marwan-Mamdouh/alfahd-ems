@@ -43,7 +43,7 @@ pnpm monorepo (ESM, Node >=22.12). Active packages: `apps/api`, `apps/web` (`fah
 - Swagger: the API mounts Swagger UI at `/` (OpenAPI JSON at `/-json`) in non-production only. New endpoints/DTOs get `@nestjs/swagger` decorators (see `auth/` and `users/` for the pattern).
 - Nested agent docs: `apps/web/AGENTS.md` contains auto-generated Next.js rules ("this is NOT the Next.js you know" — check `node_modules/next/dist/docs/` before writing web code). Its marker block is **re-added by `next dev`** — do not remove it from a diff; committing it alongside your work keeps the tree clean. `apps/web/CLAUDE.md` is just `@AGENTS.md`.
 
-- ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is off; unused vars warn, ignore args prefixed `_`.
+- ESLint flat config `apps/api/eslint.config.mjs`: Prettier recommended; `@typescript-eslint/no-explicit-any` is error (strictly enforced across all files); unused vars warn, ignore args prefixed `_`.
 - Prettier/`.editorconfig`: single quotes, trailing commas, printWidth 100, 2-space indent, LF.
 - Default branch is `master`. CI runs on PRs to `master`; deploy-api runs on push to `master` (deployment step explicitly deferred, no Railway yet).
 - CI uses `packageManager` from `package.json` (pnpm 12.6, Node 24) with `--frozen-lockfile`; `pnpm audit --audit-level=high` runs but does not fail the build.

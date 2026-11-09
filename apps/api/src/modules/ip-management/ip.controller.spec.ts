@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { Role } from '@alfahd/types';
 import { IpController } from './ip.controller.js';
 import { IpService } from './ip.service.js';
 import type { JwtUser } from '../../auth/strategies/jwt.strategy.js';
@@ -13,7 +14,7 @@ describe('IpController', () => {
     userId: '11111111-1111-1111-1111-111111111111',
     email: 'admin@alfahd.local',
     tokenId: 'token-123',
-    role: 'ADMIN' as any,
+    role: Role.ADMIN,
   };
 
   const mockIp: IpAddressDto = {
@@ -208,7 +209,10 @@ describe('IpController', () => {
     it('should pass undefined buffer to enqueueImportCsv when file is missing', async () => {
       mockIpService.enqueueImportCsv.mockResolvedValue({ jobId: 'mock-import-job-id' });
 
-      const result = await controller.importCsv(undefined as any, mockUser);
+      const result = await controller.importCsv(
+        undefined as unknown as Express.Multer.File,
+        mockUser,
+      );
 
       expect(mockIpService.enqueueImportCsv).toHaveBeenCalledWith(undefined, mockUser.userId);
       expect(result).toEqual({ jobId: 'mock-import-job-id' });

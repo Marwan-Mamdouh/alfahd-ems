@@ -39,7 +39,7 @@ describe('WarehousesService', () => {
 
   const mockRepositoryService = {
     warehouses: mockWarehousesRepo,
-    transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb({})),
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
   };
 
   beforeEach(async () => {

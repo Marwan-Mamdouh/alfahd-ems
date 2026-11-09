@@ -20,7 +20,7 @@ describe('Warehouses (e2e)', () => {
   let warehouseStore: Warehouse[] = [];
 
   const mockRepositoryService = {
-    transaction: async (cb: (tx: any) => Promise<any>) => cb({}),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({}),
     warehouses: {
       findByName: async (name: string) => {
         return warehouseStore.find(
