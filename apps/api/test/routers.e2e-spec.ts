@@ -19,6 +19,7 @@ import { StorageService } from '../src/storage/storage.interface.js';
 import { FakeStorageService } from '../src/storage/fake-storage.service.js';
 import { AttendanceReportWorker } from '../src/attendance/attendance.worker.js';
 import type { Db } from '../src/database/database.module.js';
+import { insufficientStockMessage } from '../src/modules/repository/repositories/inventory.repository.js';
 import type {
   Router,
   RouterAssignment,
@@ -305,9 +306,7 @@ describe('Routers (e2e)', () => {
         if (delta < 0) {
           const currentQty = stock?.quantity ?? 0;
           if (!stock || currentQty + delta < 0) {
-            throw new BadRequestException(
-              `Insufficient stock in warehouse: available ${currentQty}, requested ${Math.abs(delta)}`,
-            );
+            throw new BadRequestException(insufficientStockMessage(currentQty, Math.abs(delta)));
           }
           stock.quantity += delta;
           stock.updatedAt = new Date();
@@ -1546,7 +1545,7 @@ describe('Routers (e2e)', () => {
         .send(assignDto);
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('Insufficient stock in warehouse');
+      expect(res.body.message).toBe(insufficientStockMessage(0, 1));
     });
 
     it('rejects competing concurrent retries with identical serial numbers (one 201, one 409 Conflict)', async () => {

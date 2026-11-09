@@ -12,6 +12,9 @@ import {
 import { DRIZZLE } from '../../../database/database.module.js';
 import { BaseRepository } from './base.repository.js';
 
+export const insufficientStockMessage = (available: number, requested: number): string =>
+  `Insufficient stock in warehouse: available ${available}, requested ${requested}`;
+
 export interface QueryInventoryParams {
   warehouseId?: string;
   productId?: string;
@@ -243,9 +246,7 @@ export class InventoryRepository extends BaseRepository<
 
         const currentQty = existing?.quantity ?? 0;
         if (!existing || currentQty + delta < 0) {
-          throw new BadRequestException(
-            `Insufficient stock in warehouse: available ${currentQty}, requested ${Math.abs(delta)}`,
-          );
+          throw new BadRequestException(insufficientStockMessage(currentQty, Math.abs(delta)));
         }
 
         const [updated] = await client

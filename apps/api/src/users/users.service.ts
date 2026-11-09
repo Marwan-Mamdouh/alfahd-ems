@@ -67,10 +67,7 @@ export class UsersService {
     return toUserDto(created);
   }
 
-  private async assertActiveWarehouseForAssignment(
-    warehouseId: string,
-    tx: Db,
-  ): Promise<void> {
+  private async assertActiveWarehouseForAssignment(warehouseId: string, tx: Db): Promise<void> {
     const [wh] = await tx
       .select({ id: warehouses.id, isActive: warehouses.isActive })
       .from(warehouses)
