@@ -206,7 +206,7 @@ export class InventoryRepository extends BaseRepository<
     movement: NewStockMovement,
     delta: number,
     tx?: NodePgDatabase<typeof schema>,
-  ): Promise<{ inventory: WarehouseInventory; movement: StockMovement }> {
+  ): Promise<{ inventory: WarehouseInventory | null; movement: StockMovement }> {
     const run = async (client: NodePgDatabase<typeof schema>) => {
       // Lock warehouse row to serialize with deactivation and validate active status
       const [wh] = await client
@@ -225,7 +225,7 @@ export class InventoryRepository extends BaseRepository<
         );
       }
 
-      let inventory: WarehouseInventory;
+      let inventory: WarehouseInventory | null;
 
       if (delta < 0) {
         // Outbound movement: lock inventory row and strictly enforce sufficient stock
@@ -290,13 +290,7 @@ export class InventoryRepository extends BaseRepository<
           )
           .limit(1);
 
-        inventory = existing ?? {
-          id: 'temp',
-          warehouseId: movement.warehouseId,
-          productId: movement.productId,
-          quantity: 0,
-          updatedAt: new Date(),
-        };
+        inventory = existing ?? null;
       }
 
       const [createdMovement] = await client
