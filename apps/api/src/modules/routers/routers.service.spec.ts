@@ -1236,6 +1236,90 @@ describe('RoutersService', () => {
       ).rejects.toThrow('Injected stock write failure');
     });
 
+    it('rolls back completely when a caller-owned externalTx fails after create writes', async () => {
+      const mockExternalTx = {} as any;
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockRoutersRepo.createRouter.mockResolvedValue(mockRouter);
+      mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+
+      // Caller simulates an outer transaction wrapping create + downstream step
+      await expect(
+        (async () => {
+          await service.create(
+            {
+              serialNumber: 'SN-CALLER-FAIL',
+              productId: mockProduct.id,
+              warehouseId: mockWarehouse.id,
+              isNewReceipt: true,
+            },
+            'admin-id',
+            mockExternalTx,
+          );
+          // Injected caller failure after create completes its router, custody, and movement writes
+          throw new Error('Injected caller failure after receipt writes');
+        })(),
+      ).rejects.toThrow('Injected caller failure after receipt writes');
+
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createRouter).toHaveBeenCalledWith(expect.anything(), mockExternalTx);
+      expect(mockRoutersRepo.createAssignment).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        1,
+        mockExternalTx,
+      );
+    });
+
+    it('rolls back completely when an injected failure occurs on audit write after movement in create with externalTx', async () => {
+      const mockExternalTx = {} as any;
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockInventoryRepo.getStockForUpdate.mockResolvedValue({ quantity: 5 });
+      mockRoutersRepo.countRegisteredUsableInWarehouse.mockResolvedValue(2);
+      mockRoutersRepo.createRouter.mockResolvedValue({
+        ...mockRouter,
+        physicalCondition: 'DAMAGED',
+      });
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockRoutersRepo.createConditionHistory.mockRejectedValueOnce(
+        new Error('Injected condition audit write failure'),
+      );
+
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-DAMAGED-ROLLBACK',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: false,
+            physicalCondition: 'DAMAGED',
+            notes: 'Damaged opening unit',
+          },
+          'admin-id',
+          mockExternalTx,
+        ),
+      ).rejects.toThrow('Injected condition audit write failure');
+
+      expect(mockRepositoryService.transaction).not.toHaveBeenCalled();
+      expect(mockRoutersRepo.createRouter).toHaveBeenCalledWith(expect.anything(), mockExternalTx);
+      expect(mockInventoryRepo.recordMovementWithDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        -1,
+        mockExternalTx,
+      );
+      expect(mockRoutersRepo.createConditionHistory).toHaveBeenCalledWith(
+        expect.anything(),
+        mockExternalTx,
+      );
+    });
+
     it('executes assign entirely within externalTx when provided', async () => {
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
       mockRoutersRepo.releaseActiveAssignment.mockResolvedValue(mockAssignment);
