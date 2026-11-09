@@ -87,7 +87,7 @@ export class WarehousesService {
       if (!canDelete) {
         throw new ConflictException(
           reason ??
-            'Cannot deactivate warehouse due to active inventory, staff, or located routers',
+            'Cannot deactivate warehouse due to active inventory, staff, located routers, or active custody',
         );
       }
 

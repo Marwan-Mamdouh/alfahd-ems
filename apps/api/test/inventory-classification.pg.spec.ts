@@ -826,16 +826,32 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
         physicalCondition: 'UNDER_REPAIR',
       },
     ]);
-    const custodyRouter = await routers.create(
-      { productId, warehouseId: custodyWh, serialNumber: randomUUID(), isNewReceipt: true },
-      actorId,
-    );
-    expect(custodyRouter.currentHolderType).toBe('WAREHOUSE');
+    const custodyRouterId = randomUUID();
+    await db.insert(schema.routers).values({
+      id: custodyRouterId,
+      productId,
+      warehouseId: null, // Router has active custody at custodyWh, but is NOT physically located there
+      serialNumber: randomUUID(),
+      status: 'AVAILABLE',
+      physicalCondition: 'SERVICEABLE',
+    });
+    await db.insert(schema.routerAssignments).values({
+      routerId: custodyRouterId,
+      holderType: 'WAREHOUSE',
+      warehouseId: custodyWh,
+      releasedAt: null,
+      assignedBy: actorId,
+    });
 
     for (const id of [stockWh, staffWh, techWh, damagedWh, underRepairWh, custodyWh]) {
       await expect(warehouses.remove(id)).rejects.toMatchObject({ status: 409 });
       expect((await repo.warehouses.findById(id))?.isActive).toBe(true);
     }
+
+    // Verify active-custody blocker fires specifically when physical routers, staff, and stock are 0
+    await expect(warehouses.remove(custodyWh)).rejects.toThrow(
+      /active router custody assignment\(s\)\. Release custody first\./,
+    );
   });
 
   it.each([
