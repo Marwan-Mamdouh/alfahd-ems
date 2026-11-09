@@ -341,7 +341,7 @@ describe('RoutersService', () => {
       expect(mockRoutersRepo.createAssignment).not.toHaveBeenCalled();
     });
 
-    it('maps a database unique constraint violation (code 23505) to ConflictException during concurrent retry', async () => {
+    it('maps a database unique constraint violation on serial number to ConflictException during concurrent retry', async () => {
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
@@ -350,7 +350,7 @@ describe('RoutersService', () => {
           new Error(
             'duplicate key value violates unique constraint "routers_serial_number_unique"',
           ),
-          { code: '23505' },
+          { code: '23505', constraint: 'routers_serial_number_unique' },
         ),
       );
 
@@ -365,6 +365,29 @@ describe('RoutersService', () => {
           'admin-id',
         ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('does not map a 23505 unique constraint violation from a different constraint to ConflictException', async () => {
+      mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      const foreignError = Object.assign(
+        new Error('duplicate key value violates unique constraint "some_other_unique"'),
+        { code: '23505', constraint: 'some_other_unique' },
+      );
+      mockRoutersRepo.createRouter.mockRejectedValueOnce(foreignError);
+
+      await expect(
+        service.create(
+          {
+            serialNumber: 'SN-OTHER-CONSTRAINT',
+            productId: mockProduct.id,
+            warehouseId: mockWarehouse.id,
+            isNewReceipt: true,
+          },
+          'admin-id',
+        ),
+      ).rejects.toThrow(foreignError);
     });
 
     it('rejects retrying an already registered serial without altering inventory stock or movements', async () => {
