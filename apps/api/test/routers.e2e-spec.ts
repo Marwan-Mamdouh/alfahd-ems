@@ -326,7 +326,10 @@ describe('Routers (e2e)', () => {
             stock.updatedAt = new Date();
           }
         }
-        return { inventory: stock!, movement: { id: 'mov-1', ...movement, createdAt: new Date() } };
+        return {
+          inventory: stock ?? null,
+          movement: { id: 'mov-1', ...movement, createdAt: new Date() },
+        };
       },
     },
   };
