@@ -194,7 +194,7 @@ describe('UsersService', () => {
   });
 
   describe('employee warehouse assignment validation', () => {
-    const mockSequences = (sequences: any[]) => {
+    const mockSequences = (sequences: unknown[]) => {
       let callCount = 0;
       dbMock.select = vi.fn(() => ({
         from: vi.fn(() => ({

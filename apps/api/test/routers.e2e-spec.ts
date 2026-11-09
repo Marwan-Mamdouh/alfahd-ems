@@ -129,7 +129,7 @@ describe('Routers (e2e)', () => {
             new Error(
               'duplicate key value violates unique constraint "routers_serial_number_unique"',
             ),
-            { code: '23505' },
+            { code: '23505', constraint: 'routers_serial_number_unique' },
           );
           throw err;
         }

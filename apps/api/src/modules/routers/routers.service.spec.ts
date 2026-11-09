@@ -1238,13 +1238,12 @@ describe('RoutersService', () => {
     });
 
     it('rolls back completely when a caller-owned externalTx fails after create writes', async () => {
-      const mockExternalTx = {} as any;
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
       mockRoutersRepo.createRouter.mockResolvedValue(mockRouter);
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
 
       // Caller simulates an outer transaction wrapping create + downstream step
       await expect(
@@ -1278,7 +1277,6 @@ describe('RoutersService', () => {
     });
 
     it('rolls back completely when an injected failure occurs on audit write after movement in create with externalTx', async () => {
-      const mockExternalTx = {} as any;
       mockRoutersRepo.findBySerialNumber.mockResolvedValue(undefined);
       mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
@@ -1288,7 +1286,7 @@ describe('RoutersService', () => {
         ...mockRouter,
         physicalCondition: 'DAMAGED',
       });
-      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce({} as any);
+      mockInventoryRepo.recordMovementWithDelta.mockResolvedValueOnce(mockMovementResult);
       mockRoutersRepo.createConditionHistory.mockRejectedValueOnce(
         new Error('Injected condition audit write failure'),
       );
