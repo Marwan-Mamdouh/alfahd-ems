@@ -122,8 +122,9 @@ export class RoutersService {
       );
 
       // 3. Initial custody row (WAREHOUSE) only if in serviceable warehouse state
+      let initialAssignment: schema.RouterAssignment | null = null;
       if (condition === 'SERVICEABLE') {
-        await this.repo.routers.createAssignment(
+        initialAssignment = await this.repo.routers.createAssignment(
           {
             routerId: router.id,
             holderType: 'WAREHOUSE',
@@ -185,7 +186,7 @@ export class RoutersService {
         );
       }
 
-      return this.mapToDto(router, null);
+      return this.mapToDto(router, initialAssignment);
     };
 
     try {

@@ -33,6 +33,7 @@ describe('WarehousesService', () => {
     countActiveInventory: vi.fn(),
     countAssignedStaff: vi.fn(),
     countPhysicallyLocatedRouters: vi.fn(),
+    countActiveCustodyRouters: vi.fn(),
     canDeleteWarehouse: vi.fn(),
     softDeactivate: vi.fn(),
   };
