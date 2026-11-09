@@ -5,6 +5,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { RoutersService } from './routers.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
+import { insufficientStockMessage } from '../repository/repositories/inventory.repository.js';
 import type * as schema from '../../database/schema/index.js';
 import type {
   Router,
@@ -1497,7 +1498,7 @@ describe('RoutersService', () => {
       mockRoutersRepo.createAssignment.mockResolvedValue(mockAssignment);
       mockRoutersRepo.updateRouter.mockResolvedValue(mockRouter);
       mockInventoryRepo.recordMovementWithDelta.mockRejectedValueOnce(
-        new BadRequestException('Insufficient stock in warehouse: available 0, requested 1'),
+        new BadRequestException(insufficientStockMessage(0, 1)),
       );
 
       await expect(
