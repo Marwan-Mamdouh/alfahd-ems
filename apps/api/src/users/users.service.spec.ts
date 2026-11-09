@@ -194,25 +194,28 @@ describe('UsersService', () => {
   });
 
   describe('employee warehouse assignment validation', () => {
-    it('rejects createEmployee with BadRequestException when assigned warehouse is inactive', async () => {
-      // First select: duplicate email check (returns empty [])
-      // Second select: warehouse check (returns inactive warehouse)
-      let selectCount = 0;
+    const mockSequences = (sequences: any[]) => {
+      let callCount = 0;
       dbMock.select = vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => {
-            selectCount++;
-            if (selectCount === 1) {
-              return { limit: vi.fn().mockResolvedValue([]) };
-            }
+            const result = sequences[callCount++];
             return {
+              limit: vi.fn().mockResolvedValue(result),
               for: vi.fn(() => ({
-                limit: vi.fn().mockResolvedValue([{ id: 'wh-inactive', isActive: false }]),
+                limit: vi.fn().mockResolvedValue(result),
               })),
             };
           }),
         })),
       }));
+    };
+
+    it('rejects createEmployee with BadRequestException when assigned warehouse is inactive', async () => {
+      mockSequences([
+        [], // duplicate email check
+        [{ id: 'wh-inactive', isActive: false }], // warehouse check
+      ]);
 
       await expect(
         service.createEmployee({
@@ -225,24 +228,10 @@ describe('UsersService', () => {
     });
 
     it('rejects updateEmployee with BadRequestException when assigned warehouse is inactive', async () => {
-      // First select: findRowOrThrow (returns user)
-      // Second select: warehouse check (returns inactive warehouse)
-      let selectCount = 0;
-      dbMock.select = vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => {
-            selectCount++;
-            if (selectCount === 1) {
-              return { limit: vi.fn().mockResolvedValue([baseUser]) };
-            }
-            return {
-              for: vi.fn(() => ({
-                limit: vi.fn().mockResolvedValue([{ id: 'wh-inactive', isActive: false }]),
-              })),
-            };
-          }),
-        })),
-      }));
+      mockSequences([
+        [baseUser], // findRowOrThrow
+        [{ id: 'wh-inactive', isActive: false }], // warehouse check
+      ]);
 
       await expect(
         service.updateEmployee('user-1', {
