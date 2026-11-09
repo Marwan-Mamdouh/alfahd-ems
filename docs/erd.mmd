@@ -1,0 +1,195 @@
+erDiagram
+    %% Relationships
+    warehouses ||--o{ users : "assigned_warehouse_id"
+    users ||--o{ attendance_records : "user_id"
+    users ||--o{ attendance_records : "overridden_by"
+
+    warehouses ||--o{ warehouse_inventory : "warehouse_id"
+    products ||--o{ warehouse_inventory : "product_id"
+
+    products ||--o{ stock_movements : "product_id"
+    warehouses ||--o{ stock_movements : "warehouse_id"
+    users ||--o{ stock_movements : "technician_id"
+    users ||--o{ stock_movements : "responsible_user_id"
+
+    products ||--o{ routers : "product_id"
+    warehouses ||--o{ routers : "warehouse_id"
+
+    routers ||--o{ router_assignments : "router_id"
+    warehouses ||--o{ router_assignments : "warehouse_id"
+    users ||--o{ router_assignments : "technician_id"
+    users ||--o{ router_assignments : "assigned_by"
+
+    routers ||--o{ router_condition_history : "router_id"
+    warehouses ||--o{ router_condition_history : "from_warehouse_id"
+    warehouses ||--o{ router_condition_history : "to_warehouse_id"
+    users ||--o{ router_condition_history : "changed_by"
+
+    routers ||--o{ router_status_history : "router_id"
+    users ||--o{ router_status_history : "changed_by"
+
+    ip_addresses ||--o{ ip_history : "ip_id"
+    users ||--o{ ip_history : "actor_id"
+
+    %% Tables
+    users {
+        uuid id PK
+        varchar(255) name
+        varchar(255) email UK
+        varchar(255) password_hash
+        role role
+        department department
+        varchar(30) phone
+        varchar(30) national_id
+        date hire_date
+        varchar(255) profile_photo_key
+        user_status status
+        uuid assigned_warehouse_id FK
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    warehouses {
+        uuid id PK
+        varchar(255) name
+        varchar(255) address
+        double_precision gps_lat
+        double_precision gps_lng
+        integer geofence_radius_meters
+        uuid manager_id
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    attendance_records {
+        uuid id PK
+        uuid user_id FK
+        date work_date
+        timestamptz check_in_at
+        double_precision check_in_lat
+        double_precision check_in_lng
+        double_precision check_in_distance_m
+        timestamptz check_out_at
+        attendance_status status
+        text override_reason
+        uuid overridden_by FK
+        timestamptz overridden_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    products {
+        uuid id PK
+        varchar(255) name
+        varchar(100) sku UK
+        varchar(255) model
+        varchar(100) category
+        text description
+        integer low_stock_threshold
+        boolean is_serialized
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    warehouse_inventory {
+        uuid id PK
+        uuid warehouse_id FK
+        uuid product_id FK
+        integer quantity
+        timestamptz updated_at
+    }
+
+    stock_movements {
+        uuid id PK
+        uuid product_id FK
+        uuid warehouse_id FK
+        stock_movement_type movement_type
+        integer quantity
+        varchar(255) supplier_name
+        uuid technician_id FK
+        uuid responsible_user_id FK
+        text notes
+        timestamptz created_at
+    }
+
+    routers {
+        uuid id PK
+        varchar(100) serial_number UK
+        uuid product_id FK
+        router_status status
+        router_physical_condition physical_condition
+        uuid warehouse_id FK
+        varchar(255) external_location
+        text notes
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    router_assignments {
+        uuid id PK
+        uuid router_id FK
+        router_holder_type holder_type
+        uuid warehouse_id FK
+        uuid technician_id FK
+        timestamptz assigned_at
+        timestamptz released_at
+        uuid assigned_by FK
+        text notes
+    }
+
+    router_condition_history {
+        uuid id PK
+        uuid router_id FK
+        router_physical_condition from_condition
+        router_physical_condition to_condition
+        uuid from_warehouse_id FK
+        uuid to_warehouse_id FK
+        varchar(255) external_location
+        text reason
+        uuid changed_by FK
+        timestamptz created_at
+    }
+
+    router_status_history {
+        uuid id PK
+        uuid router_id FK
+        router_status from_status
+        router_status to_status
+        text reason
+        uuid changed_by FK
+        timestamptz created_at
+    }
+
+    ip_addresses {
+        uuid id PK
+        inet address UK
+        ip_status status
+        boolean is_archived
+        uuid customer_id
+        text notes
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ip_history {
+        uuid id PK
+        uuid ip_id FK
+        ip_status from_status
+        ip_status to_status
+        ip_history_action action
+        text reason
+        jsonb metadata_before
+        jsonb metadata_after
+        uuid actor_id FK
+        timestamptz created_at
+    }
+
+    ip_import_row_outcomes {
+        uuid id PK
+        text job_id
+        integer row_number
+        text outcome
+        text reason
+    }
