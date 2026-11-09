@@ -62,6 +62,12 @@ export const users = pgTable('users', {
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
   role: roleEnum('role').notNull(),
+  // OI-02: department as a Postgres ENUM pending client confirmation of the final
+  // department taxonomy. Original schema spec (issue #6) called for VARCHAR until
+  // OI-02 resolves; the enum was shipped in migration 0002 with the current values
+  // from @alfahd/types DEPARTMENTS. If OI-02 changes the taxonomy, a new migration
+  // is needed (enum values are not easily dropped in Postgres).
+  // https://github.com/Marwan-Mamdouh/alfahd-ems/issues/6
   department: departmentEnum('department'),
   phone: varchar('phone', { length: 30 }),
   nationalId: varchar('national_id', { length: 30 }),
