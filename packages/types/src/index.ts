@@ -30,6 +30,12 @@ export interface RefreshTokenRequestDto {
 
 export interface RefreshTokenResponseDto {
   accessToken: string;
+  /**
+   * New opaque refresh token id issued by this refresh. The token just used is
+   * invalidated (rotation, issue #9). Mobile clients must persist it; the web
+   * client keeps using the HTTP-only cookie and ignores this field.
+   */
+  refreshToken: string;
 }
 
 export interface ForgotPasswordRequestDto {

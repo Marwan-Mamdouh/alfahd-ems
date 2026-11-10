@@ -153,7 +153,11 @@ describe('Auth (e2e) — refresh cookie transport', () => {
         return 'OK';
       }),
       get: vi.fn(async (key: string) => redisKeys.get(key) ?? null),
-      getdel: vi.fn(async () => null),
+      getdel: vi.fn(async (key: string) => {
+        const value = redisKeys.get(key) ?? null;
+        redisKeys.delete(key);
+        return value;
+      }),
       exists: vi.fn(async (key: string) => (redisKeys.has(key) ? 1 : 0)),
       smembers: vi.fn(async (key: string) => [...(redisSets.get(key) ?? [])]),
       // ZRANGE 0 -1 over the session index (member ids ordered by expiry score).
@@ -386,51 +390,79 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       expect(typeof res.body.data.accessToken).toBe('string');
     });
 
-    it('does NOT return a refreshToken in the body', async () => {
-      // The old frontend interceptor read this field and wrote it into the store,
-      // overwriting a valid token with undefined and forcing a logout.
-      const { cookie } = await login();
+    it('rotates refresh token on use: sets new cookie, returns new token in body, and invalidates old token (web flow)', async () => {
+      const { cookie: cookie1 } = await login();
+      const oldTokenId = cookie1.split('=')[1];
 
       const res = await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie1)
         .send({})
         .expect(200);
 
-      expect(res.body.data).not.toHaveProperty('refreshToken');
-    });
+      const cookie2 = refreshCookieFrom(res);
+      const newTokenId = cookie2.split('=')[1];
 
-    it('does not rotate the refresh token', async () => {
-      const { cookie } = await login();
-      const tokenId = cookie.split('=')[1];
+      expect(cookie2).not.toBe(cookie1);
+      expect(newTokenId).not.toBe(oldTokenId);
+      expect(res.body.data.refreshToken).toBe(newTokenId);
+      expect(typeof res.body.data.accessToken).toBe('string');
 
+      const cookies = res.headers['set-cookie'] as unknown as string[];
+      const setCookie = cookies?.find((c) => c.startsWith('refresh_token='));
+      expect(setCookie).toBeDefined();
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/Path=\/(;|$)/i);
+
+      // Replaying cookie1 again -> 401 (rotation: single-use)
       await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie1)
         .send({})
-        .expect(200);
-      // Same token id must still work: rotation is deferred (FR-004).
-      const res = await request(app.getHttpServer())
+        .expect(401);
+
+      // Refreshing with cookie2 (the rotated cookie) -> 200
+      const res2 = await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie2)
         .send({})
         .expect(200);
 
-      expect(res.body.data).toBeTruthy();
-      expect(cookie.split('=')[1]).toBe(tokenId);
+      expect(res2.body.data.accessToken).toBeDefined();
     });
 
-    it('still accepts a body token for mobile clients', async () => {
-      const { accessToken, cookie } = await login();
-      const tokenId = cookie.split('=')[1];
+    it('rotates refresh token via body and rejects replaying original token (mobile flow)', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(200);
 
-      const res = await request(app.getHttpServer())
+      const tokenId = loginRes.body.data.refreshToken;
+      expect(tokenId).toBeDefined();
+
+      const refreshRes = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refreshToken: tokenId })
         .expect(200);
 
-      expect(typeof res.body.data.accessToken).toBe('string');
-      expect(accessToken).toBeTruthy();
+      const rotatedToken = refreshRes.body.data.refreshToken;
+      expect(rotatedToken).toBeDefined();
+      expect(rotatedToken).not.toBe(tokenId);
+      expect(typeof refreshRes.body.data.accessToken).toBe('string');
+
+      // Replaying the original body token -> 401
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken: tokenId })
+        .expect(401);
+
+      // Using the rotated token -> 200
+      const refreshRes2 = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken: rotatedToken })
+        .expect(200);
+
+      expect(refreshRes2.body.data.accessToken).toBeDefined();
     });
 
     it('rejects a request with neither cookie nor body token', async () => {

@@ -1,4 +1,4 @@
-import { Role, type LoginResponseDto } from '@alfahd/types';
+import { Role, type LoginResponseDto, type RefreshTokenResponseDto } from '@alfahd/types';
 import {
   BadRequestException,
   ForbiddenException,
@@ -96,9 +96,9 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string, ip?: string): Promise<{ accessToken: string }> {
-    const session = await this.sessionService.findSessionByTokenId(refreshToken);
-    if (!session) {
+  async refresh(refreshToken: string, ip?: string): Promise<RefreshTokenResponseDto> {
+    const userId = await this.sessionService.consumeSession(refreshToken);
+    if (!userId) {
       const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
       if (revokedUserId) {
         this.logger.warn('Revoked refresh token reuse detected', {
@@ -109,14 +109,26 @@ export class AuthService {
           reason: 'revoked_token_reuse',
         });
       }
+      // Replay or unknown token => 401. Deliberate scope decision: do not revoke
+      // all sessions for the user to avoid logging out every tab on benign races.
       throw new UnauthorizedException('Invalid refresh token');
     }
-    const rows = await this.db.select().from(users).where(eq(users.id, session.userId)).limit(1);
+
+    const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
     const user = rows[0];
     if (!user || !user.isActive) {
+      // The old token is already consumed: this attempt ends that session.
       throw new UnauthorizedException('Invalid refresh token');
     }
-    return { accessToken: this.signAccessToken(user, refreshToken) };
+
+    const newTokenId = randomUUID();
+    await this.sessionService.createSession(user.id, newTokenId);
+    await this.sessionService.revokeSession(user.id, refreshToken);
+
+    return {
+      accessToken: this.signAccessToken(user, newTokenId),
+      refreshToken: newTokenId,
+    };
   }
 
   async logout(userId: string, tokenId: string): Promise<void> {

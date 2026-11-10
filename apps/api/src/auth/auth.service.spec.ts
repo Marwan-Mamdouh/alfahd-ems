@@ -68,6 +68,8 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
     consumePasswordResetToken: vi.fn(),
     revokeAllSessions: vi.fn().mockResolvedValue(0),
     findSessionByTokenId: vi.fn().mockResolvedValue(null),
+    consumeSession: vi.fn().mockResolvedValue(null),
+    revokeSession: vi.fn().mockResolvedValue(undefined),
     getRevokedTokenUserId: vi.fn().mockResolvedValue(null),
   } as unknown as SessionService;
 
@@ -83,7 +85,7 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
 
   const service = new AuthService(db, sessionService, jwtService, configService, emailService);
 
-  return { service, emailService, sessionService };
+  return { service, emailService, sessionService, jwtService };
 }
 
 describe('forgotPassword — must not reveal whether an account exists', () => {
@@ -232,7 +234,7 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSession).mockResolvedValue(null);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(ACTIVE_USER.id);
 
     await expect(service.refresh('stolen-token', '203.0.113.9')).rejects.toThrow(
@@ -254,10 +256,48 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSession).mockResolvedValue(null);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(null);
 
     await expect(service.refresh('unknown-token')).rejects.toThrow(UnauthorizedException);
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('refresh — token rotation (Issue #9)', () => {
+  it('rotates refresh token on use: consumes old, creates new session, revokes old, and signs with new jti', async () => {
+    const { service, sessionService, jwtService } = makeService({ rows: [ACTIVE_USER] });
+    vi.mocked(sessionService.consumeSession).mockResolvedValue(ACTIVE_USER.id);
+
+    const result = await service.refresh('old-token-id', '127.0.0.1');
+
+    expect(result.accessToken).toBe('signed.jwt.token');
+    expect(result.refreshToken).toBeDefined();
+    expect(result.refreshToken).not.toBe('old-token-id');
+    expect(result.refreshToken).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+
+    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+    expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sub: ACTIVE_USER.id,
+        jti: result.refreshToken,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects deactivated user with consumed token and does not create new session', async () => {
+    const { service, sessionService } = makeService({
+      rows: [{ ...ACTIVE_USER, isActive: false }],
+    });
+    vi.mocked(sessionService.consumeSession).mockResolvedValue(ACTIVE_USER.id);
+
+    await expect(service.refresh('old-token-id')).rejects.toThrow(UnauthorizedException);
+
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+    expect(sessionService.revokeSession).not.toHaveBeenCalled();
   });
 });

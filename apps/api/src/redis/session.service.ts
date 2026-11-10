@@ -58,6 +58,15 @@ export class SessionService {
     return userId ? { userId } : null;
   }
 
+  /**
+   * Atomically consume a refresh token id (GETDEL) so a token can be rotated at
+   * most once even under concurrent refresh requests. Returns the owning userId,
+   * or null when the id is unknown/expired/already consumed.
+   */
+  async consumeSession(tokenId: string): Promise<string | null> {
+    return this.redis.getdel(sessionKey(tokenId));
+  }
+
   async revokeSession(userId: string, tokenId: string): Promise<void> {
     const pipeline = this.redis.pipeline();
     pipeline.del(sessionKey(tokenId));

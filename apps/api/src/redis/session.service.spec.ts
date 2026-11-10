@@ -149,6 +149,21 @@ describe('SessionService', () => {
     expect(fake.redis.get).toHaveBeenCalledWith('rt:token:token-9');
   });
 
+  it('atomically consumes a session with GETDEL, returning userId and deleting rt:token:{id}', async () => {
+    await service.createSession('user-9', 'token-9');
+    expect(fake.store.get('rt:token:token-9')).toBe('user-9');
+    await expect(service.consumeSession('token-9')).resolves.toBe('user-9');
+    expect(fake.redis.getdel).toHaveBeenCalledWith('rt:token:token-9');
+    expect(fake.store.has('rt:token:token-9')).toBe(false);
+  });
+
+  it('consumeSession returns null for an unknown or already-consumed id', async () => {
+    await service.createSession('user-9', 'token-9');
+    await expect(service.consumeSession('token-9')).resolves.toBe('user-9');
+    await expect(service.consumeSession('token-9')).resolves.toBeNull();
+    await expect(service.consumeSession('missing')).resolves.toBeNull();
+  });
+
   it('revokes a single session, deindexes it, and marks the token as revoked', async () => {
     await service.createSession('user-1', 'token-1');
     await service.revokeSession('user-1', 'token-1');
