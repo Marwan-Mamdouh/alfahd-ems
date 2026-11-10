@@ -43,6 +43,9 @@ A requirements-quality review (`checklists/api.md`, `checklists/security.md`) fo
 | R11 | **Backend e2e coverage is added** for auth, users CRUD, and the RBAC guards, so the "fully functional and tested" assumption rests on evidence. | unevidenced assumption |
 | R12 | **Web calls go through a Next.js `/api/*` rewrite.** The browser talks only to the Vercel origin; Railway is reached server-side. This is what makes FR-008 implementable — the refresh cookie is same-origin and therefore readable by middleware — and it removes the cross-site constraint that forced `SameSite=None`. It also forces the cookie `Path` to `/`, since RFC 6265 prefix matching means neither `/auth` nor `/api/auth` reaches both the refresh route and the middleware-guarded page routes. | FR-008's original "read the httpOnly cookie" wording; R3's "cross-site ⇒ `SameSite=None`" premise and its `Path=/auth` |
 
+### Revision 2026-11-11 — Refresh Token Rotation (Issue #9)
+Refresh-token rotation is implemented on `POST /auth/refresh` (issue #9), superseding the `FR-004 (DEFERRED)` decision. Each successful refresh atomically consumes the presented refresh token (`GETDEL`), issues a new access token and rotated refresh token (delivered via HTTP-only cookie and JSON body), and revokes the old token id in Redis. Any replay of an already-used refresh token returns 401.
+
 ## Current State Assessment
 
 ### Frontend Pages (Built)
@@ -96,7 +99,7 @@ As a system user, I need the login page to authenticate against the real backend
 
 1. **Given** the login page is loaded, **When** a user submits valid email and password, **Then** the system calls `POST /auth/login`, receives real access and refresh tokens, stores them securely, and redirects to the dashboard.
 2. **Given** the login page is loaded, **When** a user submits invalid credentials, **Then** the system displays a clear error message ("Invalid credentials") and does not store any tokens. The message MUST be byte-identical whether the email is unknown or the password is wrong, and the frontend MUST NOT branch on the status code to produce a more specific message — an attacker must not be able to enumerate staff accounts through login.
-3. **Given** a user is authenticated, **When** the access token expires, **Then** the axios interceptor automatically calls `POST /auth/refresh` with the refresh token and retries the original request transparently.
+3. **Given** a user is authenticated, **When** the access token expires, **Then** the axios interceptor automatically calls `POST /auth/refresh` with the refresh token and retries the original request transparently. Each refresh returns a new token and invalidates the previous one (replay → 401).
 4. **Given** a user is authenticated, **When** the refresh token is invalid or expired, **Then** the system clears the session, dispatches a session-expired event, and redirects to the login page.
 5. **Given** a user is on the login page, **When** they click logout (or session expires), **Then** `POST /auth/logout` is called to revoke the refresh token on the server.
 
@@ -209,7 +212,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - **FR-001**: The login page MUST authenticate users via `POST /auth/login` with email and password — no fake/mock authentication.
 - **FR-002**: The access token MUST be held in memory only (Zustand state without persist middleware) and MUST NOT be written to `localStorage`, `sessionStorage`, or any JavaScript-readable cookie. The refresh token MUST be delivered to the browser only as an `httpOnly` cookie set by the backend and MUST NOT be exposed to JavaScript at any point.
 - **FR-003**: The axios instance MUST attach `Authorization: Bearer <accessToken>` via a request interceptor on every request except `/auth/login`, and MUST automatically attempt a refresh and retry the original request once on a 401 response.
-- **FR-004** (DEFERRED, backend-owned): Refresh token rotation is out of scope. `POST /auth/refresh` returns a new access token only; the same refresh token stays valid until logout or revocation. Rotation remains a follow-up backend task and MUST NOT be assumed by the frontend.
+- **FR-004**: Refresh token rotation is implemented on `POST /auth/refresh` (superseding the earlier DEFERRED status via Issue #9). Each successful refresh atomically consumes the presented refresh token (`GETDEL`), sets a new `httpOnly` refresh cookie, and returns the rotated token in the response body. The previous token is immediately invalidated (replay → 401).
 - **FR-005**: The system MUST clear all session state and redirect to login when the refresh token is invalid, expired, revoked, or absent.
 - **FR-006**: The dashboard MUST derive exactly three real KPIs from `GET /users` — total users, active users, active technicians. KPIs with no backing endpoint (tickets) MUST display a static placeholder and MUST NOT offer a retry control. A failed fetch is a distinct state that MUST offer retry on the real KPI cards.
 - **FR-007**: The users page MUST fetch and display real user data from `GET /users` (full array; client-side table only, no server pagination). Sorting and filtering MUST be client-side.

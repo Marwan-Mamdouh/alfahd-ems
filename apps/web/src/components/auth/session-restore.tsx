@@ -15,10 +15,10 @@ import { LoadingState } from "@/components/shared/states";
  * Recover display fields from the access token's JWT payload.
  *
  * This is **not** a security check — the server already verified the token when
- * it issued it. It exists only because `POST /auth/refresh` returns
- * `{ accessToken }` and nothing else, and there is **no profile endpoint**: the
- * `auth.me` entry in `endpoints.ts` points at a route the backend does not
- * implement, so calling it 404s.
+ * it issued it. It exists only because `POST /auth/refresh` returns no user
+ * profile (it returns `{ accessToken, refreshToken }`), and there is **no
+ * profile endpoint**: the `auth.me` entry in `endpoints.ts` points at a route
+ * the backend does not implement, so calling it 404s.
  *
  * The two tempting alternatives are both wrong: extending
  * `RefreshTokenResponseDto` with a `user` field would change a frozen contract

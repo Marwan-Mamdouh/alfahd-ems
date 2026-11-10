@@ -111,7 +111,9 @@ export class AuthController {
     }
 
     try {
-      return await this.authService.refresh(token, req.ip);
+      const result = await this.authService.refresh(token, req.ip);
+      res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, this.cookieOptions());
+      return result;
     } catch (error) {
       // Clear a REJECTED cookie. `httpOnly` means JavaScript cannot delete it,
       // and `POST /auth/logout` — the only other thing that clears it — needs a

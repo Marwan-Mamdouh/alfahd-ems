@@ -123,7 +123,7 @@ Then, with the `refresh_token` cookie **deleted**, reload:
 
 **Expected**: original request → 401, then `POST /api/auth/refresh` → 200, then the original request retried → 200. The user sees no interruption.
 
-The refresh response contains **only** `{ accessToken }` — no `refreshToken`, no rotation.
+The refresh response returns `{ accessToken, refreshToken }` and sets a rotated `refresh_token` cookie. The web client ignores the body `refreshToken` and relies on the updated cookie; mobile clients persist the new token.
 
 ---
 
@@ -249,7 +249,7 @@ pnpm --filter fahd-dashboard lint
 | Logout does not clear the cookie | `clearCookie` path ≠ set path | Both must be `/` — both derive from `REFRESH_COOKIE_PATH` |
 | Role shows raw `CS` | Display labels missing | Map `CS` → "خدمة العملاء" via `roleLabel()` in `core/auth/role-labels.ts`; the raw wire value is never rendered |
 | Table shows blank name/status columns | Using the old `AuthUser` type | `UserDto` has no `name`, `department`, or `status` — those columns must be removed |
-| Refresh response read as `undefined` token | Reading `refreshToken` off the refresh response | The field does not exist; the response carries `accessToken` only |
+| Refresh response read as `undefined` token | Web client attempting to manage refresh tokens in JavaScript | The field exists for mobile; the web client relies on the HTTP-only cookie and ignores the body token |
 | Header shows a blank name | Reading `user?.name` | `UserDto` has no `name`; render `user?.email` |
 | Login 429s during ordinary use | Login is limited to 5 attempts / 10 min / IP, and it counts **all** attempts including successes | Wait for the window to pass. No `Retry-After` header is sent, so the UI cannot show a countdown |
 | `pnpm --filter @alfahd/api test:e2e` fails to connect | Redis/Postgres not running | `pnpm infra:up`. The `pg` pool connects lazily, so unit tests need no docker — e2e does |

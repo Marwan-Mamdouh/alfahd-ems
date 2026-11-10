@@ -89,6 +89,12 @@ export class RefreshTokenResponseDto implements RefreshTokenResponse {
     description: 'New JWT access token',
   })
   accessToken!: string;
+
+  @ApiProperty({
+    example: '3f0c9a3e-5f1b-4f0e-9d5a-2b8c7d6e1a44',
+    description: 'Rotated refresh token that replaces the one just used (mobile clients)',
+  })
+  refreshToken!: string;
 }
 
 export class AuthOkResponseDto {

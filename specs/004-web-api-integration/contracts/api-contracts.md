@@ -115,15 +115,16 @@ Body fallback (mobile, and any client without a cookie jar):
 
 **Resolution order**: cookie first, then body. If neither is present → 401.
 
-**Response (200)** — wrapped as `{ "data": { "accessToken": "..." } }`. **Returns the access token only.** No `refreshToken` field, no rotation — the same refresh token stays valid.
+**Response (200)** — wrapped as `{ "data": { "accessToken": "...", "refreshToken": "..." } }`. Returns the new access token and rotated refresh token. The endpoint sets a new `refresh_token` HTTP-only cookie for web clients. The old token id is atomically consumed and invalidated, so any replay of the old token returns 401.
 
-> The previous version of the frontend interceptor read `refreshToken` off this response and wrote it into the store. Since the field does not exist, this set the stored token to `undefined`, guaranteeing a forced logout on the second 401 in a session. The interceptor no longer reads it.
+> Mobile clients persist the new `refreshToken` from the response body; the web client keeps using the updated `httpOnly` cookie and ignores the body field.
 
-**Response (401)**: Invalid, expired, or revoked refresh token.
+**Response (401)**: Invalid, expired, or revoked refresh token (including any replayed token).
 
 **Side Effects**:
-- Backend validates the Redis session and denylist for the token id
-- **None otherwise** — no rotation, no `Set-Cookie`
+- Backend atomically consumes the old token id (`GETDEL`) and marks it revoked in the Redis denylist
+- Backend creates a new session in Redis for the rotated token id
+- Backend sets a new `refresh_token` cookie (`Set-Cookie`) with the rotated token id
 
 **Required client behaviour**: send the request with credentials (`withCredentials: true`), otherwise the cookie is not sent and the call 401s.
 

@@ -26,6 +26,8 @@
 
 **Consequence**: the frontend must not assume a new refresh token arrives. Reading `refreshToken` off the refresh response — which the existing interceptor does — sets it to `undefined` and forces a logout on the second 401.
 
+**Update (2026-11-11, Issue #9)**: Refresh token rotation was implemented on `POST /auth/refresh` by issue #9. Each refresh issues a new access token and rotated refresh token, atomically consumes the previous token via `GETDEL`, and marks it revoked. The web client continues to use the HTTP-only cookie and ignores the body token.
+
 ## R-003: API Integration Pattern — CONFIRMED
 
 **Decision**: reuse the existing Axios instance and correct its interceptors. No new HTTP client.
