@@ -466,3 +466,158 @@ export interface RouterReportQueryDto {
   warehouseId?: string;
 }
 
+// ─── Stock Movement ───────────────────────────────────────────────────────────
+export const STOCK_MOVEMENT_TYPES = [
+  'INBOUND_SUPPLIER',
+  'OUTBOUND_TECHNICIAN',
+  'RETURN_TECHNICIAN',
+  'TRANSFER_WAREHOUSE',
+  'ADJUSTMENT',
+] as const;
+
+export const StockMovementType = toValueMap(STOCK_MOVEMENT_TYPES);
+
+export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
+
+// ─── Warehouse DTOs ───────────────────────────────────────────────────────────
+export interface WarehouseDto {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters: number;
+  managerId: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWarehouseDto {
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters?: number;
+  managerId?: string | null;
+}
+
+export interface UpdateWarehouseDto {
+  name?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  geofenceRadiusMeters?: number;
+  managerId?: string | null;
+  isActive?: boolean;
+}
+
+export interface QueryWarehousesDto {
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// ─── Product DTOs ─────────────────────────────────────────────────────────────
+export interface ProductDto {
+  id: string;
+  name: string;
+  sku: string;
+  model: string;
+  category: string;
+  description: string | null;
+  lowStockThreshold: number;
+  isSerialized: boolean;
+  createdAt: string;
+  updatedAt: string;
+  totalStock?: number;
+  isLowStock?: boolean;
+}
+
+export interface CreateProductDto {
+  name: string;
+  sku: string;
+  model: string;
+  category: string;
+  description?: string | null;
+  lowStockThreshold?: number;
+}
+
+export interface UpdateProductDto {
+  name?: string;
+  model?: string;
+  category?: string;
+  description?: string | null;
+  lowStockThreshold?: number;
+}
+
+export interface QueryProductsDto {
+  search?: string;
+  category?: string;
+  isLowStock?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ─── Inventory DTOs ───────────────────────────────────────────────────────────
+export interface InboundStockDto {
+  productId: string;
+  warehouseId: string;
+  quantity: number;
+  supplierName?: string;
+  notes?: string;
+}
+
+export interface OutboundStockDto {
+  productId: string;
+  warehouseId: string;
+  quantity: number;
+  technicianId: string;
+  notes?: string;
+}
+
+export interface ReturnStockDto {
+  productId: string;
+  warehouseId: string;
+  quantity: number;
+  technicianId: string;
+  notes?: string;
+}
+
+export interface TransferStockDto {
+  productId: string;
+  sourceWarehouseId: string;
+  targetWarehouseId: string;
+  quantity: number;
+  notes?: string;
+}
+
+export interface AdjustStockDto {
+  productId: string;
+  warehouseId: string;
+  quantity: number;
+  notes?: string;
+}
+
+export interface StockMovementDto {
+  id: string;
+  productId: string;
+  warehouseId: string;
+  movementType: StockMovementType;
+  quantity: number;
+  supplierName?: string | null;
+  technicianId?: string | null;
+  responsibleUserId: string;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface InventoryBalanceDto {
+  id: string;
+  warehouseId: string;
+  productId: string;
+  quantity: number;
+  updatedAt: string;
+}
+
+
