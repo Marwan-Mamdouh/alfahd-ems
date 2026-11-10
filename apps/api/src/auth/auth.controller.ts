@@ -11,6 +11,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -57,6 +58,7 @@ export class AuthController {
   @ApiOkResponse({ description: 'Authentication successful', type: LoginResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid email or password input' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiForbiddenResponse({ description: 'Account is inactive' })
   @ApiResponse({
     status: 429,
     description: 'Too many failed login attempts; Retry-After is in seconds',
