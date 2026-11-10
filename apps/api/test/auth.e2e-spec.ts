@@ -469,12 +469,47 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       await request(app.getHttpServer()).post('/auth/refresh').send({}).expect(401);
     });
 
-    it('rejects an unknown token id', async () => {
-      await request(app.getHttpServer())
+    it('rejects an unknown token id and clears cookie', async () => {
+      const res = await request(app.getHttpServer())
         .post('/auth/refresh')
         .set('Cookie', 'refresh_token=not-a-real-token')
         .send({})
         .expect(401);
+
+      const cookies = res.headers['set-cookie'] as unknown as string[] | undefined;
+      const cleared = cookies?.find((c) => c.startsWith('refresh_token='));
+      expect(cleared).toBeDefined();
+    });
+
+    it('does not clear cookie on replay of rotated refresh token (retains winning cookie for other tabs)', async () => {
+      const { cookie: cookie1 } = await login();
+
+      const refreshRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(200);
+
+      const cookie2 = refreshCookieFrom(refreshRes);
+
+      // Replay of cookie1 (e.g. losing concurrent tab) -> 401
+      const replayRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(401);
+
+      // Must NOT clear the cookie: winning tab's cookie must survive
+      const replayCookies = replayRes.headers['set-cookie'] as unknown as string[] | undefined;
+      const clearedCookie = replayCookies?.find((c) => c.startsWith('refresh_token='));
+      expect(clearedCookie).toBeUndefined();
+
+      // Subsequent refresh with cookie2 (the winning cookie) -> 200
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie2)
+        .send({})
+        .expect(200);
     });
 
     it('rejects a revoked token (logout invalidates the session)', async () => {
@@ -540,6 +575,32 @@ describe('Auth (e2e) — refresh cookie transport', () => {
 
     it('requires a bearer token', async () => {
       await request(app.getHttpServer()).post('/auth/logout').expect(401);
+    });
+
+    it('invalidates rotated sessions even when called with a pre-rotation access token (account-wide logout)', async () => {
+      const { accessToken: access1, cookie: cookie1 } = await login();
+
+      // Refresh rotates the session and issues cookie2
+      const refreshRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(200);
+
+      const cookie2 = refreshCookieFrom(refreshRes);
+
+      // Logout with access1 (carrying stale pre-rotation jti) -> 200
+      await request(app.getHttpServer())
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${access1}`)
+        .expect(200);
+
+      // Subsequent refresh with cookie2 must return 401
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie2)
+        .send({})
+        .expect(401);
     });
   });
 

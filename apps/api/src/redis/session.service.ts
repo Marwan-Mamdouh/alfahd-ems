@@ -4,6 +4,7 @@ import { REDIS_CLIENT } from './redis.constants.js';
 
 export const REFRESH_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 export const REVOKED_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+export const ROTATED_TOKEN_TTL_SECONDS = REVOKED_TOKEN_TTL_SECONDS;
 export const PASSWORD_RESET_TTL_SECONDS = 3600; // 1 hour
 export const PASSWORD_RESET_KEY_PREFIX = 'pwd_reset:';
 
@@ -34,6 +35,10 @@ export function revokedKey(tokenId: string): string {
   return `rv:${tokenId}`;
 }
 
+export function rotatedKey(tokenId: string): string {
+  return `rt:rotated:${tokenId}`;
+}
+
 @Injectable()
 export class SessionService {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
@@ -52,12 +57,6 @@ export class SessionService {
     await pipeline.exec();
   }
 
-  /** Resolve the owning userId for a refresh tokenId. Refresh tokens are UUIDs, not JWTs. */
-  async findSessionByTokenId(tokenId: string): Promise<{ userId: string } | null> {
-    const userId = await this.redis.get(sessionKey(tokenId));
-    return userId ? { userId } : null;
-  }
-
   /**
    * Atomically consume a refresh token id (GETDEL) so a token can be rotated at
    * most once even under concurrent refresh requests. Returns the owning userId,
@@ -65,6 +64,20 @@ export class SessionService {
    */
   async consumeSession(tokenId: string): Promise<string | null> {
     return this.redis.getdel(sessionKey(tokenId));
+  }
+
+  /**
+   * Record that a tokenId was rotated on refresh. Distinguishes rotated tokens
+   * from genuinely dead/unknown tokens so concurrent or losing refresh attempts
+   * do not clear the winning tab's newly set cookie.
+   */
+  async markRotated(userId: string, tokenId: string): Promise<void> {
+    await this.redis.set(rotatedKey(tokenId), userId, 'EX', ROTATED_TOKEN_TTL_SECONDS);
+  }
+
+  /** True when the tokenId was rotated on a previous refresh request. */
+  async isRotated(tokenId: string): Promise<boolean> {
+    return (await this.redis.exists(rotatedKey(tokenId))) === 1;
   }
 
   async revokeSession(userId: string, tokenId: string): Promise<void> {

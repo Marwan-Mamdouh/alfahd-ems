@@ -115,13 +115,14 @@ export class AuthController {
       res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, this.cookieOptions());
       return result;
     } catch (error) {
-      // Clear a REJECTED cookie. `httpOnly` means JavaScript cannot delete it,
-      // and `POST /auth/logout` — the only other thing that clears it — needs a
-      // valid access token, which the caller does not have here. Leaving a dead
-      // cookie in the browser traps the web client: the middleware guard sees the
-      // cookie and bounces every navigation to /dashboard, while every API call
-      // 401s, so the user can never reach the login form.
-      if (error instanceof UnauthorizedException) {
+      // Clear a genuinely dead or invalid cookie (missing/expired/admin-revoked).
+      // If the token was rotated on a previous refresh request (e.g. concurrent
+      // tabs where a losing request presents the pre-rotation token), do NOT
+      // clear the cookie, so the winning tab's updated session is not deleted.
+      if (
+        error instanceof UnauthorizedException &&
+        !(await this.authService.wasRotatedRefreshToken(token))
+      ) {
         res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
       }
       throw error;
@@ -139,7 +140,7 @@ export class AuthController {
     @Req() req: Request & { user: JwtUser },
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthOkResponseDto> {
-    await this.authService.logout(req.user.userId, req.user.tokenId);
+    await this.authService.logout(req.user.userId);
     // Path must match the path used when setting the cookie, or the browser
     // retains it and the session appears to survive logout.
     res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
