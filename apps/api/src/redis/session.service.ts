@@ -39,6 +39,14 @@ export function rotatedKey(tokenId: string): string {
   return `rt:rotated:${tokenId}`;
 }
 
+const CONSUME_AND_MARK_ROTATED = `
+local userId = redis.call('GETDEL', KEYS[1])
+if userId then
+  redis.call('SET', KEYS[2], userId, 'EX', ARGV[1])
+end
+return userId
+`;
+
 @Injectable()
 export class SessionService {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
@@ -58,12 +66,30 @@ export class SessionService {
   }
 
   /**
-   * Atomically consume a refresh token id (GETDEL) so a token can be rotated at
-   * most once even under concurrent refresh requests. Returns the owning userId,
-   * or null when the id is unknown/expired/already consumed.
+   * Atomically consume a refresh token id (GETDEL) and write the rotated marker
+   * (`rt:rotated:{tokenId}` EX <ttl>) in a single Lua script execution.
+   *
+   * This eliminates the race window between consuming the old token and marking
+   * it as rotated, so a losing concurrent tab calling refresh never observes the
+   * token as an unknown/dead token and therefore does not clear the winner's cookie.
    */
-  async consumeSession(tokenId: string): Promise<string | null> {
-    return this.redis.getdel(sessionKey(tokenId));
+  async consumeSessionForRotation(tokenId: string): Promise<string | null> {
+    return this.redis.eval(
+      CONSUME_AND_MARK_ROTATED,
+      2,
+      sessionKey(tokenId),
+      rotatedKey(tokenId),
+      ROTATED_TOKEN_TTL_SECONDS,
+    ) as Promise<string | null>;
+  }
+
+  /**
+   * Remove the rotated marker for a token id. Used when an inactive/deactivated user
+   * attempts a refresh: since the account is inactive, the session is dead and the
+   * client cookie SHOULD be cleared.
+   */
+  async clearRotated(tokenId: string): Promise<void> {
+    await this.redis.del(rotatedKey(tokenId));
   }
 
   /**

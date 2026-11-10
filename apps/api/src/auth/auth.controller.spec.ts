@@ -9,6 +9,35 @@ import type { RateLimitGuard } from './guards/rate-limit.guard.js';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '../config/refresh-cookie.js';
 import type { LoginRequestDto, LoginResponseDto, RefreshTokenResponseDto } from './dto.js';
 
+function makeController(
+  authServiceOverrides: Partial<Record<keyof AuthService, unknown>> = {},
+  configOverrides: Partial<Record<string, unknown>> = {},
+) {
+  const authService = {
+    login: vi.fn(),
+    refresh: vi.fn(),
+    logout: vi.fn(),
+    wasRotatedRefreshToken: vi.fn().mockResolvedValue(false),
+    ...authServiceOverrides,
+  } as unknown as AuthService;
+
+  const configService = {
+    get: vi.fn((key: string) => {
+      if (key in configOverrides) return configOverrides[key];
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
+      return undefined;
+    }),
+  } as unknown as ConfigService;
+
+  const rateLimitGuard = {
+    recordFailure: vi.fn().mockResolvedValue(undefined),
+  } as unknown as RateLimitGuard;
+
+  const controller = new AuthController(authService, configService, rateLimitGuard);
+  return { controller, authService, configService, rateLimitGuard };
+}
+
 describe('AuthController', () => {
   describe('login — delivery channels contract (Issue #8)', () => {
     /**
@@ -34,23 +63,9 @@ describe('AuthController', () => {
         },
       };
 
-      const authService = {
+      const { controller } = makeController({
         login: vi.fn().mockResolvedValue(mockResult),
-      } as unknown as AuthService;
-
-      const configService = {
-        get: vi.fn((key: string) => {
-          if (key === 'NODE_ENV') return 'test';
-          if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
-          return undefined;
-        }),
-      } as unknown as ConfigService;
-
-      const rateLimitGuard = {
-        recordFailure: vi.fn().mockResolvedValue(undefined),
-      } as unknown as RateLimitGuard;
-
-      const controller = new AuthController(authService, configService, rateLimitGuard);
+      });
 
       const req = {} as Request;
       const res = {
@@ -90,21 +105,9 @@ describe('AuthController', () => {
         refreshToken: 'new-token-id',
       };
 
-      const authService = {
+      const { controller, authService } = makeController({
         refresh: vi.fn().mockResolvedValue(mockResult),
-      } as unknown as AuthService;
-
-      const configService = {
-        get: vi.fn((key: string) => {
-          if (key === 'NODE_ENV') return 'test';
-          if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
-          return undefined;
-        }),
-      } as unknown as ConfigService;
-
-      const rateLimitGuard = {} as RateLimitGuard;
-
-      const controller = new AuthController(authService, configService, rateLimitGuard);
+      });
 
       const req = {
         cookies: { [REFRESH_COOKIE_NAME]: 'old-token' },
@@ -128,18 +131,10 @@ describe('AuthController', () => {
     });
 
     it('failure: clears rejected cookie with REFRESH_COOKIE_PATH on UnauthorizedException for unknown token', async () => {
-      const authService = {
+      const { controller, authService } = makeController({
         refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
         wasRotatedRefreshToken: vi.fn().mockResolvedValue(false),
-      } as unknown as AuthService;
-
-      const configService = {
-        get: vi.fn(),
-      } as unknown as ConfigService;
-
-      const rateLimitGuard = {} as RateLimitGuard;
-
-      const controller = new AuthController(authService, configService, rateLimitGuard);
+      });
 
       const req = {
         cookies: { [REFRESH_COOKIE_NAME]: 'invalid-token' },
@@ -158,18 +153,10 @@ describe('AuthController', () => {
     });
 
     it('failure: does NOT clear cookie on UnauthorizedException if token was rotated', async () => {
-      const authService = {
+      const { controller, authService } = makeController({
         refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
         wasRotatedRefreshToken: vi.fn().mockResolvedValue(true),
-      } as unknown as AuthService;
-
-      const configService = {
-        get: vi.fn(),
-      } as unknown as ConfigService;
-
-      const rateLimitGuard = {} as RateLimitGuard;
-
-      const controller = new AuthController(authService, configService, rateLimitGuard);
+      });
 
       const req = {
         cookies: { [REFRESH_COOKIE_NAME]: 'old-rotated-token' },
@@ -188,17 +175,9 @@ describe('AuthController', () => {
 
   describe('logout', () => {
     it('revokes all sessions for userId and clears refresh cookie', async () => {
-      const authService = {
+      const { controller, authService } = makeController({
         logout: vi.fn().mockResolvedValue(undefined),
-      } as unknown as AuthService;
-
-      const configService = {
-        get: vi.fn(),
-      } as unknown as ConfigService;
-
-      const rateLimitGuard = {} as RateLimitGuard;
-
-      const controller = new AuthController(authService, configService, rateLimitGuard);
+      });
 
       const req = {
         user: {

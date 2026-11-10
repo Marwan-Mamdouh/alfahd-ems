@@ -251,14 +251,14 @@ pnpm --filter fahd-dashboard typecheck
 
 #### T05: Rewrite the axios instance
 
-**Why**: The current interceptor has two defects and one missing piece. It reads `data.data.refreshToken` from the refresh response, which the backend does not return — so it overwrites state with `undefined` and forces a logout on the second 401. It has **no request interceptor**, so no ordinary request carries `Authorization: Bearer` (SC-002 is false today). And refresh sends the token in the body instead of using the cookie.
+**Why**: The current interceptor has two defects and one missing piece. It reads `data.data.refreshToken` from the refresh response, which the backend did not return at the time of writing this feature (Issue #9 now returns the rotated token in the body, which the web client ignores) — so it overwrites state with `undefined` and forces a logout on the second 401. It has **no request interceptor**, so no ordinary request carries `Authorization: Bearer` (SC-002 is false today). And refresh sends the token in the body instead of using the cookie.
 
 **File**: `apps/web/src/core/api/axios-instance.ts` (67 lines; read it first)
 
 **Change**:
 1. `baseURL` → `'/api'` (relative, goes through the rewrite). Keep `withCredentials: true`.
 2. **Add** a request interceptor: read `accessToken` from `useAuthStore.getState()` and set `Authorization: Bearer <token>` on every request except `/auth/login`, `/auth/forgot-password`, `/auth/reset-password`.
-3. **Rewrite** `refreshAccessToken()`: `POST /api/auth/refresh` with **no body token** (the cookie carries it). Store only the returned `accessToken`. Do not read a `refreshToken` field — it does not exist.
+3. **Rewrite** `refreshAccessToken()`: `POST /api/auth/refresh` with **no body token** (the cookie carries it). Store only the returned `accessToken`. Do not store the returned refreshToken - the web client relies on the rotated HTTP-only cookie; the body field is for mobile only.
 4. Keep the existing single-flight `refreshPromise` and `_retry` guard — both are correct.
 5. **Add** GET retry per FR-021: auto-retry `GET` only, max 2 attempts, ~300ms then ~900ms backoff, then reject. Do not retry `POST`/`PATCH`/`DELETE`. Must not interfere with the 401 refresh path.
 6. Export a `logout()` helper that calls `/auth/logout` and clears the store.
@@ -659,6 +659,6 @@ Then confirm, in the browser, each Success Criterion that has a manual check:
 
 > **`apps/web` has no test runner.** Web correctness rests on typecheck, lint, and the manual scenarios in `quickstart.md`. Do not add Vitest to `apps/web` — it is out of scope, and "add tests" is not a substitute for running T17.
 
-> **The refresh response carries no user, and there is no profile endpoint.** `POST /auth/refresh` returns `{ accessToken }` only, and `GET /auth/me` — though declared in `endpoints.ts` — does not exist on the backend. T12 therefore decodes the user from the JWT. Both tempting wrong answers (extending the backend contract, or calling `/auth/me`) are called out explicitly in T12. A cheap model will otherwise reach for one of them, because `endpoints.ts` makes `/auth/me` look real.
+> **The refresh response carries no user, and there is no profile endpoint.** `POST /auth/refresh` returns `{ accessToken, refreshToken }` (the refresh token rotates; the web client still ignores it and relies on the cookie), and `GET /auth/me` — though declared in `endpoints.ts` — does not exist on the backend. T12 therefore decodes the user from the JWT. Both tempting wrong answers (extending the backend contract, or calling `/auth/me`) are called out explicitly in T12. A cheap model will otherwise reach for one of them, because `endpoints.ts` makes `/auth/me` look real.
 
 > **Two tasks carry deliberate traps and name their wrong answers inline.** T08 (cookie name) and T12 (user object on reload) each have a specific way to get them wrong that typechecks cleanly: inventing a cookie name, and reading a `user` field or calling the non-existent `GET /auth/me`. `checklists/delegation.md` is the reviewer gate for these and four other high-delegation-risk tasks.

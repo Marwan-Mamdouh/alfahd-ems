@@ -133,20 +133,39 @@ describe('Auth (e2e) — refresh cookie transport', () => {
           _script: string,
           _keys: number,
           key: string,
-          now: number,
+          now: number | string,
           window: number,
           max: number,
         ) => {
+          if (_script.includes('GETDEL')) {
+            const sessionK = key;
+            const rotatedK = String(now);
+            const userId = redisKeys.get(sessionK) ?? null;
+            if (userId) {
+              redisKeys.delete(sessionK);
+              redisKeys.set(rotatedK, userId);
+            }
+            return userId;
+          }
           const zset = redisZsets.get(key);
           if (!zset) return 0;
           for (const [member, score] of zset) {
-            if (score <= now - window) zset.delete(member);
+            if (score <= Number(now) - window) zset.delete(member);
           }
           if (zset.size < max) return 0;
           const expiryScore = [...zset.values()].sort((a, b) => a - b)[zset.size - max];
-          return Math.max(1, Math.ceil((expiryScore + window - now) / 1000));
+          return Math.max(1, Math.ceil((expiryScore + window - Number(now)) / 1000));
         },
       ),
+      del: vi.fn(async (...keys: string[]) => {
+        let count = 0;
+        for (const k of keys) {
+          if (redisKeys.delete(k)) count++;
+          redisSets.delete(k);
+          redisZsets.delete(k);
+        }
+        return count;
+      }),
       set: vi.fn(async (key: string, value: string, _mode: string, _ttl?: number) => {
         redisKeys.set(key, value);
         redisSetArgs.set(key, value);
@@ -300,6 +319,8 @@ describe('Auth (e2e) — refresh cookie transport', () => {
     return cookie.split(';')[0];
   }
 
+  const tokenFrom = (setCookie: string) => setCookie.split('=')[1];
+
   async function login(email = admin.email): Promise<{ accessToken: string; cookie: string }> {
     const res = await request(app.getHttpServer())
       .post('/auth/login')
@@ -392,7 +413,7 @@ describe('Auth (e2e) — refresh cookie transport', () => {
 
     it('rotates refresh token on use: sets new cookie, returns new token in body, and invalidates old token (web flow)', async () => {
       const { cookie: cookie1 } = await login();
-      const oldTokenId = cookie1.split('=')[1];
+      const oldTokenId = tokenFrom(cookie1);
 
       const res = await request(app.getHttpServer())
         .post('/auth/refresh')
@@ -401,7 +422,7 @@ describe('Auth (e2e) — refresh cookie transport', () => {
         .expect(200);
 
       const cookie2 = refreshCookieFrom(res);
-      const newTokenId = cookie2.split('=')[1];
+      const newTokenId = tokenFrom(cookie2);
 
       expect(cookie2).not.toBe(cookie1);
       expect(newTokenId).not.toBe(oldTokenId);
@@ -508,6 +529,37 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       await request(app.getHttpServer())
         .post('/auth/refresh')
         .set('Cookie', cookie2)
+        .send({})
+        .expect(200);
+    });
+
+    it('handles concurrent refreshes with the same cookie: exactly one succeeds and the losing 401 does not clear the cookie', async () => {
+      const { cookie } = await login();
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).send({}),
+        request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).send({}),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      expect(statuses).toEqual([200, 401]);
+
+      const failedRes = res1.status === 401 ? res1 : res2;
+      const successRes = res1.status === 200 ? res1 : res2;
+
+      // The 401 must not clear the cookie (the winner's cookie must survive)
+      const failedCookies = failedRes.headers['set-cookie'] as unknown as string[] | undefined;
+      const clearedCookie = failedCookies?.find((c) => c.startsWith('refresh_token='));
+      expect(clearedCookie).toBeUndefined();
+
+      // The winning refresh provided a valid rotated cookie
+      const rotatedCookie = refreshCookieFrom(successRes);
+      expect(rotatedCookie).toBeDefined();
+
+      // Subsequent refresh with rotated cookie succeeds
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', rotatedCookie)
         .send({})
         .expect(200);
     });
