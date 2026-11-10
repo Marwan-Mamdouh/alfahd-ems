@@ -32,7 +32,7 @@ The inner payload of `POST /auth/login` (wrapped as `{ data: ... }`).
 | Field | Type | Description |
 |-------|------|-------------|
 | `accessToken` | `string` | Short-lived JWT (default 15 min) — stored in **memory only** |
-| `refreshToken` | `string?` | Opaque UUID (7 days, Redis `rt:{userId}:{tokenId}`). Present in the body for the **mobile** client. The **web** client ignores it and never stores it — the cookie carries it |
+| `refreshToken` | `string?` | Opaque UUID (7 days, Redis `rt:token:{tokenId}` + `rt:user_tokens:{userId}`). Present in the body for the **mobile** client. The **web** client ignores it and never stores it — the cookie carries it |
 | `user` | `UserDto` | Authenticated user profile |
 
 **Source**: `@alfahd/types`
@@ -43,9 +43,10 @@ The inner payload of `POST /auth/refresh`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `accessToken` | `string` | A new access token |
+| `accessToken` | `string` | A new access token (with `jti` matching the new refresh token ID) |
+| `refreshToken` | `string` | Rotated opaque UUID (7 days, Redis `rt:token:{newId}`). Present in the body for the **mobile** client; the **web** client ignores it and relies on the rotated HTTP-only cookie |
 
-**No `refreshToken` field, and no rotation** — the same refresh token stays valid until logout or revocation. Any frontend code reading `refreshToken` off this response is reading a field that does not exist.
+**Rotated on each use**: On `POST /auth/refresh`, the presented token is atomically consumed (`GETDEL`), a new refresh token ID is minted and stored, the old ID is denylisted (`rv:{oldId}` for 7 days), and the cookie is updated. Any replay of an old token returns 401.
 
 **Source**: `@alfahd/types`
 
@@ -93,12 +94,13 @@ Not part of `UserDto` — do not use in this feature. `apps/web` declares both l
 
 ## State Transitions
 
-### Session State (no rotation — refresh reuses the same tokenId)
+### Session State (rotation — each refresh issues a new tokenId)
 
 ```
-[Logged Out] → login() → [Logged In]
-[Logged In] → logout() → [Logged Out] (tokenId denylisted `rv:{tokenId}`)
-[Logged In] → token expired → refresh() → [Logged In] (new access token, same refresh token)
+[Logged Out] → login() → [Logged In] (tokenId A stored in Redis)
+[Logged In] → logout() → [Logged Out] (account sessions revoked, tokenIds denylisted `rv:{tokenId}`)
+[Logged In] → token expired → refresh() → [Logged In] (tokenId A consumed & denylisted `rv:{A}`, new tokenId B issued, new access token with jti=B)
+[Logged In] → replayed refresh (A reused) → 401 Unauthorized (denylist hit logged)
 [Logged In] → refresh failed → [Logged Out]
 [Logged In] → admin revokes/deactivates → effective at next refresh/login, not on in-flight token
 ```
@@ -139,12 +141,12 @@ Not part of `UserDto` — do not use in this feature. `apps/web` declares both l
 - **Password**: Minimum 8 characters on create and change-password
 - **Role**: Must be a valid `Role` enum value on create/update
 - **Access token**: JWT from `Authorization: Bearer` header, verified against `JWT_ACCESS_SECRET`, claims `sub`, `email`, `role`, `jti`
-- **Refresh token**: Opaque UUID, resolved via Redis `rt:{userId}:{tokenId}` (7-day TTL). Web clients send it **only** in the `httpOnly` cookie; mobile clients send it in the request body. Never in JavaScript on the web.
-- **Refresh response**: contains `accessToken` **only**. It carries no user object, so a page reload restores the token but not the profile — the plan must resolve how the user is recovered on mount (see `plan.md` T12) rather than assuming a field the backend does not return.
+- **Refresh token**: Opaque UUID, resolved via Redis `rt:token:{tokenId}` + `rt:user_tokens:{userId}` (7-day TTL). Web clients send it **only** in the `httpOnly` cookie; mobile clients send it in the request body. Never in JavaScript on the web.
+- **Refresh response**: contains `accessToken` and rotated `refreshToken`. It carries no user object, so a page reload restores the token but not the profile — the plan must resolve how the user is recovered on mount (see `plan.md` T12) rather than assuming a field the backend does not return.
 
 ## Relationships
 
 ```
 AuthUser 1 ← → 0..* Session (via userId)
-Session 1 ← → 1 RefreshToken (via tokenId)
+Session 1 ← → 0..* RefreshToken (via tokenId; 1 active, older IDs revoked on rotation)
 ```

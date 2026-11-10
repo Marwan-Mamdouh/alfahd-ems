@@ -127,9 +127,10 @@ describe('AuthController', () => {
       expect(result).toEqual(mockResult);
     });
 
-    it('failure: clears rejected cookie with REFRESH_COOKIE_PATH on UnauthorizedException and propagates error', async () => {
+    it('failure: clears rejected cookie with REFRESH_COOKIE_PATH on UnauthorizedException for unknown token', async () => {
       const authService = {
         refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
+        wasRotatedRefreshToken: vi.fn().mockResolvedValue(false),
       } as unknown as AuthService;
 
       const configService = {
@@ -150,9 +151,78 @@ describe('AuthController', () => {
 
       await expect(controller.refresh({}, req, res)).rejects.toThrow(UnauthorizedException);
 
+      expect(authService.wasRotatedRefreshToken).toHaveBeenCalledWith('invalid-token');
       expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
         path: REFRESH_COOKIE_PATH,
       });
+    });
+
+    it('failure: does NOT clear cookie on UnauthorizedException if token was rotated', async () => {
+      const authService = {
+        refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
+        wasRotatedRefreshToken: vi.fn().mockResolvedValue(true),
+      } as unknown as AuthService;
+
+      const configService = {
+        get: vi.fn(),
+      } as unknown as ConfigService;
+
+      const rateLimitGuard = {} as RateLimitGuard;
+
+      const controller = new AuthController(authService, configService, rateLimitGuard);
+
+      const req = {
+        cookies: { [REFRESH_COOKIE_NAME]: 'old-rotated-token' },
+      } as unknown as Request;
+      const res = {
+        cookie: vi.fn(),
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      await expect(controller.refresh({}, req, res)).rejects.toThrow(UnauthorizedException);
+
+      expect(authService.wasRotatedRefreshToken).toHaveBeenCalledWith('old-rotated-token');
+      expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes all sessions for userId and clears refresh cookie', async () => {
+      const authService = {
+        logout: vi.fn().mockResolvedValue(undefined),
+      } as unknown as AuthService;
+
+      const configService = {
+        get: vi.fn(),
+      } as unknown as ConfigService;
+
+      const rateLimitGuard = {} as RateLimitGuard;
+
+      const controller = new AuthController(authService, configService, rateLimitGuard);
+
+      const req = {
+        user: {
+          userId: 'user-123',
+          email: 'admin@alfahd.local',
+          role: Role.ADMIN,
+          tokenId: 'token-abc',
+        },
+      } as unknown as Request & {
+        user: { userId: string; email: string; role: Role; tokenId: string };
+      };
+
+      const res = {
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      const result = await controller.logout(req as never, res);
+
+      expect(authService.logout).toHaveBeenCalledTimes(1);
+      expect(authService.logout).toHaveBeenCalledWith('user-123');
+      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
+        path: REFRESH_COOKIE_PATH,
+      });
+      expect(result).toEqual({ ok: true });
     });
   });
 });

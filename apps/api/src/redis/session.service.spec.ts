@@ -3,7 +3,10 @@ import {
   PASSWORD_RESET_TTL_SECONDS,
   REFRESH_SESSION_TTL_SECONDS,
   REVOKED_TOKEN_TTL_SECONDS,
+  ROTATED_TOKEN_TTL_SECONDS,
   SessionService,
+  revokedKey,
+  rotatedKey,
   sessionKey,
   userTokensKey,
 } from './session.service.js';
@@ -140,15 +143,6 @@ describe('SessionService', () => {
     expect(zset?.has('fresh-token')).toBe(true); // new session indexed
   });
 
-  it('resolves userId from a bare tokenId with a single GET (no SCAN)', async () => {
-    await service.createSession('user-9', 'token-9');
-    await expect(service.findSessionByTokenId('token-9')).resolves.toEqual({ userId: 'user-9' });
-    await expect(service.findSessionByTokenId('missing')).resolves.toBeNull();
-    // Regression guard: refresh is a hot path and must never iterate the keyspace.
-    expect(fake.redis.scan).not.toHaveBeenCalled();
-    expect(fake.redis.get).toHaveBeenCalledWith('rt:token:token-9');
-  });
-
   it('atomically consumes a session with GETDEL, returning userId and deleting rt:token:{id}', async () => {
     await service.createSession('user-9', 'token-9');
     expect(fake.store.get('rt:token:token-9')).toBe('user-9');
@@ -208,15 +202,38 @@ describe('SessionService', () => {
 
   it('never issues KEYS or SCAN — lookups are GET/ZRANGE only', async () => {
     await service.createSession('user-1', 'token-1');
-    await service.findSessionByTokenId('token-1');
+    await service.consumeSession('token-1');
     await service.revokeAllSessions('user-1');
     expect('keys' in fake.redis).toBe(false);
     expect(fake.redis.scan).not.toHaveBeenCalled();
   });
 
+  it('records a token as rotated with a 7-day TTL and verifies rotation status', async () => {
+    await service.markRotated('user-1', 'token-1');
+    expect(fake.store.get('rt:rotated:token-1')).toBe('user-1');
+    expect(fake.redis.set).toHaveBeenCalledWith(
+      'rt:rotated:token-1',
+      'user-1',
+      'EX',
+      ROTATED_TOKEN_TTL_SECONDS,
+    );
+    expect(ROTATED_TOKEN_TTL_SECONDS).toBe(604800);
+    await expect(service.isRotated('token-1')).resolves.toBe(true);
+    await expect(service.isRotated('unknown-token')).resolves.toBe(false);
+  });
+
+  it('revokeSession does not mark a token as rotated', async () => {
+    await service.createSession('user-1', 'token-1');
+    await service.revokeSession('user-1', 'token-1');
+    await expect(service.isRevoked('token-1')).resolves.toBe(true);
+    await expect(service.isRotated('token-1')).resolves.toBe(false);
+  });
+
   it('exposes stable key helpers', () => {
     expect(sessionKey('abc')).toBe('rt:token:abc');
     expect(userTokensKey('u1')).toBe('rt:user_tokens:u1');
+    expect(revokedKey('r1')).toBe('rv:r1');
+    expect(rotatedKey('rot1')).toBe('rt:rotated:rot1');
   });
 
   it('stores password-reset tokens with a 1-hour TTL', async () => {
