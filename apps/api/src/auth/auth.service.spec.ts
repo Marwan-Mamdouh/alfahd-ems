@@ -1,7 +1,15 @@
 import { describe, expect, it, vi, beforeAll } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
-import { hash } from 'argon2';
-import { AuthService } from './auth.service.js';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { hash, verify } from 'argon2';
+import { AuthService, DUMMY_HASH } from './auth.service.js';
+
+vi.mock('argon2', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('argon2')>();
+  return {
+    ...actual,
+    verify: vi.fn(actual.verify),
+  };
+});
 import type { Db } from '../database/database.module.js';
 import type { EmailService } from '../email/email.service.js';
 import type { SessionService } from '../redis/session.service.js';
@@ -116,6 +124,23 @@ describe('forgotPassword — must not reveal whether an account exists', () => {
 });
 
 describe('login — wrong password and unknown email are indistinguishable', () => {
+  it('returns access token, refresh token, and user dto for valid credentials', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    const result = await service.login('admin@alfahd.local', PASSWORD);
+
+    expect(result).toHaveProperty('accessToken', 'signed.jwt.token');
+    expect(result).toHaveProperty('refreshToken');
+    expect(result.user).toEqual({
+      id: ACTIVE_USER.id,
+      email: ACTIVE_USER.email,
+      role: ACTIVE_USER.role,
+      isActive: true,
+      createdAt: ACTIVE_USER.createdAt.toISOString(),
+    });
+    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+  });
+
   it('throws the same UnauthorizedException for a wrong password', async () => {
     const { service } = makeService({ rows: [ACTIVE_USER] });
 
@@ -142,6 +167,41 @@ describe('login — wrong password and unknown email are indistinguishable', () 
     );
 
     expect(sessionService.createPasswordResetToken).not.toHaveBeenCalled();
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenException (403) for an inactive user with valid credentials', async () => {
+    const { service, sessionService } = makeService({
+      rows: [{ ...ACTIVE_USER, isActive: false }],
+    });
+
+    await expect(service.login('admin@alfahd.local', PASSWORD)).rejects.toThrow(ForbiddenException);
+
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+  });
+
+  it('runs the same single hash verify against a dummy hash when the user does not exist (no user-enumeration path)', async () => {
+    // Non-enumeration timing mitigation: verify must run against DUMMY_HASH for unknown emails
+    // so wall time matches an existing account with an invalid password.
+    const verifyMock = vi.mocked(verify);
+
+    // Path 1: Nonexistent email
+    const { service: ghostService } = makeService({ rows: [] });
+    verifyMock.mockClear();
+    await expect(ghostService.login('ghost@fahdgroup.com', 'wrong-password')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(verifyMock).toHaveBeenCalledTimes(1);
+    expect(verifyMock).toHaveBeenCalledWith(DUMMY_HASH, 'wrong-password');
+
+    // Path 2: Existing user with wrong password
+    const { service: existingService } = makeService({ rows: [ACTIVE_USER] });
+    verifyMock.mockClear();
+    await expect(existingService.login('admin@alfahd.local', 'wrong-password')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(verifyMock).toHaveBeenCalledTimes(1);
+    expect(verifyMock).toHaveBeenCalledWith(ACTIVE_USER.passwordHash, 'wrong-password');
   });
 });
 

@@ -1,6 +1,7 @@
 import { Role, type LoginResponseDto } from '@alfahd/types';
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -17,6 +18,11 @@ import { users, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
 import { SessionService } from '../redis/session.service.js';
+
+// Fixed argon2id dummy hash with the same cost parameters as ARGON2_OPTIONS
+// (m=65536, t=3, p=1). Safe to parse and verify; always returns false.
+export const DUMMY_HASH =
+  '$argon2id$v=19$m=65536,p=1,t=3$Qyj4rKb7LqEEH5DTNIuaMg$hK00Pkq2YCFstEGrCMjt0Fb/+owHrnS7uT4w6dRZk7s';
 
 export interface AccessTokenPayload {
   sub: string;
@@ -60,10 +66,27 @@ export class AuthService {
   }
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
-    const user = await this.findActiveUserByEmail(email);
-    if (!user || !(await verify(user.passwordHash, password))) {
+    const rows = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+    const user = rows[0];
+
+    // Constant-time failure path: if user does not exist, run a dummy argon2 verify
+    // so wall time is comparable to an existing user with wrong credentials, preventing
+    // user enumeration through timing differences.
+    if (!user) {
+      await verify(DUMMY_HASH, password);
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    const isPasswordValid = await verify(user.passwordHash, password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Inactive/deactivated users with valid credentials must be rejected with 403 Forbidden.
+    if (!user.isActive) {
+      throw new ForbiddenException('Account is inactive');
+    }
+
     const tokenId = randomUUID();
     await this.sessionService.createSession(user.id, tokenId);
     return {

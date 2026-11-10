@@ -358,13 +358,13 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       expect(res.body.message).toBe('Invalid credentials');
     });
 
-    it('rejects a deactivated user without setting a cookie', async () => {
+    it('rejects a deactivated user with 403 Forbidden without setting a cookie', async () => {
       admin.isActive = false;
 
       const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: admin.email, password: PASSWORD })
-        .expect(401);
+        .expect(403);
 
       expect(res.headers['set-cookie']).toBeUndefined();
       admin.isActive = true;
