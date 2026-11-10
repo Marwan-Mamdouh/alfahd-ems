@@ -20,6 +20,8 @@
 
 ## R-002: Refresh Token Rotation — SUPERSEDED
 
+> **UPDATE (2026-11-11, Issue #9): rotation is implemented. The decision below is historical and no longer describes the backend.**
+
 **Decision (original)**: implement rotation on every refresh.
 
 **Why it is superseded**: `AuthService.refresh()` (`apps/api/src/auth/auth.service.ts`) re-signs with the **same** `tokenId`. No rotation exists, and implementing it is not this feature's job. The spec records it as `FR-004 (DEFERRED, backend-owned)`.

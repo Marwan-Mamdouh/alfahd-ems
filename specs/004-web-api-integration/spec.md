@@ -59,7 +59,7 @@ Refresh-token rotation is implemented on `POST /auth/refresh` (issue #9), supers
 
 ### Frontend Auth Infrastructure (Built)
 - **Auth Store** (Zustand + persist): Stores `accessToken`, `refreshToken`, `user` in `localStorage` — **a known XSS exposure that this feature removes**
-- **Axios Instance**: Refresh-token interceptor with single-flight deduplication. **Two defects, both fixed by this feature:** (a) it reads `data.data.refreshToken` from the refresh response, which the backend does not return, so it overwrites the stored refresh token with `undefined` and forces a logout on the second 401; (b) there is **no request interceptor** at all, so no request carries `Authorization: Bearer` except the 401-retry path — SC-002 is therefore false today.
+- **Axios Instance**: Refresh-token interceptor with single-flight deduplication. **Two defects, both fixed by this feature:** (a) it reads `data.data.refreshToken` from the refresh response, which the backend did not return at the time of writing this feature (Issue #9 now returns the rotated token in the body, which the web client ignores), so it overwrites the stored refresh token with `undefined` and forces a logout on the second 401; (b) there is **no request interceptor** at all, so no request carries `Authorization: Bearer` except the 401-retry path — SC-002 is therefore false today.
 - **Route Guard** (`proxy.ts`): Checks for the JS-writable `fahd-session` cookie, which `auth.store.ts` writes via `document.cookie` with `samesite=strict`. This feature removes that flag cookie entirely; the guard reads the same-origin `httpOnly` refresh cookie instead, enabled by the `/api/*` rewrite (R12).
 - **Base URL**: `axios-instance.ts` uses `process.env.NEXT_PUBLIC_API_URL` directly as `baseURL`, with an absolute URL hard-coded for the refresh call. With the rewrite, both become relative `/api` paths (FR-008).
 - **Role Guard** (`RoleGuard`): Client-side permission checking via `hasPermission()`
@@ -134,7 +134,7 @@ As a security-conscious administrator, I need tokens stored and managed securely
 
 1. **Given** a user logs in, **When** tokens are received, **Then** the access token is held in memory only (Zustand state, no persist middleware) and is NOT written to `localStorage`; the refresh token is set by the backend as an `httpOnly` cookie and is never exposed to JavaScript.
 2. **Given** a user has an active session, **When** the page is reloaded or reopened, **Then** the frontend calls `POST /auth/refresh` on mount and the backend reads the `httpOnly` cookie, so the session is restored without a re-login prompt.
-3. **Given** a user is signed in and a refresh occurs, **When** the backend issues a new access token, **Then** the same refresh token remains valid — this feature does **not** introduce rotation (see FR-004).
+3. **Given** a user is signed in and a refresh occurs, **When** the backend issues a new access token, **Then** the presented refresh token is invalidated, a new one is issued, and replaying the old token returns 401 (FR-004, Issue #9).
 4. **Given** an admin revokes a user's session, **When** the user makes their next request, **Then** the refresh is rejected and their session is cleared within the access token's remaining lifetime (≤15 min), and immediately on any refresh attempt.
 
 ---
@@ -266,7 +266,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - **SC-005**: The users page displays real data from `GET /users` with client-side sort and filter — no mock data remains, and no server pagination is used.
 - **SC-006**: Unauthorized access attempts are blocked with appropriate error messages — no data leaks to unauthenticated users, and no protected request is issued without a bearer token.
 - **SC-007**: Session expiry or logout propagates to all open tabs within 5 seconds of the originating tab acting, measurable by timestamping the broadcast and the redirect in each tab.
-- **SC-008** (DEFERRED): Removed from this feature's acceptance. Tracked as a backend follow-up.
+- **SC-008** (IMPLEMENTED, Issue #9): Refresh-token rotation is covered by API unit and e2e tests (`apps/api/src/auth/auth.service.spec.ts`, `apps/api/test/auth.e2e-spec.ts`).
 - **SC-009**: The refresh token is never present in `localStorage`, `sessionStorage`, or `document.cookie` after login — verifiable by inspecting each store and the cookie jar.
 - **SC-010**: A page reload with a valid refresh cookie restores the session without a re-login prompt; with the cookie cleared, the app lands on login and makes no retry loop against `/api/auth/refresh`. The cookie must survive the rewrite intact — verified by confirming it is sent on both `/api/auth/refresh` and `/dashboard`.
 - **SC-011**: A `GET` that fails with a transient 5xx or network error retries at most twice before the error state appears, and a `POST` that fails the same way issues exactly one network call — verified by counting requests in a mocked-interceptor test.

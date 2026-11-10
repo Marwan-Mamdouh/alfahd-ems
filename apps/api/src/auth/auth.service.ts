@@ -97,17 +97,26 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string, ip?: string): Promise<RefreshTokenResponseDto> {
-    const userId = await this.sessionService.consumeSession(refreshToken);
+    const userId = await this.sessionService.consumeSessionForRotation(refreshToken);
     if (!userId) {
-      const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
-      if (revokedUserId) {
-        this.logger.warn('Revoked refresh token reuse detected', {
+      if (await this.sessionService.isRotated(refreshToken)) {
+        this.logger.warn('Rotated refresh token replayed', {
           tokenId: refreshToken,
-          userId: revokedUserId,
           ip: ip ?? 'unknown',
           timestamp: new Date().toISOString(),
-          reason: 'revoked_token_reuse',
+          reason: 'rotated_token_replay',
         });
+      } else {
+        const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
+        if (revokedUserId) {
+          this.logger.warn('Revoked refresh token reuse detected', {
+            tokenId: refreshToken,
+            userId: revokedUserId,
+            ip: ip ?? 'unknown',
+            timestamp: new Date().toISOString(),
+            reason: 'revoked_token_reuse',
+          });
+        }
       }
       // Replay or unknown token => 401. Deliberate scope decision: do not revoke
       // all sessions for the user to avoid logging out every tab on benign races.
@@ -119,8 +128,9 @@ export class AuthService {
     const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
     const user = rows[0];
     if (!user || !user.isActive) {
-      // The old token is already consumed: revoking it in Redis denylist records
-      // the termination and attributes any subsequent replay attempt.
+      // Inactive/deactivated user: clear the rotated marker so the controller
+      // clears the dead cookie, and revoke in denylist for attribution.
+      await this.sessionService.clearRotated(refreshToken);
       await this.sessionService.revokeSession(userId, refreshToken);
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -128,7 +138,6 @@ export class AuthService {
     const newTokenId = randomUUID();
     await this.sessionService.createSession(user.id, newTokenId);
     await this.sessionService.revokeSession(user.id, refreshToken);
-    await this.sessionService.markRotated(user.id, refreshToken);
 
     return {
       accessToken: this.signAccessToken(user, newTokenId),
@@ -137,7 +146,7 @@ export class AuthService {
   }
 
   /**
-   * Check whether a tokenId was previously rotated. Used by the controller to
+   * Facade delegating to SessionService.isRotated. Used by the controller to
    * prevent clearing a newly-rotated cookie when a losing concurrent tab fails.
    */
   async wasRotatedRefreshToken(tokenId: string): Promise<boolean> {

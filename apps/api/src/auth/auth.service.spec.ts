@@ -67,7 +67,8 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
     createPasswordResetToken: vi.fn().mockResolvedValue(undefined),
     consumePasswordResetToken: vi.fn(),
     revokeAllSessions: vi.fn().mockResolvedValue(0),
-    consumeSession: vi.fn().mockResolvedValue(null),
+    consumeSessionForRotation: vi.fn().mockResolvedValue(null),
+    clearRotated: vi.fn().mockResolvedValue(undefined),
     revokeSession: vi.fn().mockResolvedValue(undefined),
     markRotated: vi.fn().mockResolvedValue(undefined),
     isRotated: vi.fn().mockResolvedValue(false),
@@ -231,11 +232,33 @@ describe('resetPassword — revokes live sessions (HARD-08)', () => {
 });
 
 describe('refresh — attributes revoked-token replay to the targeted account (HARD-03)', () => {
+  it('logs benign rotated refresh token replay with reason rotated_token_replay', async () => {
+    const { service, sessionService } = makeService();
+    const warnSpy = vi.fn();
+    (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(true);
+
+    await expect(service.refresh('rotated-token', '203.0.113.9')).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toBe('Rotated refresh token replayed');
+    expect(warnSpy.mock.calls[0][1]).toMatchObject({
+      tokenId: 'rotated-token',
+      ip: '203.0.113.9',
+      reason: 'rotated_token_replay',
+    });
+    expect(sessionService.getRevokedTokenUserId).not.toHaveBeenCalled();
+  });
+
   it('logs the stored userId when a revoked refresh token is replayed', async () => {
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.consumeSession).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(false);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(ACTIVE_USER.id);
 
     await expect(service.refresh('stolen-token', '203.0.113.9')).rejects.toThrow(
@@ -257,7 +280,8 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.consumeSession).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(false);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(null);
 
     await expect(service.refresh('unknown-token')).rejects.toThrow(UnauthorizedException);
@@ -266,9 +290,9 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
 });
 
 describe('refresh — token rotation (Issue #9)', () => {
-  it('rotates refresh token on use: consumes old, creates new session, revokes old, marks rotated, and signs with new jti', async () => {
+  it('rotates refresh token on use: consumes old, creates new session, revokes old, and signs with new jti', async () => {
     const { service, sessionService, jwtService } = makeService({ rows: [ACTIVE_USER] });
-    vi.mocked(sessionService.consumeSession).mockResolvedValue(ACTIVE_USER.id);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
 
     const result = await service.refresh('old-token-id', '127.0.0.1');
 
@@ -279,9 +303,11 @@ describe('refresh — token rotation (Issue #9)', () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
 
+    expect(sessionService.consumeSessionForRotation).toHaveBeenCalledWith('old-token-id');
     expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
     expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
-    expect(sessionService.markRotated).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
+    // markRotated is handled atomically in Lua inside consumeSessionForRotation, not called here
+    expect(sessionService.markRotated).not.toHaveBeenCalled();
     expect(jwtService.sign).toHaveBeenCalledWith(
       expect.objectContaining({
         sub: ACTIVE_USER.id,
@@ -291,14 +317,15 @@ describe('refresh — token rotation (Issue #9)', () => {
     );
   });
 
-  it('rejects deactivated user with consumed token, revokes token in denylist, and does not create new session', async () => {
+  it('rejects deactivated user with consumed token, clears rotated marker, revokes token in denylist, and does not create new session', async () => {
     const { service, sessionService } = makeService({
       rows: [{ ...ACTIVE_USER, isActive: false }],
     });
-    vi.mocked(sessionService.consumeSession).mockResolvedValue(ACTIVE_USER.id);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
 
     await expect(service.refresh('old-token-id')).rejects.toThrow(UnauthorizedException);
 
+    expect(sessionService.clearRotated).toHaveBeenCalledWith('old-token-id');
     expect(sessionService.createSession).not.toHaveBeenCalled();
     expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
   });

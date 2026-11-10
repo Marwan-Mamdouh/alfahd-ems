@@ -142,7 +142,7 @@ Not part of `UserDto` — do not use in this feature. `apps/web` declares both l
 - **Role**: Must be a valid `Role` enum value on create/update
 - **Access token**: JWT from `Authorization: Bearer` header, verified against `JWT_ACCESS_SECRET`, claims `sub`, `email`, `role`, `jti`
 - **Refresh token**: Opaque UUID, resolved via Redis `rt:token:{tokenId}` + `rt:user_tokens:{userId}` (7-day TTL). Web clients send it **only** in the `httpOnly` cookie; mobile clients send it in the request body. Never in JavaScript on the web.
-- **Refresh response**: contains `accessToken` and rotated `refreshToken`. It carries no user object, so a page reload restores the token but not the profile — the plan must resolve how the user is recovered on mount (see `plan.md` T12) rather than assuming a field the backend does not return.
+- **Refresh response**: contains `accessToken` and rotated `refreshToken`. It carries no user object, so a page reload restores the token but not the profile — the plan must resolve how the user is recovered on mount (see `plan.md` T12) rather than assuming a user profile field omitted from the backend response.
 
 ## Relationships
 
