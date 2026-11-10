@@ -1,17 +1,13 @@
 /**
  * Wire-format types for the API.
  *
- * `Role` and `UserDto` are re-exported from `@alfahd/types` — the single source
- * of truth for the backend contract (Constitution §I). They are NOT redefined
- * here. The local copies that used to live in this file contradicted the wire:
- * `Role` carried `"CUSTOMER_SERVICE"` instead of `"CS"`, and `AuthUser` declared
- * `name`, `department`, `warehouseId` and `status`, none of which the backend
- * ever sends. `UserDto` is `{ id, email, role, isActive, createdAt }`.
+ * Domain enums, value constants, and DTO contracts are re-exported directly from
+ * `@alfahd/types` — the single source of truth for the API contract (Constitution §I).
  */
-export type { Role, UserDto } from "@alfahd/types";
+export * from "@alfahd/types";
 
 /**
- * Success envelope. The backend's `ResponseInterceptor` wraps **every** response
+ * Success envelope. The backend's `ResponseInterceptor` wraps every response
  * as `{ data: <payload> }` — there is no `success` flag and no `message` field.
  */
 export interface ApiResponse<T> {
@@ -27,9 +23,7 @@ export interface ApiErrorBody {
 }
 
 /**
- * `GET /users` takes no pagination parameters and returns the full array
- * (R10), so `PaginatedResponse` was deleted. Sorting and filtering happen
- * client-side.
+ * Common list query parameters across paginated/filterable endpoints.
  */
 export interface ListQueryParams {
   page?: number;
@@ -38,4 +32,16 @@ export interface ListQueryParams {
   sortBy?: string;
   sortOrder?: "asc" | "desc";
   filters?: Record<string, string | number | boolean | undefined>;
+}
+
+/**
+ * Unified pagination result across all domains (unifies HR `{ data, meta }`,
+ * supply `{ items, total }`, and client-paginated arrays).
+ */
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
