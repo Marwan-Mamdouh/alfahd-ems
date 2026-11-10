@@ -21,11 +21,7 @@
       },
       "browser-mcp": {
         "type": "local",
-        "command": [
-          "npx",
-          "-y",
-          "@agent360/browser-mcp@latest"
-        ]
+        "command": ["npx", "-y", "@agent360/browser-mcp@latest"]
       }
     }
   }
