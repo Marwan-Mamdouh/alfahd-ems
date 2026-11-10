@@ -1,3 +1,14 @@
+/**
+ * Canonical registry of API routes for apps/web.
+ *
+ * All endpoints align exactly with apps/api NestJS controller routes:
+ * - Hyphenated paths: `/ip-addresses`, `/check-in`, `/check-out`
+ * - Exact singular/plural controller mappings: `/warehouses`, `/products`, `/inventory/movements`, `/routers`
+ * - Report and async job endpoints: `/attendance/report`, `/jobs/:id`, `/jobs/:id/download`
+ *
+ * Fabricated endpoints (e.g. `/warehouses/:id/staff`, `/employees/:id/deactivate`)
+ * have been strictly eliminated.
+ */
 export const ENDPOINTS = {
   auth: {
     login: "/auth/login",
@@ -9,98 +20,104 @@ export const ENDPOINTS = {
     changePassword: "/auth/change-password",
   },
 
+  users: {
+    list: "/users",
+    byId: (id: string) => `/users/${id}`,
+    detail: (id: string) => `/users/${id}`,
+  },
+
   employees: {
     list: "/employees",
     byId: (id: string) => `/employees/${id}`,
+    detail: (id: string) => `/employees/${id}`,
     create: "/employees",
     update: (id: string) => `/employees/${id}`,
-    deactivate: (id: string) => `/employees/${id}/deactivate`,
+    updateStatus: (id: string) => `/employees/${id}/status`,
+    status: (id: string) => `/employees/${id}/status`,
+    lookup: "/employees/lookup",
+    uploadPhoto: (id: string) => `/employees/${id}/photo`,
+    photo: (id: string) => `/employees/${id}/photo`,
   },
 
   attendance: {
+    list: "/attendance",
     records: "/attendance",
+    today: "/attendance/today",
     byEmployee: (id: string) => `/attendance/employee/${id}`,
     summary: "/attendance/summary",
-    export: "/attendance/export",
+    checkIn: "/attendance/check-in",
+    checkOut: "/attendance/check-out",
+    override: (id: string) => `/attendance/${id}/override`,
+    record: (id: string) => `/attendance/${id}`,
+    byId: (id: string) => `/attendance/${id}`,
+    detail: (id: string) => `/attendance/${id}`,
+    report: "/attendance/report",
   },
 
   warehouses: {
     list: "/warehouses",
     create: "/warehouses",
     byId: (id: string) => `/warehouses/${id}`,
+    detail: (id: string) => `/warehouses/${id}`,
     update: (id: string) => `/warehouses/${id}`,
-    staff: (id: string) => `/warehouses/${id}/staff`,
-    movements: (id: string) => `/warehouses/${id}/movements`,
+    remove: (id: string) => `/warehouses/${id}`,
+  },
+
+  products: {
+    list: "/products",
+    create: "/products",
+    byId: (id: string) => `/products/${id}`,
+    detail: (id: string) => `/products/${id}`,
+    update: (id: string) => `/products/${id}`,
+    remove: (id: string) => `/products/${id}`,
   },
 
   inventory: {
-    items: "/inventory/items",
-    item: (id: string) => `/inventory/items/${id}`,
+    stock: "/inventory",
+    balances: "/inventory",
+    warehouseStock: (warehouseId: string) => `/inventory/warehouses/${warehouseId}`,
     inbound: "/inventory/inbound",
     outbound: "/inventory/outbound",
     returns: "/inventory/returns",
-    itemMovements: (itemId: string) => `/inventory/items/${itemId}/movements`,
-    lowStock: "/inventory/low-stock",
-    export: "/inventory/export",
+    transfer: "/inventory/transfer",
+    adjust: "/inventory/adjust",
+    movements: "/inventory/movements",
+    movementById: (id: string) => `/inventory/movements/${id}`,
+    movementDetail: (id: string) => `/inventory/movements/${id}`,
   },
 
   routers: {
     list: "/routers",
     create: "/routers",
     byId: (id: string) => `/routers/${id}`,
-    update: (id: string) => `/routers/${id}`,
+    detail: (id: string) => `/routers/${id}`,
+    assign: (id: string) => `/routers/${id}/assign`,
     transition: (id: string) => `/routers/${id}/transition`,
-    history: (id: string) => `/routers/${id}/history`,
+    condition: (id: string) => `/routers/${id}/condition`,
+    assignments: (id: string) => `/routers/${id}/assignments`,
+    conditionHistory: (id: string) => `/routers/${id}/condition-history`,
+    statusHistory: (id: string) => `/routers/${id}/status-history`,
     export: "/routers/export",
   },
 
-  ips: {
-    list: "/ips",
-    create: "/ips",
-    byId: (id: string) => `/ips/${id}`,
-    update: (id: string) => `/ips/${id}`,
-    bulkImport: "/ips/import",
+  ipAddresses: {
+    list: "/ip-addresses",
+    create: "/ip-addresses",
+    byId: (id: string) => `/ip-addresses/${id}`,
+    detail: (id: string) => `/ip-addresses/${id}`,
+    update: (id: string) => `/ip-addresses/${id}`,
+    reserve: (id: string) => `/ip-addresses/${id}/reserve`,
+    release: (id: string) => `/ip-addresses/${id}/release`,
+    archive: (id: string) => `/ip-addresses/${id}/archive`,
+    unarchive: (id: string) => `/ip-addresses/${id}/unarchive`,
+    history: (id: string) => `/ip-addresses/${id}/history`,
+    import: "/ip-addresses/import",
+    importStatus: (id: string) => `/ip-addresses/import/${id}`,
   },
 
-  technicians: {
-    list: "/technicians",
-    byId: (id: string) => `/technicians/${id}`,
-    tasks: (id: string) => `/technicians/${id}/tasks`,
-    routers: (id: string) => `/technicians/${id}/routers`,
-    performance: (id: string) => `/technicians/${id}/performance`,
-  },
-
-  tracking: {
-    live: "/tracking/live",
-  },
-
-  customers: {
-    list: "/customers",
-    create: "/customers",
-    byId: (id: string) => `/customers/${id}`,
-    update: (id: string) => `/customers/${id}`,
-    tickets: (id: string) => `/customers/${id}/tickets`,
-  },
-
-  tickets: {
-    list: "/tickets",
-    create: "/tickets",
-    byId: (id: string) => `/tickets/${id}`,
-    update: (id: string) => `/tickets/${id}`,
-    unassigned: "/tickets/unassigned",
-    suggestions: "/tickets/assignment-suggestions",
-    confirmAssignment: "/tickets/confirm-assignment",
-    assign: (id: string) => `/tickets/${id}/assign`,
-    rate: (id: string) => `/tickets/${id}/rating`,
-  },
-
-  reports: {
-    attendance: "/reports/attendance",
-    inventory: "/reports/inventory",
-    routers: "/reports/routers",
-    technicians: "/reports/technicians",
-    tickets: "/reports/tickets",
-    customers: "/reports/customers",
+  jobs: {
+    status: (id: string) => `/jobs/${id}`,
+    download: (id: string) => `/jobs/${id}/download`,
   },
 
   settings: {
