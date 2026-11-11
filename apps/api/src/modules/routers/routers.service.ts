@@ -11,7 +11,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema/index.js';
 import {
   Role,
-  type RouterStatus,
+  ALLOWED_ROUTER_TRANSITIONS,
   type RouterPhysicalCondition,
   type RouterDto,
   type RouterAssignmentDto,
@@ -27,16 +27,7 @@ import type {
   RouterQueryDto,
 } from './dto/index.js';
 
-export const ALLOWED_ROUTER_TRANSITIONS: Record<RouterStatus, readonly RouterStatus[]> = {
-  AVAILABLE: ['ASSIGNED_TO_TECHNICIAN'],
-  ASSIGNED_TO_TECHNICIAN: ['INSTALLED_AT_CUSTOMER', 'RETURNED', 'DAMAGED', 'LOST'],
-  INSTALLED_AT_CUSTOMER: ['RETURNED'],
-  RETURNED: ['AVAILABLE', 'UNDER_REPAIR', 'DAMAGED'],
-  DAMAGED: ['UNDER_REPAIR', 'DECOMMISSIONED'],
-  UNDER_REPAIR: ['AVAILABLE', 'DECOMMISSIONED'],
-  LOST: [],
-  DECOMMISSIONED: [],
-};
+export { ALLOWED_ROUTER_TRANSITIONS };
 
 @Injectable()
 export class RoutersService {

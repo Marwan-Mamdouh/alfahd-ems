@@ -119,6 +119,17 @@ export const RouterStatus = toValueMap(ROUTER_STATUSES);
 
 export type RouterStatus = (typeof ROUTER_STATUSES)[number];
 
+export const ALLOWED_ROUTER_TRANSITIONS: Record<RouterStatus, readonly RouterStatus[]> = {
+  AVAILABLE: ['ASSIGNED_TO_TECHNICIAN'],
+  ASSIGNED_TO_TECHNICIAN: ['INSTALLED_AT_CUSTOMER', 'RETURNED', 'DAMAGED', 'LOST'],
+  INSTALLED_AT_CUSTOMER: ['RETURNED'],
+  RETURNED: ['AVAILABLE', 'UNDER_REPAIR', 'DAMAGED'],
+  DAMAGED: ['UNDER_REPAIR', 'DECOMMISSIONED'],
+  UNDER_REPAIR: ['AVAILABLE', 'DECOMMISSIONED'],
+  LOST: [],
+  DECOMMISSIONED: [],
+};
+
 export const ROUTER_HOLDER_TYPES = ['WAREHOUSE', 'TECHNICIAN', 'CUSTOMER'] as const;
 export const RouterHolderType = toValueMap(ROUTER_HOLDER_TYPES);
 
