@@ -580,6 +580,21 @@ describe('Users (e2e)', () => {
       await request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).expect(200);
     });
 
+    it('rejects a new password identical to the current one with 400 and leaves sessions untouched', async () => {
+      const { accessToken, cookie } = await loginAs(csUser);
+
+      const res = await request(app.getHttpServer())
+        .patch('/auth/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ oldPassword: PASSWORD, newPassword: PASSWORD })
+        .expect(400);
+
+      expect(res.body.message).toBe('New password must differ from the current password');
+
+      // Refresh cookie still succeeds — nothing was revoked
+      await request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).expect(200);
+    });
+
     it('invalidates all other sessions on success and applies the new password', async () => {
       const first = await loginAs(admin);
       const second = await loginAs(admin);

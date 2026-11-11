@@ -393,4 +393,19 @@ describe('changePassword - Issue #14', () => {
 
     expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
   });
+
+  it('new password identical to the current one rejects with BadRequestException after the old-password verify, and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: PASSWORD,
+        newPassword: PASSWORD,
+      }),
+    ).rejects.toThrow(
+      new BadRequestException('New password must differ from the current password'),
+    );
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+  });
 });
