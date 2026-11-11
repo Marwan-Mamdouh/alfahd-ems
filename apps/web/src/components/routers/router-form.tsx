@@ -1,9 +1,25 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Loader2, Router as RouterIcon, Save, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownToLine,
+  Boxes,
+  Loader2,
+  Save,
+  X,
+} from "lucide-react";
+import type { RouterPhysicalCondition } from "@alfahd/types";
 
-import type { RouterFormValues, RouterRow } from "./types";
+import type { RouterRegistrationFormValues } from "./types";
+
+interface ProductOption {
+  id: string;
+  name: string;
+  sku?: string;
+  model?: string;
+  isSerialized?: boolean;
+}
 
 interface WarehouseOption {
   id: string;
@@ -11,10 +27,9 @@ interface WarehouseOption {
 }
 
 interface RouterFormProps {
-  router?: RouterRow | null;
+  products: ProductOption[];
   warehouses: WarehouseOption[];
-  existingSerialNumbers?: string[];
-  onSubmit: (values: RouterFormValues) => void | Promise<void>;
+  onSubmit: (values: RouterRegistrationFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
 }
@@ -24,36 +39,36 @@ const INPUT_CLASS =
 
 const LABEL_CLASS = "mb-2 block text-sm font-medium text-foreground";
 
-function getInitialValues(router?: RouterRow | null): RouterFormValues {
-  return {
-    serialNumber: router?.serialNumber ?? "",
-    brand: router?.brand ?? "",
-    model: router?.model ?? "",
-    warehouseId: router?.warehouseId ?? "",
-  };
-}
+const INITIAL_VALUES: RouterRegistrationFormValues = {
+  serialNumber: "",
+  productId: "",
+  warehouseId: "",
+  physicalCondition: "SERVICEABLE",
+  isNewReceipt: true,
+  notes: "",
+};
 
 export function RouterForm({
-  router,
+  products,
   warehouses,
-  existingSerialNumbers = [],
   onSubmit,
   onCancel,
   isSubmitting = false,
 }: RouterFormProps) {
-  const isEdit = Boolean(router);
-
-  const [values, setValues] = useState<RouterFormValues>(() => getInitialValues(router));
-
-  const [errors, setErrors] = useState<Partial<Record<keyof RouterFormValues, string>>>({});
-
+  const [values, setValues] = useState<RouterRegistrationFormValues>(INITIAL_VALUES);
+  const [errors, setErrors] = useState<Partial<Record<keyof RouterRegistrationFormValues, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
-
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
 
-  function updateField(field: keyof RouterFormValues, value: string) {
+  // Filter products to serialized only (or all if not flagged false)
+  const serializedProducts = products.filter((p) => p.isSerialized !== false);
+
+  function updateField<K extends keyof RouterRegistrationFormValues>(
+    field: K,
+    value: RouterRegistrationFormValues[K]
+  ) {
     setValues((previous) => ({
       ...previous,
       [field]: value,
@@ -68,37 +83,21 @@ export function RouterForm({
   }
 
   function validate(): boolean {
-    const nextErrors: Partial<Record<keyof RouterFormValues, string>> = {};
+    const nextErrors: Partial<Record<keyof RouterRegistrationFormValues, string>> = {};
 
-    const serialNumber = values.serialNumber.trim();
-
+    const serialNumber = values.serialNumber.trim().toUpperCase();
     if (!serialNumber) {
-      nextErrors.serialNumber = "الرقم التسلسلي مطلوب.";
-    } else if (serialNumber.length < 5) {
-      nextErrors.serialNumber = "الرقم التسلسلي يجب أن يكون 5 أحرف على الأقل.";
-    } else if (
-      existingSerialNumbers.some(
-        (serial) =>
-          serial.trim().toLowerCase() === serialNumber.toLowerCase() &&
-          serial.trim().toLowerCase() !== (router?.serialNumber ?? "").trim().toLowerCase()
-      )
-    ) {
-      nextErrors.serialNumber = "الرقم التسلسلي مستخدم بالفعل.";
+      nextErrors.serialNumber = "الرقم التسلسلي (Serial Number) مطلوب.";
+    } else if (serialNumber.length < 3) {
+      nextErrors.serialNumber = "الرقم التسلسلي يجب أن يتكون من 3 أحرف على الأقل.";
     }
 
-    if (!values.brand.trim()) {
-      nextErrors.brand = "اسم الشركة مطلوب.";
+    if (!values.productId || !serializedProducts.some((p) => p.id === values.productId)) {
+      nextErrors.productId = "يرجى اختيار موديل الراوتر من الكتالوج.";
     }
 
-    if (!values.model.trim()) {
-      nextErrors.model = "الموديل مطلوب.";
-    }
-
-    if (
-      !values.warehouseId ||
-      !warehouses.some((warehouse) => warehouse.id === values.warehouseId)
-    ) {
-      nextErrors.warehouseId = "يرجى اختيار مخزن صحيح.";
+    if (!values.warehouseId || !warehouses.some((w) => w.id === values.warehouseId)) {
+      nextErrors.warehouseId = "يرجى اختيار المخزن الفعلي.";
     }
 
     setErrors(nextErrors);
@@ -110,20 +109,20 @@ export function RouterForm({
 
     if (loading || !validate()) return;
 
-    const cleanedValues: RouterFormValues = {
-      serialNumber: values.serialNumber.trim(),
-      brand: values.brand.trim(),
-      model: values.model.trim(),
-      warehouseId: values.warehouseId,
+    const payload: RouterRegistrationFormValues = {
+      ...values,
+      serialNumber: values.serialNumber.trim().toUpperCase(),
+      notes: values.notes.trim(),
     };
 
     try {
       setLocalSubmitting(true);
       setSubmitError(null);
-
-      await onSubmit(cleanedValues);
+      await onSubmit(payload);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "حدث خطأ أثناء حفظ بيانات الراوتر.");
+      setSubmitError(
+        error instanceof Error ? error.message : "حدث خطأ غير متوقع أثناء تسجيل الراوتر."
+      );
     } finally {
       setLocalSubmitting(false);
     }
@@ -131,121 +130,198 @@ export function RouterForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6" dir="rtl">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-          <RouterIcon className="h-6 w-6" />
-        </div>
+      <div>
+        <h2 className="text-xl font-bold text-foreground">تسجيل جهاز راوتر جديد</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          أدخل بيانات السيريال والمخزن واختر نمط الاستلام (شحنة جديدة أو من الرصيد الحالي).
+        </p>
+      </div>
 
-        <div>
-          <h2 className="text-xl font-bold">
-            {isEdit ? "تعديل بيانات الراوتر" : "إضافة راوتر جديد"}
-          </h2>
+      {/* Onboarding Mode Selection (isNewReceipt) */}
+      <div>
+        <p className="mb-3 text-sm font-medium">نمط تسجيل الجهاز في المخزن *</p>
 
-          <p className="mt-1 text-sm text-muted-foreground">
-            أدخل بيانات الجهاز ورقمه التسلسلي والمخزن التابع له.
-          </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* New Receipt Mode */}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => updateField("isNewReceipt", true)}
+            aria-pressed={values.isNewReceipt}
+            className={`rounded-xl border p-4 text-right transition-colors ${
+              values.isNewReceipt
+                ? "border-teal-500 bg-teal-50 text-teal-900 dark:bg-teal-950/40 dark:text-teal-200 ring-2 ring-teal-500/20"
+                : "border-border bg-background hover:bg-muted/50"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+                <ArrowDownToLine className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">استلام شحنة جديدة من المورد</p>
+                <p className="mt-1 text-xs opacity-80">
+                  زيادة رصيد المخزن تلقائياً (+1 وارد مورد) وفتح عهدة المخزن.
+                </p>
+              </div>
+            </div>
+          </button>
+
+          {/* Existing Stock Mode */}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => updateField("isNewReceipt", false)}
+            aria-pressed={!values.isNewReceipt}
+            className={`rounded-xl border p-4 text-right transition-colors ${
+              !values.isNewReceipt
+                ? "border-teal-500 bg-teal-50 text-teal-900 dark:bg-teal-950/40 dark:text-teal-200 ring-2 ring-teal-500/20"
+                : "border-border bg-background hover:bg-muted/50"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+                <Boxes className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">تسجيل من رصيد المخزن الحالي</p>
+                <p className="mt-1 text-xs opacity-80">
+                  حجز جهاز من الرصيد المسجل مسبقًا (+0 تغيير) مع فحص سعة المخزن المتاحة.
+                </p>
+              </div>
+            </div>
+          </button>
         </div>
       </div>
 
+      {/* Basic Inputs */}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        <div className="md:col-span-2">
+        {/* Serial Number */}
+        <div>
           <label htmlFor="router-serial" className={LABEL_CLASS}>
             الرقم التسلسلي (Serial Number) *
           </label>
-
           <input
             id="router-serial"
             type="text"
             required
-            minLength={5}
             maxLength={100}
             value={values.serialNumber}
-            onChange={(event) => updateField("serialNumber", event.target.value)}
-            placeholder="مثال: TPL-2026-00001"
-            className={INPUT_CLASS}
+            onChange={(e) => updateField("serialNumber", e.target.value.toUpperCase())}
+            placeholder="مثال: TPL-2026-88491"
+            className={`${INPUT_CLASS} font-mono`}
             dir="ltr"
-            autoComplete="off"
-            aria-invalid={Boolean(errors.serialNumber)}
           />
-
           {errors.serialNumber && (
             <p className="mt-1 text-xs text-red-600">{errors.serialNumber}</p>
           )}
         </div>
 
+        {/* Product Model */}
         <div>
-          <label htmlFor="router-brand" className={LABEL_CLASS}>
-            الشركة المصنعة *
+          <label htmlFor="router-product" className={LABEL_CLASS}>
+            نوع وموديل الراوتر (كتالوج المنتجات) *
           </label>
-
-          <input
-            id="router-brand"
-            type="text"
+          <select
+            id="router-product"
             required
-            maxLength={100}
-            value={values.brand}
-            onChange={(event) => updateField("brand", event.target.value)}
-            placeholder="مثال: TP-Link"
+            value={values.productId}
+            onChange={(e) => updateField("productId", e.target.value)}
             className={INPUT_CLASS}
-          />
-
-          {errors.brand && <p className="mt-1 text-xs text-red-600">{errors.brand}</p>}
+          >
+            <option value="">اختر الموديل من الكتالوج</option>
+            {serializedProducts.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.name} {product.model ? `(${product.model})` : ""} {product.sku ? `— ${product.sku}` : ""}
+              </option>
+            ))}
+          </select>
+          {errors.productId && (
+            <p className="mt-1 text-xs text-red-600">{errors.productId}</p>
+          )}
         </div>
 
+        {/* Target Warehouse */}
         <div>
-          <label htmlFor="router-model" className={LABEL_CLASS}>
-            الموديل *
-          </label>
-
-          <input
-            id="router-model"
-            type="text"
-            required
-            maxLength={100}
-            value={values.model}
-            onChange={(event) => updateField("model", event.target.value)}
-            placeholder="مثال: Archer C6"
-            className={INPUT_CLASS}
-          />
-
-          {errors.model && <p className="mt-1 text-xs text-red-600">{errors.model}</p>}
-        </div>
-
-        <div className="md:col-span-2">
           <label htmlFor="router-warehouse" className={LABEL_CLASS}>
-            المخزن *
+            المخزن المستلم *
           </label>
-
           <select
             id="router-warehouse"
             required
             value={values.warehouseId}
-            onChange={(event) => updateField("warehouseId", event.target.value)}
+            onChange={(e) => updateField("warehouseId", e.target.value)}
             className={INPUT_CLASS}
-            aria-invalid={Boolean(errors.warehouseId)}
           >
             <option value="">اختر المخزن</option>
-
             {warehouses.map((warehouse) => (
               <option key={warehouse.id} value={warehouse.id}>
                 {warehouse.name}
               </option>
             ))}
           </select>
+          {errors.warehouseId && (
+            <p className="mt-1 text-xs text-red-600">{errors.warehouseId}</p>
+          )}
+        </div>
 
-          {errors.warehouseId && <p className="mt-1 text-xs text-red-600">{errors.warehouseId}</p>}
+        {/* Physical Condition */}
+        <div>
+          <label htmlFor="router-condition" className={LABEL_CLASS}>
+            الحالة الفيزيائية الابتدائية *
+          </label>
+          <select
+            id="router-condition"
+            required
+            value={values.physicalCondition}
+            onChange={(e) =>
+              updateField("physicalCondition", e.target.value as RouterPhysicalCondition)
+            }
+            className={INPUT_CLASS}
+          >
+            <option value="SERVICEABLE">صالح للاستخدام (سليم - جاهز للتشغيل)</option>
+            <option value="DAMAGED">تالف / معيب (تسجيل وحدة متضررة)</option>
+            <option value="UNDER_REPAIR">قيد الصيانة / الإصلاح</option>
+          </select>
+          {!values.isNewReceipt && values.physicalCondition === "DAMAGED" && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              ملاحظة: تسجيل جهاز تالف من الرصيد الحالي سيقوم بخصم 1 من رصيد المخزن عبر تسوية جردية رقابية.
+            </p>
+          )}
+        </div>
+
+        {/* Notes */}
+        <div className="md:col-span-2">
+          <label htmlFor="router-notes" className={LABEL_CLASS}>
+            ملاحظات إضافية
+          </label>
+          <textarea
+            id="router-notes"
+            rows={3}
+            maxLength={1000}
+            value={values.notes}
+            onChange={(e) => updateField("notes", e.target.value)}
+            placeholder="أدخل أي تفاصيل عن الشحنة، المورد، أو الفحص المبدئي للجهاز..."
+            className="w-full resize-y rounded-lg border border-input bg-background p-3 text-sm outline-none focus:border-teal-500"
+          />
         </div>
       </div>
 
+      {/* Server Rejection Alert Banner */}
       {submitError && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
         >
-          {submitError}
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+            تعذر تسجيل الراوتر
+          </div>
+          <p className="mt-1 text-xs leading-relaxed">{submitError}</p>
         </div>
       )}
 
+      {/* Buttons */}
       <div className="flex flex-wrap justify-end gap-3 border-t pt-5">
         {onCancel && (
           <button
@@ -265,8 +341,7 @@ export function RouterForm({
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-
-          {loading ? "جاري الحفظ..." : isEdit ? "حفظ التعديلات" : "إضافة الراوتر"}
+          {loading ? "جاري التسجيل..." : "تسجيل الراوتر"}
         </button>
       </div>
     </form>
