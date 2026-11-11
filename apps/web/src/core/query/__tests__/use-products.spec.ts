@@ -32,6 +32,7 @@ describe("Products React Query Integration", () => {
     description: "100m spool",
     lowStockThreshold: 5,
     isSerialized: false,
+    isActive: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };
@@ -109,6 +110,25 @@ describe("Products React Query Integration", () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
 
     expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(invKey)?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates product list, detail, and inventory caches on deactivation", async () => {
+    const listKey = queryKeys.products.list();
+    const detailKey = queryKeys.products.detail("prod-1");
+    const invKey = queryKeys.inventory.all;
+
+    queryClient.setQueryData(listKey, { items: [mockProduct], total: 1 });
+    queryClient.setQueryData(detailKey, mockProduct);
+    queryClient.setQueryData(invKey, { items: [] });
+
+    // Mimic useDeleteProduct onSuccess:
+    queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.products.detail("prod-1") });
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(invKey)?.isInvalidated).toBe(true);
   });
 });

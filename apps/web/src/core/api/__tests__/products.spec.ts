@@ -6,6 +6,7 @@ import {
   fetchProductById,
   createProduct,
   updateProduct,
+  deleteProduct,
 } from "../products";
 import type { ProductDto, CreateProductDto, UpdateProductDto } from "../types";
 
@@ -23,6 +24,7 @@ describe("Products API Client Functions", () => {
     description: "High-performance router",
     lowStockThreshold: 10,
     isSerialized: true,
+    isActive: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };
@@ -126,6 +128,27 @@ describe("Products API Client Functions", () => {
     expect(capturedUrl).toBe("/products/prod-1");
     expect(capturedBody.sku).toBe("RTR-NEW-02");
     expect(result.sku).toBe("RTR-NEW-02");
+  });
+
+  it("deleteProduct calls DELETE /products/:id for soft deactivation", async () => {
+    let capturedUrl = "";
+    let capturedMethod = "";
+
+    api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+      capturedUrl = config.url ?? "";
+      capturedMethod = config.method ?? "";
+      return {
+        data: undefined,
+        status: 204,
+        statusText: "No Content",
+        headers: {},
+        config,
+      };
+    };
+
+    await deleteProduct("prod-1");
+    expect(capturedUrl).toBe("/products/prod-1");
+    expect(capturedMethod.toLowerCase()).toBe("delete");
   });
 });
 
