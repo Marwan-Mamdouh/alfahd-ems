@@ -250,6 +250,47 @@ The real data layer for Router asset management integrates with `/routers`, `/ro
 5. **Zero Generic PATCH**:
    - Routers are never updated via generic property mutation; they strictly use dedicated endpoints for assignments, transitions, and condition changes.
 
+---
+
+## 10. Real IP Address Management, Lifecycle Transitions & RBAC Mirroring (Task B6 / Issue #74)
+
+The real data layer for IP Address Management integrates with `/ip-addresses`, `/ip-addresses/:id`, `/ip-addresses/:id/reserve`, `/ip-addresses/:id/release`, `/ip-addresses/:id/archive`, `/ip-addresses/:id/unarchive`, and `/ip-addresses/:id/history`, plus async BullMQ CSV import via `/ip-addresses/import`.
+
+### IP Management Hooks ([`use-ip-addresses.ts`](./use-ip-addresses.ts))
+
+| Hook | Type | Description | Permissions & Scoping | Cache Invalidation |
+| :--- | :--- | :--- | :--- | :--- |
+| `useIpAddresses(params?)` | Query | Paginated IPv4 addresses with status, isArchived, and search filters | `ADMIN`, `TECHNICIAN` (`CS` & `WAREHOUSE_STAFF` 403 Forbidden) | `ipAddressesKeys.list(params)` |
+| `useIpAddress(id)` | Query | Single IP address details | `ADMIN`, `TECHNICIAN` | `ipAddressesKeys.detail(id)` |
+| `useCreateIpAddress()` | Mutation | Registers a new individual IPv4 address in `FREE` status (`CreateIpDto`) | **Strictly `ADMIN` only** | `ipAddresses.all` |
+| `useUpdateIpAddress()` | Mutation | Updates metadata notes on an IP address (`UpdateIpDto`) | **Strictly `ADMIN` only** | `ipAddresses.all`, `ipAddresses.detail(id)`, `ipAddresses.history(id)` |
+| `useReserveIpAddress()` | Mutation | Manually reserves an available `FREE` IP address | **Strictly `ADMIN` only** | `ipAddresses.all`, `ipAddresses.detail(id)`, `ipAddresses.history(id)` |
+| `useReleaseIpAddress()` | Mutation | Releases a `RESERVED` IP address back to `FREE` | **Strictly `ADMIN` only** | `ipAddresses.all`, `ipAddresses.detail(id)`, `ipAddresses.history(id)` |
+| `useArchiveIpAddress()` | Mutation | Archives a `FREE` IP address (blocks allocation) | **Strictly `ADMIN` only** | `ipAddresses.all`, `ipAddresses.detail(id)`, `ipAddresses.history(id)` |
+| `useUnarchiveIpAddress()` | Mutation | Restores an archived IP address back to the active pool | **Strictly `ADMIN` only** | `ipAddresses.all`, `ipAddresses.detail(id)`, `ipAddresses.history(id)` |
+| `useIpHistory(id)` | Query | Full chronological audit ledger for an IP address | **Strictly `ADMIN` only** (Technician UI never requests history) | `ipAddresses.history(id)` |
+
+### Key Architectural Invariants
+1. **Authoritative Two-Status Model & Separate Archive Toggle**:
+   - Domain statuses are strictly `FREE` and `RESERVED` (`@alfahd/types`).
+   - Archiving is represented by an independent `isArchived: boolean` column, never mixed into a pseudo-status.
+2. **Archiving Invariant (Cannot Archive RESERVED IPs)**:
+   - An IP in `RESERVED` status cannot be archived directly (must be released to `FREE` first; backend returns 409 Conflict).
+   - The UI disables the archive button on reserved addresses and shows an explanatory tooltip.
+3. **Defensive IPv4 Validation**:
+   - Accepts individual IPv4 hosts only (`192.168.1.50`).
+   - Client-side validation strictly rejects CIDR prefixes (`/24`), IPv6 addresses (`:`), non-numeric octets, and values $> 255$.
+   - Form state is defensively retained on `409 Conflict` duplicate IP errors.
+4. **Action-Specific RBAC Mirroring**:
+   - `ADMIN`: Full authority (create, edit notes, reserve, release, archive, unarchive, view history, CSV import).
+   - `TECHNICIAN`: Read-only access to lists and details. Technician UI never renders mutation buttons or requests `GET /ip-addresses/:id/history`.
+   - `CS` & `WAREHOUSE_STAFF`: Denied access to IP management (`403 Forbidden`).
+5. **Task A9 CSV Import Seam**:
+   - Integrates `useIpImport()` and `CsvDropzone` for asynchronous BullMQ bulk import with real-time job progress and line-numbered inserted/skipped/error summaries.
+6. **Zero Generic Status Updates / No Hidden Hard Delete**:
+   - All status transitions use discrete lifecycle endpoints; IPs are archived, never deleted.
+
+
 
 
 
