@@ -582,8 +582,9 @@ export interface InboundStockDto {
   productId: string;
   warehouseId: string;
   quantity: number;
-  supplierName?: string;
+  supplierName: string;
   notes?: string;
+  responsibleUserId?: string;
 }
 
 export interface OutboundStockDto {
@@ -592,6 +593,7 @@ export interface OutboundStockDto {
   quantity: number;
   technicianId: string;
   notes?: string;
+  responsibleUserId?: string;
 }
 
 export interface ReturnStockDto {
@@ -600,21 +602,27 @@ export interface ReturnStockDto {
   quantity: number;
   technicianId: string;
   notes?: string;
+  responsibleUserId?: string;
 }
 
 export interface TransferStockDto {
   productId: string;
-  sourceWarehouseId: string;
-  targetWarehouseId: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
   quantity: number;
   notes?: string;
+  responsibleUserId?: string;
+  sourceWarehouseId?: string;
+  targetWarehouseId?: string;
 }
 
 export interface AdjustStockDto {
   productId: string;
   warehouseId: string;
-  quantity: number;
-  notes?: string;
+  newQuantity: number;
+  notes: string;
+  quantity?: number;
+  responsibleUserId?: string;
 }
 
 export interface StockMovementDto {
@@ -636,6 +644,19 @@ export interface InventoryBalanceDto {
   productId: string;
   quantity: number;
   updatedAt: string;
+  product?: {
+    id: string;
+    name: string;
+    sku: string;
+    model: string;
+    category: string;
+    lowStockThreshold: number;
+    isSerialized?: boolean;
+  };
+  warehouse?: {
+    id: string;
+    name: string;
+  };
 }
 
 export type WarehouseInventoryDto = InventoryBalanceDto;
