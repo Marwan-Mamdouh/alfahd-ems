@@ -5,16 +5,19 @@ import {
   Warehouse,
   Plus,
   ArrowRight,
-  FlaskConical,
   MapPin,
   Users,
   Package,
   Pencil,
   History,
   AlertTriangle,
+  RefreshCw,
+  ShieldAlert,
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
+import { useAuthStore } from "@/core/auth/auth.store";
+import { Role } from "@alfahd/types";
 import { WarehouseTable } from "@/components/warehouses/warehouse-table";
 import { WarehouseForm } from "@/components/warehouses/warehouse-form";
 import { WarehouseStaffTable } from "@/components/warehouses/warehouse-staff-table";
@@ -24,6 +27,17 @@ import {
   type WarehouseStockRow,
 } from "@/components/warehouses/warehouse-stock-table";
 
+import {
+  useWarehouses,
+  useCreateWarehouse,
+  useUpdateWarehouse,
+  useDeleteWarehouse,
+  useWarehouseStaff,
+  useWarehouseStock,
+  useWarehouseMovements,
+  extractErrorMessage,
+} from "@/core/query/use-warehouses";
+
 import type {
   WarehouseRow,
   WarehouseFormValues,
@@ -31,227 +45,134 @@ import type {
   WarehouseMovementRow,
 } from "@/components/warehouses/types";
 
-// DEMO ONLY — No API calls or database persistence.
-
-const DEMO_STAFF: Record<string, WarehouseStaffRow[]> = {
-  "warehouse-1": [
-    {
-      id: "staff-1",
-      name: "أحمد محمد",
-      email: "ahmed@example.com",
-      role: "WAREHOUSE_STAFF",
-    },
-    {
-      id: "staff-2",
-      name: "محمد علي",
-      email: "mohamed@example.com",
-      role: "WAREHOUSE_STAFF",
-    },
-  ],
-  "warehouse-2": [
-    {
-      id: "staff-3",
-      name: "خالد محمود",
-      email: "khaled@example.com",
-      role: "WAREHOUSE_STAFF",
-    },
-  ],
-  "warehouse-3": [
-    {
-      id: "staff-4",
-      name: "عمر أحمد",
-      email: "omar@example.com",
-      role: "WAREHOUSE_STAFF",
-    },
-  ],
-};
-
-const DEMO_STOCK: Record<string, WarehouseStockRow[]> = {
-  "warehouse-1": [
-    {
-      id: "stock-1",
-      itemName: "راوتر TP-Link",
-      model: "Archer C6",
-      category: "راوترات",
-      quantity: 45,
-      lowStockThreshold: 10,
-    },
-    {
-      id: "stock-2",
-      itemName: "كابل إنترنت",
-      model: "CAT6",
-      category: "كابلات",
-      quantity: 8,
-      lowStockThreshold: 15,
-    },
-    {
-      id: "stock-3",
-      itemName: "راوتر Huawei",
-      model: "HG8245H",
-      category: "راوترات",
-      quantity: 0,
-      lowStockThreshold: 5,
-    },
-  ],
-  "warehouse-2": [
-    {
-      id: "stock-4",
-      itemName: "راوتر Huawei",
-      model: "HG8245H",
-      category: "راوترات",
-      quantity: 25,
-      lowStockThreshold: 10,
-    },
-    {
-      id: "stock-5",
-      itemName: "كابل فايبر",
-      model: "Single Mode",
-      category: "كابلات",
-      quantity: 6,
-      lowStockThreshold: 10,
-    },
-  ],
-  "warehouse-3": [
-    {
-      id: "stock-6",
-      itemName: "راوتر TP-Link",
-      model: "Archer C6",
-      category: "راوترات",
-      quantity: 30,
-      lowStockThreshold: 10,
-    },
-    {
-      id: "stock-7",
-      itemName: "كابل فايبر",
-      model: "Single Mode",
-      category: "كابلات",
-      quantity: 20,
-      lowStockThreshold: 10,
-    },
-  ],
-};
-
-const DEMO_MOVEMENTS: Record<string, WarehouseMovementRow[]> = {
-  "warehouse-1": [
-    {
-      id: "movement-1",
-      itemName: "راوتر TP-Link",
-      type: "INBOUND",
-      quantity: 20,
-      createdAt: "2026-10-15T09:00:00+03:00",
-      performedBy: "أحمد محمد",
-    },
-    {
-      id: "movement-2",
-      itemName: "كابل إنترنت",
-      type: "OUTBOUND",
-      quantity: 10,
-      createdAt: "2026-10-15T11:30:00+03:00",
-      performedBy: "محمد علي",
-    },
-    {
-      id: "movement-3",
-      itemName: "راوتر TP-Link",
-      type: "RETURN",
-      quantity: 2,
-      createdAt: "2026-10-16T13:00:00+03:00",
-      performedBy: "أحمد محمد",
-    },
-  ],
-  "warehouse-2": [
-    {
-      id: "movement-4",
-      itemName: "راوتر Huawei",
-      type: "INBOUND",
-      quantity: 15,
-      createdAt: "2026-10-14T10:00:00+03:00",
-      performedBy: "خالد محمود",
-    },
-  ],
-  "warehouse-3": [
-    {
-      id: "movement-5",
-      itemName: "كابل فايبر",
-      type: "INBOUND",
-      quantity: 30,
-      createdAt: "2026-10-13T09:30:00+03:00",
-      performedBy: "عمر أحمد",
-    },
-  ],
-};
-
-const INITIAL_WAREHOUSES: WarehouseRow[] = [
-  {
-    id: "warehouse-1",
-    name: "المخزن الرئيسي",
-    address: "مدينة نصر، القاهرة",
-    latitude: 30.0561,
-    longitude: 31.3301,
-    staffCount: DEMO_STAFF["warehouse-1"].length,
-    itemCount: DEMO_STOCK["warehouse-1"].length,
-  },
-  {
-    id: "warehouse-2",
-    name: "مخزن الجيزة",
-    address: "الدقي، الجيزة",
-    latitude: 30.0384,
-    longitude: 31.2122,
-    staffCount: DEMO_STAFF["warehouse-2"].length,
-    itemCount: DEMO_STOCK["warehouse-2"].length,
-  },
-  {
-    id: "warehouse-3",
-    name: "مخزن الإسكندرية",
-    address: "سموحة، الإسكندرية",
-    latitude: 31.2156,
-    longitude: 29.9553,
-    staffCount: DEMO_STAFF["warehouse-3"].length,
-    itemCount: DEMO_STOCK["warehouse-3"].length,
-  },
-];
-
 type ViewMode = "list" | "create" | "edit" | "details";
 
 function WarehousePreviewContent() {
-  const [warehouses, setWarehouses] = useState<WarehouseRow[]>(INITIAL_WAREHOUSES);
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === Role.ADMIN;
 
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
-
   const [search, setSearch] = useState("");
   const [notification, setNotification] = useState<string | null>(null);
+  const [deactivationError, setDeactivationError] = useState<string | null>(null);
+
+  // Live Query Hooks
+  const {
+    warehouses: rawWarehouses,
+    isLoading: isLoadingWarehouses,
+    error: warehousesError,
+    refetch: refetchWarehouses,
+  } = useWarehouses();
+
+  const createMutation = useCreateWarehouse();
+  const updateMutation = useUpdateWarehouse();
+  const deleteMutation = useDeleteWarehouse();
+
+  // Selected warehouse sub-queries
+  const {
+    employees: staffList,
+    isLoading: isLoadingStaff,
+    error: staffError,
+    isForbidden: isStaffForbidden,
+    refetch: refetchStaff,
+  } = useWarehouseStaff(selectedWarehouseId ?? undefined, user?.role);
+
+  const {
+    stockItems,
+    isLoading: isLoadingStock,
+    error: stockError,
+    refetch: refetchStock,
+  } = useWarehouseStock(selectedWarehouseId ?? undefined);
+
+  const {
+    movements: rawMovements,
+    isLoading: isLoadingMovements,
+    error: movementsError,
+    isForbidden: isMovementsForbidden,
+    refetch: refetchMovements,
+  } = useWarehouseMovements(selectedWarehouseId ?? undefined, user?.role);
+
+  const warehouses: WarehouseRow[] = useMemo(
+    () =>
+      rawWarehouses.map((w) => ({
+        id: w.id,
+        name: w.name,
+        address: w.address,
+        latitude: w.latitude,
+        longitude: w.longitude,
+        geofenceRadiusMeters: w.geofenceRadiusMeters,
+        managerId: w.managerId,
+        isActive: w.isActive,
+        staffCount: 0,
+        itemCount: 0,
+        createdAt: w.createdAt,
+        updatedAt: w.updatedAt,
+      })),
+    [rawWarehouses]
+  );
 
   const selectedWarehouse = useMemo(
-    () => warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ?? null,
+    () => warehouses.find((w) => w.id === selectedWarehouseId) ?? null,
     [warehouses, selectedWarehouseId]
   );
 
-  const selectedStaff = selectedWarehouseId ? (DEMO_STAFF[selectedWarehouseId] ?? []) : [];
+  const selectedStaff: WarehouseStaffRow[] = useMemo(
+    () =>
+      staffList.map((s) => ({
+        id: s.id,
+        name: s.name,
+        role: s.role,
+        status: s.status,
+        isEligible: s.isEligible,
+      })),
+    [staffList]
+  );
 
-  const selectedStock = selectedWarehouseId ? (DEMO_STOCK[selectedWarehouseId] ?? []) : [];
+  const selectedStock: WarehouseStockRow[] = useMemo(
+    () =>
+      stockItems.map((s) => ({
+        id: s.id,
+        itemId: s.productId,
+        itemName: `صنف ${s.productId.slice(0, 8)}`,
+        model: "—",
+        category: "مخزون",
+        quantity: s.quantity,
+        lowStockThreshold: 10,
+      })),
+    [stockItems]
+  );
 
-  const selectedMovements = selectedWarehouseId ? (DEMO_MOVEMENTS[selectedWarehouseId] ?? []) : [];
+  const selectedMovements: WarehouseMovementRow[] = useMemo(
+    () =>
+      rawMovements.map((m) => ({
+        id: m.id,
+        itemName: `صنف ${m.productId.slice(0, 8)}`,
+        type: m.movementType,
+        quantity: m.quantity,
+        createdAt: m.createdAt,
+        performedBy: m.responsibleUserId,
+      })),
+    [rawMovements]
+  );
 
   const lowStockItems = selectedStock.filter((item) => item.quantity <= item.lowStockThreshold);
 
   const filteredWarehouses = useMemo(() => {
     const term = search.trim().toLowerCase();
-
     if (!term) return warehouses;
-
     return warehouses.filter(
-      (warehouse) =>
-        warehouse.name.toLowerCase().includes(term) ||
-        warehouse.address.toLowerCase().includes(term)
+      (w) =>
+        w.name.toLowerCase().includes(term) ||
+        w.address.toLowerCase().includes(term)
     );
   }, [warehouses, search]);
 
   const stats = useMemo(
     () => ({
       total: warehouses.length,
-      staff: warehouses.reduce((sum, warehouse) => sum + warehouse.staffCount, 0),
-      items: warehouses.reduce((sum, warehouse) => sum + warehouse.itemCount, 0),
+      active: warehouses.filter((w) => w.isActive).length,
+      inactive: warehouses.filter((w) => !w.isActive).length,
     }),
     [warehouses]
   );
@@ -259,18 +180,21 @@ function WarehousePreviewContent() {
   function openCreate() {
     setSelectedWarehouseId(null);
     setNotification(null);
+    setDeactivationError(null);
     setViewMode("create");
   }
 
   function openEdit(warehouse: WarehouseRow) {
     setSelectedWarehouseId(warehouse.id);
     setNotification(null);
+    setDeactivationError(null);
     setViewMode("edit");
   }
 
   function openDetails(warehouse: WarehouseRow) {
     setSelectedWarehouseId(warehouse.id);
     setNotification(null);
+    setDeactivationError(null);
     setViewMode("details");
   }
 
@@ -279,74 +203,59 @@ function WarehousePreviewContent() {
     setViewMode("list");
   }
 
+  async function handleDeactivateWarehouse(warehouse: WarehouseRow) {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من رغبتك في تعطيل ${warehouse.name}؟ لن يمكن استخدامه في عمليات الصرف والاستلام الجديدة.`
+    );
+    if (!confirmed) return;
+
+    setDeactivationError(null);
+    try {
+      await deleteMutation.mutateAsync(warehouse.id);
+      setNotification(`تم تعطيل ${warehouse.name} بنجاح.`);
+    } catch (err) {
+      const msg = extractErrorMessage(
+        err,
+        "فشل تعطيل المخزن. يرجى التحقق من عدم وجود أصناف نشطة أو فنيين أو أجهزة راوتر تابعة له."
+      );
+      setDeactivationError(msg);
+    }
+  }
+
   async function handleWarehouseSubmit(values: WarehouseFormValues) {
     const name = values.name.trim();
     const address = values.address.trim();
     const latitude = Number(values.latitude);
     const longitude = Number(values.longitude);
+    const geofenceRadiusMeters = Number(values.geofenceRadiusMeters);
+    const managerId = values.managerId.trim() || undefined;
 
-    if (!name || !address) {
-      throw new Error("اسم المخزن والعنوان مطلوبان.");
-    }
-
-    if (
-      !values.latitude.trim() ||
-      !values.longitude.trim() ||
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
-      throw new Error("إحداثيات المخزن غير صحيحة.");
-    }
-
-    const duplicate = warehouses.some(
-      (warehouse) =>
-        warehouse.name.toLowerCase() === name.toLowerCase() && warehouse.id !== selectedWarehouseId
-    );
-
-    if (duplicate) {
-      throw new Error("يوجد مخزن بنفس الاسم في بيانات المعاينة.");
-    }
+    setDeactivationError(null);
 
     if (viewMode === "edit") {
-      if (!selectedWarehouse) {
-        throw new Error("لم يتم العثور على المخزن.");
-      }
-
-      setWarehouses((previous) =>
-        previous.map((warehouse) =>
-          warehouse.id === selectedWarehouse.id
-            ? {
-                ...warehouse,
-                name,
-                address,
-                latitude,
-                longitude,
-              }
-            : warehouse
-        )
-      );
-
-      setNotification("تم تعديل المخزن في بيانات المعاينة فقط.");
+      if (!selectedWarehouse) throw new Error("لم يتم العثور على المخزن.");
+      await updateMutation.mutateAsync({
+        id: selectedWarehouse.id,
+        dto: {
+          name,
+          address,
+          latitude,
+          longitude,
+          geofenceRadiusMeters,
+          managerId,
+        },
+      });
+      setNotification("تم تحديث بيانات المخزن بنجاح.");
     } else if (viewMode === "create") {
-      const newWarehouse: WarehouseRow = {
-        id: crypto.randomUUID(),
+      await createMutation.mutateAsync({
         name,
         address,
         latitude,
         longitude,
-        staffCount: 0,
-        itemCount: 0,
-      };
-
-      setWarehouses((previous) => [newWarehouse, ...previous]);
-
-      setNotification("تمت إضافة المخزن إلى بيانات المعاينة فقط.");
-    } else {
-      throw new Error("عملية غير صالحة.");
+        geofenceRadiusMeters,
+        managerId,
+      });
+      setNotification("تمت إضافة المخزن بنجاح.");
     }
 
     backToList();
@@ -354,19 +263,6 @@ function WarehousePreviewContent() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Preview Notice */}
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        <FlaskConical className="mt-0.5 h-5 w-5 shrink-0" />
-
-        <div>
-          <p className="font-semibold">وضع المعاينة — بيانات تجريبية</p>
-          <p className="mt-1 text-sm">
-            جميع المخازن والموظفين والأصناف والحركات المعروضة تجريبية. التعديلات محلية ولن يتم حفظها
-            في قاعدة البيانات.
-          </p>
-        </div>
-      </div>
-
       {/* Header */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-teal-700 via-teal-600 to-teal-500 p-6 text-white shadow-sm">
         <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
@@ -377,18 +273,29 @@ function WarehousePreviewContent() {
 
             <div>
               <h1 className="text-2xl font-bold">إدارة المخازن</h1>
-
-              <p className="mt-1 text-sm text-white/80">Warehouse Management — Phase 2</p>
+              <p className="mt-1 text-sm text-white/80">
+                شبكة المخازن ونقاط الإمداد والتوزيع — ربط مباشر مع قاعدة البيانات
+              </p>
             </div>
           </div>
 
-          <span className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold">
-            {warehouses.length} مخازن تجريبية
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => refetchWarehouses()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-medium hover:bg-white/20 transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              تحديث
+            </button>
+            <span className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold">
+              {warehouses.length} مخزن
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Notification */}
+      {/* Notification banner */}
       {notification && (
         <div
           role="status"
@@ -398,27 +305,40 @@ function WarehousePreviewContent() {
         </div>
       )}
 
+      {/* 409 Conflict Deactivation Blocker Alert */}
+      {deactivationError && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+          <div>
+            <p className="font-semibold">تعذر تعطيل المخزن (تعارض في البيانات)</p>
+            <p className="mt-1 text-sm">{deactivationError}</p>
+          </div>
+        </div>
+      )}
+
       {/* Statistics */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {[
           {
-            title: "إجمالي المخازن",
+            title: "إجمالي المخازن المسجلة",
             value: stats.total,
             icon: Warehouse,
           },
           {
-            title: "الموظفون بالمخازن",
-            value: stats.staff,
+            title: "المخازن النشطة",
+            value: stats.active,
             icon: Users,
           },
           {
-            title: "إجمالي أصناف المخزون",
-            value: stats.items,
+            title: "المخازن المعطلة",
+            value: stats.inactive,
             icon: Package,
           },
         ].map((stat) => {
           const Icon = stat.icon;
-
           return (
             <div
               key={stat.title}
@@ -427,7 +347,6 @@ function WarehousePreviewContent() {
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300">
                 <Icon className="h-6 w-6" />
               </div>
-
               <div>
                 <p className="text-sm text-muted-foreground">{stat.title}</p>
                 <p className="mt-1 text-2xl font-bold">{stat.value.toLocaleString("ar-EG")}</p>
@@ -444,18 +363,20 @@ function WarehousePreviewContent() {
             <div>
               <h2 className="text-lg font-semibold">قائمة المخازن</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                عرض المخازن والبحث عنها وإدارتها.
+                عرض تفاصيل المخازن وإحداثياتها ونطاق السياج الجغرافي.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة مخزن
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة مخزن
+              </button>
+            )}
           </div>
 
           <input
@@ -467,9 +388,15 @@ function WarehousePreviewContent() {
             className="h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none focus-visible:border-teal-500 sm:max-w-md"
           />
 
-          <p className="text-sm text-muted-foreground">عدد النتائج: {filteredWarehouses.length}</p>
-
-          <WarehouseTable warehouses={filteredWarehouses} onWarehouseClick={openDetails} />
+          <WarehouseTable
+            warehouses={filteredWarehouses}
+            isLoading={isLoadingWarehouses}
+            error={warehousesError ? new Error(warehousesError) : null}
+            onRetry={() => refetchWarehouses()}
+            onWarehouseClick={openDetails}
+            onDeactivateClick={handleDeactivateWarehouse}
+            canManage={isAdmin}
+          />
         </section>
       )}
 
@@ -490,6 +417,7 @@ function WarehousePreviewContent() {
             warehouse={viewMode === "edit" ? selectedWarehouse : null}
             onSubmit={handleWarehouseSubmit}
             onCancel={backToList}
+            isSubmitting={createMutation.isPending || updateMutation.isPending}
           />
         </section>
       )}
@@ -509,7 +437,18 @@ function WarehousePreviewContent() {
 
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">{selectedWarehouse.name}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold">{selectedWarehouse.name}</h2>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      selectedWarehouse.isActive
+                        ? "border border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300"
+                        : "border border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+                    }`}
+                  >
+                    {selectedWarehouse.isActive ? "نشط" : "معطل"}
+                  </span>
+                </div>
 
                 <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <MapPin className="h-4 w-4" />
@@ -517,39 +456,48 @@ function WarehousePreviewContent() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => openEdit(selectedWarehouse)}
-                className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
-              >
-                <Pencil className="h-4 w-4" />
-                تعديل المخزن
-              </button>
+              {isAdmin && selectedWarehouse.isActive && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(selectedWarehouse)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    تعديل المخزن
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeactivateWarehouse(selectedWarehouse)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40"
+                  >
+                    تعطيل المخزن
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">خط العرض</p>
+                <p className="text-sm text-muted-foreground">خط العرض (Latitude)</p>
                 <p className="mt-2 font-mono text-lg" dir="ltr">
                   {selectedWarehouse.latitude}
                 </p>
               </div>
 
               <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">خط الطول</p>
+                <p className="text-sm text-muted-foreground">خط الطول (Longitude)</p>
                 <p className="mt-2 font-mono text-lg" dir="ltr">
                   {selectedWarehouse.longitude}
                 </p>
               </div>
 
               <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">عدد الموظفين</p>
-                <p className="mt-2 text-2xl font-bold">{selectedWarehouse.staffCount}</p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">عدد الأصناف</p>
-                <p className="mt-2 text-2xl font-bold">{selectedWarehouse.itemCount}</p>
+                <p className="text-sm text-muted-foreground">السياج الجغرافي للحضور</p>
+                <p className="mt-2 flex items-center gap-1.5 font-bold text-lg text-teal-700 dark:text-teal-300">
+                  <ShieldAlert className="h-5 w-5" />
+                  {selectedWarehouse.geofenceRadiusMeters ?? 150} متر
+                </p>
               </div>
             </div>
           </section>
@@ -561,10 +509,8 @@ function WarehousePreviewContent() {
               className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-
               <div>
                 <p className="font-semibold">تنبيه انخفاض المخزون</p>
-
                 <p className="mt-1 text-sm">
                   يوجد {lowStockItems.length} صنف يحتاج إلى مراجعة مستوى المخزون، بما في ذلك الأصناف
                   التي نفدت كميتها.
@@ -575,57 +521,110 @@ function WarehousePreviewContent() {
 
           {/* Current Stock */}
           <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <Package className="h-5 w-5 text-teal-600" />
-
-              <div>
-                <h3 className="text-lg font-semibold">المخزون الحالي</h3>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  الأصناف المتاحة والكميات وحدود التنبيه داخل المخزن.
-                </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Package className="h-5 w-5 text-teal-600" />
+                <div>
+                  <h3 className="text-lg font-semibold">المخزون الحالي بالمستودع</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    الأصناف المتاحة والكميات المسجلة داخل المستودع.
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => refetchStock()}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <RefreshCw className="h-3 w-3" />
+                تحديث
+              </button>
             </div>
 
-            <WarehouseStockTable items={selectedStock} />
+            <WarehouseStockTable
+              items={selectedStock}
+              isLoading={isLoadingStock}
+              error={stockError ? new Error(stockError) : null}
+              onRetry={() => refetchStock()}
+            />
           </section>
 
           {/* Warehouse Staff */}
           <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <Users className="h-5 w-5 text-teal-600" />
-
-              <div>
-                <h3 className="text-lg font-semibold">الموظفون التابعون للمخزن</h3>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  عدد الموظفين المعروضين: {selectedStaff.length}
-                </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Users className="h-5 w-5 text-teal-600" />
+                <div>
+                  <h3 className="text-lg font-semibold">الموظفون التابعون للمخزن</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    الموظفون والفنيون المعينون لهذا المخزن (عبر واجهة التحقق الرسمية).
+                  </p>
+                </div>
               </div>
+              {!isStaffForbidden && (
+                <button
+                  type="button"
+                  onClick={() => refetchStaff()}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  تحديث
+                </button>
+              )}
             </div>
 
-            <WarehouseStaffTable staff={selectedStaff} />
+            {isStaffForbidden ? (
+              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                قائمة الموظفين مخصصة لمديري النظام ومسؤولي المستودعات فقط.
+              </div>
+            ) : (
+              <WarehouseStaffTable
+                staff={selectedStaff}
+                isLoading={isLoadingStaff}
+                error={staffError ? new Error(staffError) : null}
+                onRetry={() => refetchStaff()}
+              />
+            )}
           </section>
 
-          {/* Movement History */}
+          {/* Movement History — Scoped by Permission */}
           <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <History className="h-5 w-5 text-teal-600" />
-
-              <div>
-                <h3 className="text-lg font-semibold">سجل حركات المخزون</h3>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  عمليات الوارد والصادر والمرتجعات مرتبة من الأحدث إلى الأقدم.
-                </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <History className="h-5 w-5 text-teal-600" />
+                <div>
+                  <h3 className="text-lg font-semibold">سجل حركات المخزون</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    عمليات الوارد والصادر والمرتجعات (متاحة للإدارة ومسؤولي المستودعات فقط).
+                  </p>
+                </div>
               </div>
+              {!isMovementsForbidden && (
+                <button
+                  type="button"
+                  onClick={() => refetchMovements()}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  تحديث
+                </button>
+              )}
             </div>
 
-            <WarehouseMovementsTable
-              movements={[...selectedMovements].sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              )}
-            />
+            {isMovementsForbidden ? (
+              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                سجل حركات المخزون مخصص لمديري النظام ومسؤولي المستودعات فقط.
+              </div>
+            ) : (
+              <WarehouseMovementsTable
+                movements={[...selectedMovements].sort(
+                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                )}
+                isLoading={isLoadingMovements}
+                error={movementsError ? new Error(movementsError) : null}
+                onRetry={() => refetchMovements()}
+              />
+            )}
           </section>
         </div>
       )}

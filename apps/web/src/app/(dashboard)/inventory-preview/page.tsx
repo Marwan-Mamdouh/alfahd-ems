@@ -17,6 +17,12 @@ import {
 
 import { RoleGuard } from "@/core/auth/guards";
 import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+} from "@/core/query/use-products";
+import { useWarehouses } from "@/core/query/use-warehouses";
 
 import { InventoryItemsTable } from "@/components/inventory/inventory-items-table";
 import { InventoryItemForm } from "@/components/inventory/inventory-item-form";
@@ -242,7 +248,35 @@ function getStockStatus(stock: InventoryStockRow) {
 }
 
 function InventoryPreviewContent() {
-  const [items, setItems] = useState<InventoryItemRow[]>(DEMO_ITEMS);
+  const { products: liveProducts } = useProducts();
+  const createProductMutation = useCreateProduct();
+  const updateProductMutation = useUpdateProduct();
+
+  const { warehouses: liveWarehouses } = useWarehouses();
+  const activeWarehouses = useMemo(() => {
+    const active = liveWarehouses
+      .filter((w) => w.isActive)
+      .map((w) => ({ id: w.id, name: w.name }));
+    return active.length > 0 ? active : DEMO_WAREHOUSES;
+  }, [liveWarehouses]);
+
+  const [localItems] = useState<InventoryItemRow[]>(DEMO_ITEMS);
+
+  const items = useMemo(() => {
+    if (liveProducts.length > 0) {
+      return liveProducts.map((p) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        model: p.model,
+        category: p.category,
+        description: p.description,
+        lowStockThreshold: p.lowStockThreshold,
+        isSerialized: p.isSerialized,
+      }));
+    }
+    return localItems;
+  }, [liveProducts, localItems]);
 
   const [stocks, setStocks] = useState<InventoryStockRow[]>(DEMO_STOCKS);
 
@@ -369,23 +403,14 @@ function InventoryPreviewContent() {
 
   async function handleItemSubmit(values: InventoryItemFormValues) {
     const name = values.name.trim();
+    const sku = values.sku.trim().toUpperCase();
     const model = values.model.trim();
     const category = values.category.trim();
     const description = values.description.trim();
+    const lowStockThreshold = Number(values.lowStockThreshold);
 
-    if (!name || !model || !category) {
-      throw new Error("اسم الصنف والموديل والتصنيف مطلوبون.");
-    }
-
-    const duplicate = items.some(
-      (item) =>
-        item.name.toLowerCase() === name.toLowerCase() &&
-        item.model.toLowerCase() === model.toLowerCase() &&
-        item.id !== selectedItemId
-    );
-
-    if (duplicate) {
-      throw new Error("يوجد صنف بنفس الاسم والموديل.");
+    if (!name || !sku || !model || !category) {
+      throw new Error("اسم الصنف ورمز الصنف (SKU) والموديل والتصنيف مطلوبون.");
     }
 
     if (pageMode === "edit-item") {
@@ -393,56 +418,30 @@ function InventoryPreviewContent() {
         throw new Error("لم يتم العثور على الصنف.");
       }
 
-      const updatedItem: InventoryItemRow = {
-        ...selectedItem,
-        name,
-        model,
-        category,
-        description: description || null,
-      };
+      await updateProductMutation.mutateAsync({
+        id: selectedItem.id,
+        dto: {
+          name,
+          sku,
+          model,
+          category,
+          description: description || null,
+          lowStockThreshold,
+        },
+      });
 
-      setItems((previous) =>
-        previous.map((item) => (item.id === selectedItem.id ? updatedItem : item))
-      );
-
-      // Keep existing stock and movement display names synced.
-      setStocks((previous) =>
-        previous.map((stock) =>
-          stock.itemId === selectedItem.id
-            ? {
-                ...stock,
-                itemName: name,
-                model,
-                category,
-              }
-            : stock
-        )
-      );
-
-      setMovements((previous) =>
-        previous.map((movement) =>
-          movement.itemId === selectedItem.id
-            ? {
-                ...movement,
-                itemName: name,
-              }
-            : movement
-        )
-      );
-
-      setNotification("تم تعديل بيانات الصنف في المعاينة فقط.");
+      setNotification("تم تعديل بيانات الصنف في الكتالوج بنجاح.");
     } else if (pageMode === "create-item") {
-      const newItem: InventoryItemRow = {
-        id: crypto.randomUUID(),
+      await createProductMutation.mutateAsync({
         name,
+        sku,
         model,
         category,
         description: description || null,
-      };
+        lowStockThreshold,
+      });
 
-      setItems((previous) => [newItem, ...previous]);
-
-      setNotification("تمت إضافة الصنف إلى الكتالوج التجريبي.");
+      setNotification("تمت إضافة الصنف إلى كتالوج المنتجات بنجاح.");
     } else {
       throw new Error("عملية غير صالحة.");
     }
@@ -454,7 +453,7 @@ function InventoryPreviewContent() {
   async function handleMovementSubmit(values: InventoryMovementFormValues) {
     const item = items.find((entry) => entry.id === values.itemId);
 
-    const warehouse = DEMO_WAREHOUSES.find((entry) => entry.id === values.warehouseId);
+    const warehouse = activeWarehouses.find((entry) => entry.id === values.warehouseId);
 
     const quantity = Number(values.quantity);
 
@@ -752,7 +751,7 @@ function InventoryPreviewContent() {
               >
                 <option value="all">جميع المخازن</option>
 
-                {DEMO_WAREHOUSES.map((warehouse) => (
+                {activeWarehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.name}
                   </option>
@@ -838,7 +837,7 @@ function InventoryPreviewContent() {
 
           <InventoryMovementForm
             items={itemOptions}
-            warehouses={DEMO_WAREHOUSES}
+            warehouses={activeWarehouses}
             technicians={activeTechnicians}
             onSubmit={handleMovementSubmit}
             onCancel={backToOverview}
