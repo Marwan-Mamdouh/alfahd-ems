@@ -126,7 +126,7 @@ export class AuthController {
         error instanceof UnauthorizedException &&
         !(await this.authService.wasRotatedRefreshToken(token))
       ) {
-        res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+        this.clearRefreshCookie(res);
       }
       throw error;
     }
@@ -144,9 +144,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthOkResponseDto> {
     await this.authService.logout(req.user.userId);
-    // Path must match the path used when setting the cookie, or the browser
-    // retains it and the session appears to survive logout.
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+    this.clearRefreshCookie(res);
     return { ok: true };
   }
 
@@ -157,6 +155,12 @@ export class AuthController {
       REFRESH_COOKIE_SECURE: this.configService.get<boolean>('REFRESH_COOKIE_SECURE'),
       JWT_REFRESH_EXPIRES_IN: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
     });
+  }
+
+  // Path must match the path used when setting the cookie, or the browser
+  // retains it and the session appears to survive logout/revocation.
+  private clearRefreshCookie(res: Response): void {
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
   }
 
   @Post('forgot-password')
@@ -196,7 +200,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthOkResponseDto> {
     await this.authService.changePassword(user.userId, dto);
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+    this.clearRefreshCookie(res);
     return { ok: true };
   }
 }

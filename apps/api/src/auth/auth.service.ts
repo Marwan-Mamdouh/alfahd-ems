@@ -228,6 +228,12 @@ export class AuthService {
     if (!(await verify(user.passwordHash, dto.oldPassword))) {
       throw new BadRequestException('Old password is incorrect');
     }
+    // Only checked after the old-password verify succeeds: rejecting the equality
+    // before authentication would let anyone probe validation without proving
+    // they know the current password.
+    if (dto.newPassword === dto.oldPassword) {
+      throw new BadRequestException('New password must differ from the current password');
+    }
 
     const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
     await this.db
