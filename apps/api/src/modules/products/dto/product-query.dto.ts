@@ -25,6 +25,24 @@ export class QueryProductsDto {
   })
   isLowStock?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value as boolean | undefined;
+  })
+  activeOnly?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value as boolean | undefined;
+  })
+  isActive?: boolean;
+
   @IsInt()
   @Min(1)
   @Max(100)

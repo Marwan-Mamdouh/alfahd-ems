@@ -35,6 +35,8 @@ export class ProductsService {
       search: query.search,
       category: query.category,
       isLowStock: query.isLowStock,
+      activeOnly: query.activeOnly,
+      isActive: query.isActive,
       limit: query.limit,
       offset: query.offset,
     });
@@ -92,18 +94,20 @@ export class ProductsService {
   }
 
   async remove(id: string): Promise<void> {
-    const existing = await this.repo.products.findById(id);
-    if (!existing) {
-      throw new NotFoundException(`Product with ID "${id}" was not found`);
-    }
+    return this.repo.transaction(async (tx) => {
+      const existing = await this.repo.products.findById(id);
+      if (!existing) {
+        throw new NotFoundException(`Product with ID "${id}" was not found`);
+      }
 
-    const { canDelete, reason } = await this.repo.products.canDeleteProduct(id);
-    if (!canDelete) {
-      throw new ConflictException(
-        reason ?? 'Cannot delete product due to existing inventory or transaction history',
-      );
-    }
+      const { canDelete, reason } = await this.repo.products.canDeleteProduct(id, tx);
+      if (!canDelete) {
+        throw new ConflictException(
+          reason ?? 'Cannot deactivate product due to active inventory or active router assets',
+        );
+      }
 
-    await this.repo.products.deleteById(id);
+      await this.repo.products.softDeactivate(id, tx);
+    });
   }
 }

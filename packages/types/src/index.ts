@@ -566,6 +566,7 @@ export interface ProductDto {
   description: string | null;
   lowStockThreshold: number;
   isSerialized: boolean;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
   totalStock?: number;
@@ -594,6 +595,8 @@ export interface QueryProductsDto {
   search?: string;
   category?: string;
   isLowStock?: boolean;
+  activeOnly?: boolean;
+  isActive?: boolean;
   limit?: number;
   offset?: number;
 }

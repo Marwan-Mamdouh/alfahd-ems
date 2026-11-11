@@ -18,6 +18,7 @@ describe('ProductsService (TDD Unit Tests)', () => {
     description: 'Outdoor FTTH drop cable 100m',
     lowStockThreshold: 10,
     isSerialized: false,
+    isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };
@@ -36,13 +37,17 @@ describe('ProductsService (TDD Unit Tests)', () => {
     create: vi.fn(),
     updateProduct: vi.fn(),
     deleteById: vi.fn(),
+    softDeactivate: vi.fn(),
+    softReactivate: vi.fn(),
     countProductStock: vi.fn(),
+    countActiveRouters: vi.fn(),
     hasMovementHistory: vi.fn(),
     canDeleteProduct: vi.fn(),
   };
 
   const mockRepositoryService = {
     products: mockProductsRepo,
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
   };
 
   beforeEach(async () => {
@@ -108,6 +113,17 @@ describe('ProductsService (TDD Unit Tests)', () => {
       expect(mockProductsRepo.findManyWithStock).toHaveBeenCalledWith(query);
       expect(result).toEqual(expectedResult);
     });
+
+    it('should pass activeOnly filter to repository', async () => {
+      const query: QueryProductsDto = { limit: 10, offset: 0, activeOnly: true };
+      const expectedResult = { items: [mockProductWithStock], total: 1 };
+      mockProductsRepo.findManyWithStock.mockResolvedValue(expectedResult);
+
+      const result = await service.findAll(query);
+
+      expect(mockProductsRepo.findManyWithStock).toHaveBeenCalledWith(query);
+      expect(result).toEqual(expectedResult);
+    });
   });
 
   describe('findById', () => {
@@ -165,33 +181,55 @@ describe('ProductsService (TDD Unit Tests)', () => {
   });
 
   describe('remove', () => {
-    it('should delete product when no stock and no movement history exist', async () => {
+    it('should soft-deactivate product when no active stock and no active routers exist', async () => {
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
       mockProductsRepo.canDeleteProduct.mockResolvedValue({ canDelete: true });
-      mockProductsRepo.deleteById.mockResolvedValue(undefined);
+      mockProductsRepo.softDeactivate.mockResolvedValue({ ...mockProduct, isActive: false });
 
       await expect(service.remove(mockProduct.id)).resolves.not.toThrow();
 
+      expect(mockRepositoryService.transaction).toHaveBeenCalled();
       expect(mockProductsRepo.findById).toHaveBeenCalledWith(mockProduct.id);
-      expect(mockProductsRepo.canDeleteProduct).toHaveBeenCalledWith(mockProduct.id);
-      expect(mockProductsRepo.deleteById).toHaveBeenCalledWith(mockProduct.id);
-    });
-
-    it('should throw NotFoundException if product to delete does not exist', async () => {
-      mockProductsRepo.findById.mockResolvedValue(null);
-
-      await expect(service.remove('missing-id')).rejects.toThrow(NotFoundException);
+      expect(mockProductsRepo.canDeleteProduct).toHaveBeenCalledWith(
+        mockProduct.id,
+        expect.anything(),
+      );
+      expect(mockProductsRepo.softDeactivate).toHaveBeenCalledWith(
+        mockProduct.id,
+        expect.anything(),
+      );
       expect(mockProductsRepo.deleteById).not.toHaveBeenCalled();
     });
 
-    it('should throw ConflictException if product has stock or movement history', async () => {
+    it('should throw NotFoundException if product to deactivate does not exist', async () => {
+      mockProductsRepo.findById.mockResolvedValue(null);
+
+      await expect(service.remove('missing-id')).rejects.toThrow(NotFoundException);
+      expect(mockProductsRepo.softDeactivate).not.toHaveBeenCalled();
+      expect(mockProductsRepo.deleteById).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException if product has active inventory stock', async () => {
       mockProductsRepo.findById.mockResolvedValue(mockProduct);
       mockProductsRepo.canDeleteProduct.mockResolvedValue({
         canDelete: false,
-        reason: 'Cannot delete product with active inventory (10 units in stock)',
+        reason: 'Cannot deactivate product holding active inventory (10 units in stock)',
       });
 
       await expect(service.remove(mockProduct.id)).rejects.toThrow(ConflictException);
+      expect(mockProductsRepo.softDeactivate).not.toHaveBeenCalled();
+      expect(mockProductsRepo.deleteById).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException if product has active router hardware assets', async () => {
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockProductsRepo.canDeleteProduct.mockResolvedValue({
+        canDelete: false,
+        reason: 'Cannot deactivate product with active router hardware assets (3 units active)',
+      });
+
+      await expect(service.remove(mockProduct.id)).rejects.toThrow(ConflictException);
+      expect(mockProductsRepo.softDeactivate).not.toHaveBeenCalled();
       expect(mockProductsRepo.deleteById).not.toHaveBeenCalled();
     });
   });
