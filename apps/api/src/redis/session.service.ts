@@ -92,15 +92,6 @@ export class SessionService {
     await this.redis.del(rotatedKey(tokenId));
   }
 
-  /**
-   * Record that a tokenId was rotated on refresh. Distinguishes rotated tokens
-   * from genuinely dead/unknown tokens so concurrent or losing refresh attempts
-   * do not clear the winning tab's newly set cookie.
-   */
-  async markRotated(userId: string, tokenId: string): Promise<void> {
-    await this.redis.set(rotatedKey(tokenId), userId, 'EX', ROTATED_TOKEN_TTL_SECONDS);
-  }
-
   /** True when the tokenId was rotated on a previous refresh request. */
   async isRotated(tokenId: string): Promise<boolean> {
     return (await this.redis.exists(rotatedKey(tokenId))) === 1;

@@ -70,7 +70,6 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
     consumeSessionForRotation: vi.fn().mockResolvedValue(null),
     clearRotated: vi.fn().mockResolvedValue(undefined),
     revokeSession: vi.fn().mockResolvedValue(undefined),
-    markRotated: vi.fn().mockResolvedValue(undefined),
     isRotated: vi.fn().mockResolvedValue(false),
     getRevokedTokenUserId: vi.fn().mockResolvedValue(null),
   } as unknown as SessionService;
@@ -306,8 +305,6 @@ describe('refresh — token rotation (Issue #9)', () => {
     expect(sessionService.consumeSessionForRotation).toHaveBeenCalledWith('old-token-id');
     expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
     expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
-    // markRotated is handled atomically in Lua inside consumeSessionForRotation, not called here
-    expect(sessionService.markRotated).not.toHaveBeenCalled();
     expect(jwtService.sign).toHaveBeenCalledWith(
       expect.objectContaining({
         sub: ACTIVE_USER.id,
