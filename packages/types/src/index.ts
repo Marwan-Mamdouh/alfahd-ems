@@ -350,6 +350,16 @@ export interface RouterDto {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  product?: {
+    id: string;
+    name: string;
+    sku: string;
+    model: string;
+  };
+  warehouse?: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 export interface RouterAssignmentDto {
