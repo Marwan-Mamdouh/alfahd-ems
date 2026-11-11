@@ -76,6 +76,9 @@ api.interceptors.request.use((config) => {
   const url = config.url ?? "";
   if (UNAUTHENTICATED_PATHS.has(url)) return config;
 
+  // Never send bearer tokens to external origins; only relative /api or same-origin paths
+  if (url.startsWith("http://") || url.startsWith("https://")) return config;
+
   config.headers.Authorization = `Bearer ${accessToken}`;
 
   return config;
@@ -162,6 +165,10 @@ api.interceptors.response.use(
     // duplicate writes, and the backend has no idempotency key to make it safe.
     const method = (original.method ?? "get").toLowerCase();
     if (method !== "get") return Promise.reject(error);
+
+    // Non-idempotent GET endpoints that enqueue background jobs (such as /attendance/report)
+    // must never be blindly retried on transient failures to avoid enqueuing duplicate jobs.
+    if (url.startsWith(ENDPOINTS.attendance.report)) return Promise.reject(error);
 
     // A 401 that already spent its single refresh-and-replay must not be retried
     // again here: that replay used the same (dead) credentials, so further
