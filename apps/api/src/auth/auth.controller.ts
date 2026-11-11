@@ -41,12 +41,13 @@ import {
   REFRESH_COOKIE_PATH,
   refreshCookieOptions,
 } from '../config/refresh-cookie.js';
+import { routes } from '../common/constants/routes.constants.js';
 
 // `cookies` is populated by cookie-parser and already typed by @types/cookie-parser.
 type CookieRequest = Request;
 
 @ApiTags('Auth')
-@Controller('auth')
+@Controller(routes.auth.root)
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
@@ -54,7 +55,7 @@ export class AuthController {
     private readonly rateLimitGuard: RateLimitGuard,
   ) {}
 
-  @Post('login')
+  @Post(routes.auth.login)
   @UseGuards(RateLimitGuard)
   @HttpCode(200)
   @ApiOperation({ summary: 'Authenticate user and issue tokens' })
@@ -93,7 +94,7 @@ export class AuthController {
     return result;
   }
 
-  @Post('refresh')
+  @Post(routes.auth.refresh)
   @HttpCode(200)
   @ApiOperation({ summary: 'Refresh access token using refresh token cookie or body' })
   @ApiOkResponse({
@@ -132,7 +133,7 @@ export class AuthController {
     }
   }
 
-  @Post('logout')
+  @Post(routes.auth.logout)
   @UseGuards(JwtAuthGuard)
   @HttpCode(200)
   @ApiBearerAuth()
@@ -163,7 +164,7 @@ export class AuthController {
     res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
   }
 
-  @Post('forgot-password')
+  @Post(routes.auth.forgotPassword)
   @HttpCode(200)
   @ApiOperation({ summary: 'Request a password reset link' })
   @ApiOkResponse({
@@ -176,7 +177,7 @@ export class AuthController {
     return { ok: true };
   }
 
-  @Post('reset-password')
+  @Post(routes.auth.resetPassword)
   @HttpCode(200)
   @ApiOperation({ summary: 'Reset password using a valid token' })
   @ApiOkResponse({ description: 'Password reset successfully', type: AuthOkResponseDto })

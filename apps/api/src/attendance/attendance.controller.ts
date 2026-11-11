@@ -31,8 +31,9 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 import { AttendanceListRequestDto, AttendanceListResponseDto } from './dto/attendance-list.dto.js';
+import { routes } from '../common/constants/routes.constants.js';
 
-@Controller('attendance')
+@Controller(routes.attendance.root)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
@@ -60,7 +61,7 @@ export class AttendanceController {
     return this.attendanceService.list(query);
   }
 
-  @Post('check-in')
+  @Post(routes.attendance.checkIn)
   @Roles(Role.TECHNICIAN)
   checkIn(
     @Body() dto: CheckInDto,
@@ -69,14 +70,14 @@ export class AttendanceController {
     return this.attendanceService.checkIn(req.user.userId, dto.lat, dto.lng);
   }
 
-  @Post('check-out')
+  @Post(routes.attendance.checkOut)
   @HttpCode(HttpStatus.OK)
   @Roles(Role.TECHNICIAN)
   checkOut(@Req() req: Request & { user: JwtUser }): Promise<AttendanceRecordDto> {
     return this.attendanceService.checkOut(req.user.userId);
   }
 
-  @Patch(':id')
+  @Patch(routes.attendance.id)
   @Roles(Role.ADMIN)
   override(
     @Param('id', ParseUUIDPipe) id: string,
@@ -86,7 +87,7 @@ export class AttendanceController {
     return this.attendanceService.override(id, req.user.userId, dto);
   }
 
-  @Get('report')
+  @Get(routes.attendance.report)
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.ACCEPTED)
   getReport(
