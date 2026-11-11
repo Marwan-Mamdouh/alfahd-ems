@@ -7,6 +7,7 @@ import {
   fetchProductById,
   createProduct,
   updateProduct,
+  deleteProduct,
 } from "@/core/api/products";
 import type {
   CreateProductDto,
@@ -101,4 +102,25 @@ export function useUpdateProduct() {
     },
   });
 }
+
+/**
+ * Mutation hook to deactivate a product (ADMIN only).
+ * Performs soft deactivation; physical hard deletion is strictly prohibited.
+ * Invalidates product list, product detail, and inventory stock caches.
+ */
+export function useDeleteProduct() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => deleteProduct(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.products.detail(id),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 
