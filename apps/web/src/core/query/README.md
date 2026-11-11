@@ -156,4 +156,32 @@ export function TechnicianSelect({
 }
 ```
 
+---
+
+## 7. Warehouses & Product Catalog Hooks (Task B2 / Issue #70)
+
+The real data layer for Warehouses and Products integrates with backend endpoints `/warehouses`, `/products`, `/inventory/warehouses/:id`, and `/inventory/movements`.
+
+### Warehouse Hooks ([`use-warehouses.ts`](./use-warehouses.ts))
+
+| Hook | Description | Cache Invalidation |
+| :--- | :--- | :--- |
+| `useWarehouses(params?)` | Fetches paginated warehouses list | `warehousesKeys.list(params)` |
+| `useWarehouse(id)` | Fetches single warehouse details | `warehousesKeys.detail(id)` |
+| `useCreateWarehouse()` | Creates warehouse (`CreateWarehouseDto`) | `warehouses.all`, `inventory.all` |
+| `useUpdateWarehouse()` | Updates warehouse (`UpdateWarehouseDto`) | `warehouses.all`, `warehouses.detail(id)`, `inventory.all` |
+| `useDeleteWarehouse()` | Soft-deactivates warehouse with 409 conflict detection | `warehouses.all`, `inventory.all` |
+| `useWarehouseStaff(id)` | Resolves staff via `/employees/lookup?warehouse_id=...` | Delegated to `employeesKeys.lookup` |
+| `useWarehouseStock(id)` | Fetches warehouse inventory balances | `warehousesKeys.stock(id)` |
+| `useWarehouseMovements(id, role)` | Fetches movement history (Least-privilege scoped: only runs for `ADMIN` and `WAREHOUSE_STAFF`) | `inventoryKeys.movements` |
+
+### Product Hooks ([`use-products.ts`](./use-products.ts))
+
+| Hook | Description | Cache Invalidation |
+| :--- | :--- | :--- |
+| `useProducts(params?)` | Fetches paginated product catalog | `productsKeys.list(params)` |
+| `useProduct(id)` | Fetches product by ID | `productsKeys.detail(id)` |
+| `useCreateProduct()` | Adds product with uppercase SKU normalization | `products.all`, `inventory.all` |
+| `useUpdateProduct()` | Updates catalog details and low stock threshold | `products.all`, `products.detail(id)`, `inventory.all` |
+
 
