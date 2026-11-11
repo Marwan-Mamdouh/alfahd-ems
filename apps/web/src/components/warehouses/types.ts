@@ -1,8 +1,5 @@
 /**
  * Frontend display models for Warehouse Management.
- *
- * These types are temporary until the backend
- * API contract is confirmed.
  */
 
 export interface WarehouseRow {
@@ -11,8 +8,13 @@ export interface WarehouseRow {
   address: string;
   latitude: number;
   longitude: number;
-  staffCount: number;
-  itemCount: number;
+  geofenceRadiusMeters: number;
+  managerId: string | null;
+  isActive: boolean;
+  staffCount?: number;
+  itemCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface WarehouseFormValues {
@@ -20,19 +22,23 @@ export interface WarehouseFormValues {
   address: string;
   latitude: string;
   longitude: string;
+  geofenceRadiusMeters: string;
+  managerId: string;
 }
 
 export interface WarehouseStaffRow {
   id: string;
   name: string;
-  email: string;
+  email?: string;
   role: string;
+  status?: string;
+  isEligible?: boolean;
 }
 
 export interface WarehouseMovementRow {
   id: string;
   itemName: string;
-  type: "INBOUND" | "OUTBOUND" | "RETURN";
+  type: string;
   quantity: number;
   createdAt: string;
   performedBy: string;

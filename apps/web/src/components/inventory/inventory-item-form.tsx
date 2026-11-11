@@ -14,9 +14,11 @@ interface InventoryItemFormProps {
 
 const EMPTY_VALUES: InventoryItemFormValues = {
   name: "",
+  sku: "",
   model: "",
   category: "",
   description: "",
+  lowStockThreshold: "10",
 };
 
 const inputClass =
@@ -29,9 +31,11 @@ function getInitialValues(item?: InventoryItemRow | null): InventoryItemFormValu
 
   return {
     name: item.name,
+    sku: item.sku ?? "",
     model: item.model,
     category: item.category,
     description: item.description ?? "",
+    lowStockThreshold: String(item.lowStockThreshold ?? 10),
   };
 }
 
@@ -44,9 +48,7 @@ export function InventoryItemForm({
   const isEdit = Boolean(item);
 
   const [values, setValues] = useState<InventoryItemFormValues>(() => getInitialValues(item));
-
   const [errors, setErrors] = useState<Partial<Record<keyof InventoryItemFormValues, string>>>({});
-
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
@@ -55,7 +57,7 @@ export function InventoryItemForm({
   function updateField(field: keyof InventoryItemFormValues, value: string) {
     setValues((previous) => ({
       ...previous,
-      [field]: value,
+      [field]: field === "sku" ? value.toUpperCase() : value,
     }));
 
     setErrors((previous) => ({
@@ -75,12 +77,25 @@ export function InventoryItemForm({
       nextErrors.name = "اسم الصنف يجب أن يحتوي على حرفين على الأقل.";
     }
 
+    if (!values.sku.trim()) {
+      nextErrors.sku = "رمز الصنف (SKU) مطلوب.";
+    } else if (values.sku.trim().length > 100) {
+      nextErrors.sku = "رمز الصنف يجب ألا يتجاوز 100 حرف.";
+    }
+
     if (!values.model.trim()) {
       nextErrors.model = "موديل الصنف مطلوب.";
     }
 
     if (!values.category.trim()) {
       nextErrors.category = "تصنيف الصنف مطلوب.";
+    }
+
+    const threshold = Number(values.lowStockThreshold);
+    if (!values.lowStockThreshold.trim()) {
+      nextErrors.lowStockThreshold = "حد انخفاض المخزون مطلوب.";
+    } else if (!Number.isInteger(threshold) || threshold < 0) {
+      nextErrors.lowStockThreshold = "حد انخفاض المخزون يجب أن يكون رقمًا صحيحًا غير سالب.";
     }
 
     setErrors(nextErrors);
@@ -94,9 +109,11 @@ export function InventoryItemForm({
 
     const cleanedValues: InventoryItemFormValues = {
       name: values.name.trim(),
+      sku: values.sku.trim().toUpperCase(),
       model: values.model.trim(),
       category: values.category.trim(),
       description: values.description.trim(),
+      lowStockThreshold: values.lowStockThreshold.trim(),
     };
 
     try {
@@ -136,7 +153,6 @@ export function InventoryItemForm({
           <label htmlFor="inventory-item-name" className={labelClass}>
             اسم الصنف *
           </label>
-
           <input
             id="inventory-item-name"
             type="text"
@@ -145,19 +161,36 @@ export function InventoryItemForm({
             maxLength={150}
             value={values.name}
             onChange={(event) => updateField("name", event.target.value)}
-            placeholder="مثال: كابل إنترنت"
+            placeholder="مثال: راوتر واي فاي 6"
             className={inputClass}
             aria-invalid={Boolean(errors.name)}
           />
-
           {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="inventory-item-sku" className={labelClass}>
+            رمز الصنف (SKU) *
+          </label>
+          <input
+            id="inventory-item-sku"
+            type="text"
+            required
+            maxLength={100}
+            value={values.sku}
+            onChange={(event) => updateField("sku", event.target.value)}
+            placeholder="مثال: RTR-WIFI6-01"
+            className={inputClass}
+            dir="ltr"
+            aria-invalid={Boolean(errors.sku)}
+          />
+          {errors.sku && <p className="mt-1 text-xs text-red-600">{errors.sku}</p>}
         </div>
 
         <div>
           <label htmlFor="inventory-item-model" className={labelClass}>
             الموديل *
           </label>
-
           <input
             id="inventory-item-model"
             type="text"
@@ -165,18 +198,16 @@ export function InventoryItemForm({
             maxLength={100}
             value={values.model}
             onChange={(event) => updateField("model", event.target.value)}
-            placeholder="مثال: CAT6"
+            placeholder="مثال: Archer AX55"
             className={inputClass}
           />
-
           {errors.model && <p className="mt-1 text-xs text-red-600">{errors.model}</p>}
         </div>
 
-        <div className="md:col-span-2">
+        <div>
           <label htmlFor="inventory-item-category" className={labelClass}>
             التصنيف *
           </label>
-
           <input
             id="inventory-item-category"
             type="text"
@@ -184,18 +215,37 @@ export function InventoryItemForm({
             maxLength={100}
             value={values.category}
             onChange={(event) => updateField("category", event.target.value)}
-            placeholder="مثال: كابلات أو راوترات"
+            placeholder="مثال: راوترات أو كابلات"
             className={inputClass}
           />
-
           {errors.category && <p className="mt-1 text-xs text-red-600">{errors.category}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="inventory-item-threshold" className={labelClass}>
+            حد انخفاض المخزون (تنبيه إعادة الطلب) *
+          </label>
+          <input
+            id="inventory-item-threshold"
+            type="number"
+            min={0}
+            step={1}
+            required
+            value={values.lowStockThreshold}
+            onChange={(event) => updateField("lowStockThreshold", event.target.value)}
+            placeholder="10"
+            className={inputClass}
+            dir="ltr"
+          />
+          {errors.lowStockThreshold && (
+            <p className="mt-1 text-xs text-red-600">{errors.lowStockThreshold}</p>
+          )}
         </div>
 
         <div className="md:col-span-2">
           <label htmlFor="inventory-item-description" className={labelClass}>
             وصف الصنف
           </label>
-
           <textarea
             id="inventory-item-description"
             rows={4}
@@ -236,7 +286,6 @@ export function InventoryItemForm({
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-
           {loading ? "جاري الحفظ..." : isEdit ? "حفظ التعديلات" : "إضافة الصنف"}
         </button>
       </div>

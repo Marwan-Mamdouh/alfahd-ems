@@ -35,7 +35,9 @@ export function InventoryItemsTable({
 
             <div className="min-w-0">
               <p className="font-semibold text-foreground">{item.name}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{item.model || "بدون موديل"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {item.sku ? `${item.sku} • ${item.model}` : item.model || "بدون موديل"}
+              </p>
             </div>
           </div>
         ),
