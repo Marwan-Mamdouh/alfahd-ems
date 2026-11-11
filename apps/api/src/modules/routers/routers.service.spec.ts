@@ -98,6 +98,19 @@ describe('RoutersService', () => {
     add: vi.fn(),
   };
 
+  const mockTechnicianUser = {
+    id: 'tech-1',
+    name: 'Mahmoud Tech',
+    role: 'TECHNICIAN',
+    status: 'ACTIVE',
+    isActive: true,
+  };
+
+  const mockUsersRepo = {
+    findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
+  };
+
   const mockExternalTx = {} as unknown as NodePgDatabase<typeof schema>;
   const mockMovementResult = {
     inventory: {} as WarehouseInventory,
@@ -133,10 +146,14 @@ describe('RoutersService', () => {
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,
     inventory: mockInventoryRepo,
+    users: mockUsersRepo,
   };
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    mockUsersRepo.findById.mockResolvedValue(mockTechnicianUser);
+    mockUsersRepo.findByIdForUpdate.mockResolvedValue(mockTechnicianUser);
 
     mockProductsRepo.findByIdForUpdate.mockImplementation((id: string) =>
       mockProductsRepo.findById(id),
@@ -522,6 +539,39 @@ describe('RoutersService', () => {
       mockRoutersRepo.findByIdForUpdate.mockResolvedValue({
         ...mockRouter,
         status: 'RETURNED',
+      });
+
+      await expect(
+        service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws NotFoundException if target technician is not found', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue(null);
+
+      await expect(
+        service.assign(mockRouter.id, { technicianId: 'non-existent-tech' }, 'admin-id'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException if assigned user does not have role TECHNICIAN', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockTechnicianUser,
+        role: 'CS',
+      });
+
+      await expect(
+        service.assign(mockRouter.id, { technicianId: 'tech-1' }, 'admin-id'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws ConflictException if target technician is ON_LEAVE or INACTIVE', async () => {
+      mockRoutersRepo.findByIdForUpdate.mockResolvedValue(mockRouter);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockTechnicianUser,
+        status: 'ON_LEAVE',
       });
 
       await expect(

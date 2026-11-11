@@ -5,6 +5,7 @@ import { WarehousesRepository } from './repositories/warehouses.repository.js';
 import { InventoryRepository } from './repositories/inventory.repository.js';
 import { RoutersRepository } from './repositories/routers.repository.js';
 import { IpRepository } from './repositories/ip.repository.js';
+import { UsersRepository } from './repositories/users.repository.js';
 
 @Global()
 @Module({
@@ -15,6 +16,7 @@ import { IpRepository } from './repositories/ip.repository.js';
     InventoryRepository,
     RoutersRepository,
     IpRepository,
+    UsersRepository,
   ],
   exports: [
     RepositoryService,
@@ -23,6 +25,7 @@ import { IpRepository } from './repositories/ip.repository.js';
     InventoryRepository,
     RoutersRepository,
     IpRepository,
+    UsersRepository,
   ],
 })
 export class RepositoryModule {}
