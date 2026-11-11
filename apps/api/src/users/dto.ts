@@ -1,5 +1,4 @@
 import type {
-  ChangePasswordRequestDto as ChangePasswordRequest,
   CreateUserDto as CreateUserRequest,
   UpdateUserDto as UpdateUserRequest,
   UserDto,
@@ -68,18 +67,6 @@ export class UpdateUserRequestDto implements UpdateUserRequest {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-}
-
-export class ChangePasswordRequestDto implements ChangePasswordRequest {
-  @ApiProperty({ example: 'OldPassword123!', minLength: 1, description: 'Current user password' })
-  @IsString()
-  @MinLength(1)
-  oldPassword!: string;
-
-  @ApiProperty({ example: 'NewSecurePassword123!', minLength: 8, description: 'New password' })
-  @IsString()
-  @MinLength(8)
-  newPassword!: string;
 }
 
 export class RevokeSessionResponseDto {

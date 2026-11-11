@@ -1,5 +1,4 @@
 import type {
-  ChangePasswordRequestDto,
   CreateEmployeeDto,
   CreateUserDto,
   UpdateEmployeeDto,
@@ -18,7 +17,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { hash, verify } from 'argon2';
+import { hash } from 'argon2';
 import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, warehouses, type User } from '../database/schema/index.js';
@@ -335,20 +334,5 @@ export class UsersService {
     }
     // Session revocation happens inside `update` (isActive === false).
     return this.update(id, { isActive: false }, requestingUserId);
-  }
-
-  async changePassword(userId: string, dto: ChangePasswordRequestDto): Promise<void> {
-    const user = await this.findRowOrThrow(userId);
-    if (!(await verify(user.passwordHash, dto.oldPassword))) {
-      throw new BadRequestException('Old password is incorrect');
-    }
-    const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
-    await this.db
-      .update(users)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(users.id, userId));
-    // A password change invalidates every pre-change session: refresh tokens
-    // minted under the old credential must not outlive it by up to 7 days.
-    await this.sessionService.revokeAllSessions(userId);
   }
 }

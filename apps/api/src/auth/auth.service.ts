@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +19,7 @@ import { users, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
 import { SessionService } from '../redis/session.service.js';
+import type { ChangePasswordRequestDto } from './dto.js';
 
 // Fixed argon2id dummy hash with the same cost parameters as ARGON2_OPTIONS
 // (m=65536, t=3, p=1). Safe to parse and verify; always returns false.
@@ -214,6 +216,30 @@ export class AuthService {
     // Reset via a (possibly stolen) token must kill every session that could
     // have been established under the old credential — otherwise an attacker
     // holding an old refresh token keeps access for up to 7 days.
+    await this.sessionService.revokeAllSessions(userId);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordRequestDto): Promise<void> {
+    const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const user = rows[0];
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (!(await verify(user.passwordHash, dto.oldPassword))) {
+      throw new BadRequestException('Old password is incorrect');
+    }
+
+    const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
+    await this.db
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+
+    // Issue #14 choice: revoke every session, including the caller's, and let the
+    // client log in again with the new credential. Re-issuing the caller's session
+    // here would keep a pre-change token alive across the security boundary.
+    // Access tokens (stateless JWTs) can still work until they expire (<=15m);
+    // refresh is dead immediately, which is what "force re-login" means here.
     await this.sessionService.revokeAllSessions(userId);
   }
 }

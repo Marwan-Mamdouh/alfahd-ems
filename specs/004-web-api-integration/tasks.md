@@ -158,7 +158,7 @@ description: "Task list for Web API Integration (004)"
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [X] T034 [P] Update `specs/004-web-api-integration/contracts/api-contracts.md`: cookie table `Path` → `/` and `SameSite` → `Lax`, the `/api/*` rewrite and its consequences, the GET-only retry budget, `POST /users/change-password` → 201, and the 5-per-10-min login rate limit. Required by Constitution §V — a separate frontend developer codes against this file and M4 #54 will freeze it
+- [X] T034 [P] Update `specs/004-web-api-integration/contracts/api-contracts.md`: cookie table `Path` → `/` and `SameSite` → `Lax`, the `/api/*` rewrite and its consequences, the GET-only retry budget, `PATCH /auth/change-password` → 200, and the 5-per-10-min login rate limit. Required by Constitution §V — a separate frontend developer codes against this file and M4 #54 will freeze it
 - [X] T035 [P] Update `specs/004-web-api-integration/quickstart.md`: dashboard on 3001, `/api/...` paths, cookie `path: /`, the new troubleshooting rows, and a scenario for password recovery
 - [X] T036 Confirm no secret leakage in `apps/web`. Check **behaviour, not prose** — several files mention these names in explanatory comments, so a naive `grep` over the whole tree gives false positives. The assertions that must hold:
   - `grep -rn "document\.cookie\s*=\|localStorage\.\|sessionStorage\.\|zustand/middleware\|\.refreshToken" apps/web/src` → **no matches** (the token is never written to or read from any JS-reachable store)
