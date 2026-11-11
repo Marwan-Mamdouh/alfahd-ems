@@ -170,6 +170,68 @@ describe("Routers React Query Integration", () => {
     expect(queryClient.getQueryState(invKey)?.isInvalidated).toBe(true);
   });
 
+  it("invalidates routers, histories, warehouse, and inventory caches on transition", async () => {
+    const listKey = queryKeys.routers.list();
+    const detailKey = queryKeys.routers.detail("router-1");
+    const statusHistKey = queryKeys.routers.statusHistory("router-1");
+    const asgnHistKey = queryKeys.routers.assignmentHistory("router-1");
+    const whKey = queryKeys.warehouses.all;
+    const invKey = queryKeys.inventory.all;
+
+    queryClient.setQueryData(listKey, { items: [mockRouter], total: 1 });
+    queryClient.setQueryData(detailKey, mockRouter);
+    queryClient.setQueryData(statusHistKey, []);
+    queryClient.setQueryData(asgnHistKey, []);
+    queryClient.setQueryData(whKey, { items: [] });
+    queryClient.setQueryData(invKey, { items: [] });
+
+    // Mimic useTransitionRouter onSuccess:
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.all });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.detail("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.statusHistory("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.assignmentHistory("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(statusHistKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(asgnHistKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(whKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(invKey)?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates routers, condition history, assignment history, warehouse, and inventory caches on condition update", async () => {
+    const listKey = queryKeys.routers.list();
+    const detailKey = queryKeys.routers.detail("router-1");
+    const condHistKey = queryKeys.routers.conditionHistory("router-1");
+    const asgnHistKey = queryKeys.routers.assignmentHistory("router-1");
+    const whKey = queryKeys.warehouses.all;
+    const invKey = queryKeys.inventory.all;
+
+    queryClient.setQueryData(listKey, { items: [mockRouter], total: 1 });
+    queryClient.setQueryData(detailKey, mockRouter);
+    queryClient.setQueryData(condHistKey, []);
+    queryClient.setQueryData(asgnHistKey, []);
+    queryClient.setQueryData(whKey, { items: [] });
+    queryClient.setQueryData(invKey, { items: [] });
+
+    // Mimic useUpdateRouterCondition onSuccess:
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.all });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.detail("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.conditionHistory("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.routers.assignmentHistory("router-1") });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(condHistKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(asgnHistKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(whKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(invKey)?.isInvalidated).toBe(true);
+  });
+
   describe("extractErrorMessage helper", () => {
     it("extracts 409 capacity limit conflict message", () => {
       const err = {

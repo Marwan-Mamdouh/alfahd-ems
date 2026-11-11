@@ -141,6 +141,7 @@ export function useTransitionRouter() {
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.statusHistory(variables.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.routers.assignmentHistory(variables.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
     },
@@ -160,6 +161,7 @@ export function useUpdateRouterCondition() {
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.routers.conditionHistory(variables.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.routers.assignmentHistory(variables.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
     },
