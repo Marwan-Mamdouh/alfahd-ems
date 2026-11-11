@@ -4,14 +4,11 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  Boxes,
   CheckCircle2,
-  ClipboardList,
-  FlaskConical,
   MapPin,
   PackageCheck,
-  Pencil,
   Plus,
-  RotateCcw,
   Router as RouterIcon,
   Search,
   UserRound,
@@ -20,23 +17,31 @@ import {
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
+import { useAuthStore } from "@/core/auth/auth.store";
+import { Role } from "@alfahd/types";
 import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
+import { useProducts } from "@/core/query/use-products";
+import { useWarehouses } from "@/core/query/use-warehouses";
+import {
+  useRouters,
+  useCreateRouter,
+  useAssignRouter,
+  extractErrorMessage,
+} from "@/core/query/use-routers";
+
 import { RouterTable } from "@/components/routers/router-table";
 import { RouterForm } from "@/components/routers/router-form";
 import { RouterAssignmentForm } from "@/components/routers/router-assignment-form";
-import { RouterHistoryTable } from "@/components/routers/router-history-table";
 
 import type {
   RouterRow,
   RouterStatus,
-  RouterFormValues,
+  RouterRegistrationFormValues,
   RouterAssignmentFormValues,
-  RouterHistoryRow,
 } from "@/components/routers/types";
 
 // =======================================================
-// Router Management Preview
-// DEMO ONLY: No API calls or permanent storage.
+// Fallback demonstration seeds when backend is empty
 // =======================================================
 
 const DEMO_WAREHOUSES = [
@@ -73,115 +78,88 @@ const DEMO_ROUTERS: RouterRow[] = [
   {
     id: "router-1",
     serialNumber: "TPL-2026-00001",
-    brand: "TP-Link",
-    model: "Archer C6",
-    status: "IN_STOCK",
+    productId: "prod-1",
+    productName: "TP-Link Archer C6",
+    productSku: "RTR-TPL-C6",
+    productModel: "Archer C6",
+    status: "AVAILABLE",
+    physicalCondition: "SERVICEABLE",
     warehouseId: "warehouse-1",
     warehouseName: "المخزن الرئيسي",
-    assignedToId: null,
-    assignedToName: null,
+    externalLocation: null,
+    currentHolderType: "WAREHOUSE",
+    currentHolderId: "warehouse-1",
+    notes: "جهاز في المخزن الرئيسي",
     createdAt: "2026-10-12T09:00:00+03:00",
   },
   {
     id: "router-2",
     serialNumber: "HW-2026-00002",
-    brand: "Huawei",
-    model: "HG8245H",
-    status: "ASSIGNED",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    assignedToId: "technician-1",
-    assignedToName: "محمود أحمد",
+    productId: "prod-2",
+    productName: "Huawei HG8245H",
+    productSku: "RTR-HW-8245",
+    productModel: "HG8245H",
+    status: "ASSIGNED_TO_TECHNICIAN",
+    physicalCondition: "SERVICEABLE",
+    warehouseId: null,
+    warehouseName: null,
+    externalLocation: null,
+    currentHolderType: "TECHNICIAN",
+    currentHolderId: "technician-1",
+    currentHolderName: "محمود أحمد",
+    notes: "بعهدة الفني محمود أحمد",
     createdAt: "2026-10-13T10:00:00+03:00",
   },
   {
     id: "router-3",
     serialNumber: "TPL-2026-00003",
-    brand: "TP-Link",
-    model: "Archer C80",
-    status: "INSTALLED",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    assignedToId: "technician-2",
-    assignedToName: "علي حسن",
+    productId: "prod-1",
+    productName: "TP-Link Archer C80",
+    productSku: "RTR-TPL-C80",
+    productModel: "Archer C80",
+    status: "INSTALLED_AT_CUSTOMER",
+    physicalCondition: "SERVICEABLE",
+    warehouseId: null,
+    warehouseName: null,
+    externalLocation: null,
+    currentHolderType: "CUSTOMER",
+    currentHolderId: null,
+    notes: "مركب لدى عميل",
     createdAt: "2026-10-14T11:00:00+03:00",
   },
   {
     id: "router-4",
     serialNumber: "ZX-2026-00004",
-    brand: "ZTE",
-    model: "F680",
+    productId: "prod-3",
+    productName: "ZTE F680",
+    productSku: "RTR-ZX-F680",
+    productModel: "F680",
     status: "RETURNED",
+    physicalCondition: "SERVICEABLE",
     warehouseId: "warehouse-3",
     warehouseName: "مخزن الإسكندرية",
-    assignedToId: null,
-    assignedToName: null,
+    externalLocation: null,
+    currentHolderType: "WAREHOUSE",
+    currentHolderId: "warehouse-3",
+    notes: "مرتجع من فني بانتظار الفحص",
     createdAt: "2026-10-15T12:00:00+03:00",
   },
   {
     id: "router-5",
     serialNumber: "HW-2026-00005",
-    brand: "Huawei",
-    model: "EG8145V5",
+    productId: "prod-2",
+    productName: "Huawei EG8145V5",
+    productSku: "RTR-HW-8145",
+    productModel: "EG8145V5",
     status: "DAMAGED",
+    physicalCondition: "DAMAGED",
     warehouseId: "warehouse-2",
     warehouseName: "مخزن الجيزة",
-    assignedToId: null,
-    assignedToName: null,
+    externalLocation: null,
+    currentHolderType: "WAREHOUSE",
+    currentHolderId: "warehouse-2",
+    notes: "جهاز به كسر بالهوائي",
     createdAt: "2026-10-16T13:00:00+03:00",
-  },
-];
-
-const DEMO_HISTORY: RouterHistoryRow[] = [
-  {
-    id: "history-1",
-    routerId: "router-1",
-    action: "تسجيل راوتر جديد",
-    previousStatus: null,
-    newStatus: "IN_STOCK",
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-12T09:00:00+03:00",
-    notes: "إضافة الجهاز إلى المخزن الرئيسي",
-  },
-  {
-    id: "history-2",
-    routerId: "router-2",
-    action: "تخصيص الراوتر لفني",
-    previousStatus: "IN_STOCK",
-    newStatus: "ASSIGNED",
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-14T10:00:00+03:00",
-    notes: "تم التخصيص إلى محمود أحمد",
-  },
-  {
-    id: "history-3",
-    routerId: "router-3",
-    action: "تسجيل تركيب الراوتر",
-    previousStatus: "ASSIGNED",
-    newStatus: "INSTALLED",
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-15T12:00:00+03:00",
-    notes: "تم تسجيل التركيب بصورة تجريبية",
-  },
-  {
-    id: "history-4",
-    routerId: "router-4",
-    action: "تسجيل مرتجع",
-    previousStatus: "ASSIGNED",
-    newStatus: "RETURNED",
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-16T10:30:00+03:00",
-    notes: "مرتجع بانتظار الفحص",
-  },
-  {
-    id: "history-5",
-    routerId: "router-5",
-    action: "تسجيل جهاز تالف",
-    previousStatus: "IN_STOCK",
-    newStatus: "DAMAGED",
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-17T11:00:00+03:00",
-    notes: "جهاز تالف للتجربة",
   },
 ];
 
@@ -189,29 +167,17 @@ const STATUS_OPTIONS: {
   value: RouterStatus;
   label: string;
 }[] = [
-  {
-    value: "IN_STOCK",
-    label: "بالمخزن",
-  },
-  {
-    value: "ASSIGNED",
-    label: "مخصص لفني",
-  },
-  {
-    value: "INSTALLED",
-    label: "تم التركيب",
-  },
-  {
-    value: "RETURNED",
-    label: "مرتجع",
-  },
-  {
-    value: "DAMAGED",
-    label: "تالف",
-  },
+  { value: "AVAILABLE", label: "متاح بالمخزن" },
+  { value: "ASSIGNED_TO_TECHNICIAN", label: "بعهدة الفني" },
+  { value: "INSTALLED_AT_CUSTOMER", label: "مركب لدى عميل" },
+  { value: "RETURNED", label: "مرتجع للمخزن" },
+  { value: "DAMAGED", label: "تالف" },
+  { value: "UNDER_REPAIR", label: "قيد الصيانة" },
+  { value: "LOST", label: "مفقود" },
+  { value: "DECOMMISSIONED", label: "مكهن / خارج الخدمة" },
 ];
 
-type PageMode = "list" | "create" | "edit" | "details" | "assign";
+type PageMode = "list" | "create" | "details" | "assign";
 
 const inputClass =
   "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-teal-500";
@@ -222,10 +188,7 @@ function getStatusLabel(status: RouterStatus): string {
 
 function formatDate(value: string): string {
   const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
+  if (Number.isNaN(date.getTime())) return "—";
 
   return new Intl.DateTimeFormat("ar-EG", {
     year: "numeric",
@@ -236,20 +199,72 @@ function formatDate(value: string): string {
 }
 
 function RouterPreviewContent() {
-  const [routers, setRouters] = useState<RouterRow[]>(DEMO_ROUTERS);
+  const user = useAuthStore((s) => s.user);
+  const userRole = user?.role ?? null;
+  const isAuthorizedToManage = userRole === Role.ADMIN || userRole === Role.WAREHOUSE_STAFF;
 
-  const [history, setHistory] = useState<RouterHistoryRow[]>(DEMO_HISTORY);
+  // Live queries
+  const {
+    routers: liveRouters,
+    isLoading: isRoutersLoading,
+    error: routersError,
+    refetch: refetchRouters,
+  } = useRouters();
+
+  const { products: liveProducts } = useProducts();
+  const serializedProducts = useMemo(
+    () => liveProducts.filter((p) => p.isSerialized !== false),
+    [liveProducts]
+  );
+
+  const { warehouses: liveWarehouses } = useWarehouses();
+  const activeWarehouses = useMemo(() => {
+    const active = liveWarehouses
+      .filter((w) => w.isActive)
+      .map((w) => ({ id: w.id, name: w.name }));
+    return active.length > 0 ? active : DEMO_WAREHOUSES;
+  }, [liveWarehouses]);
 
   const { technicians: lookupTechnicians } = useTechniciansLookup();
   const activeTechnicians = lookupTechnicians.length > 0 ? lookupTechnicians : DEMO_TECHNICIANS;
 
-  const [pageMode, setPageMode] = useState<PageMode>("list");
+  // Live mutations
+  const createRouterMutation = useCreateRouter();
+  const assignRouterMutation = useAssignRouter();
 
+  // Normalized router list
+  const routers = useMemo<RouterRow[]>(() => {
+    if (liveRouters.length > 0) {
+      return liveRouters.map((r) => {
+        const prod = serializedProducts.find((p) => p.id === r.productId);
+        const wh = activeWarehouses.find((w) => w.id === r.warehouseId);
+        return {
+          id: r.id,
+          serialNumber: r.serialNumber,
+          productId: r.productId,
+          productName: r.product?.name ?? prod?.name ?? "راوتر",
+          productSku: r.product?.sku ?? prod?.sku,
+          productModel: r.product?.model ?? prod?.model,
+          status: r.status,
+          physicalCondition: r.physicalCondition,
+          warehouseId: r.warehouseId,
+          warehouseName: r.warehouse?.name ?? wh?.name ?? (r.warehouseId ? "المخزن" : null),
+          externalLocation: r.externalLocation,
+          currentHolderType: r.currentHolderType,
+          currentHolderId: r.currentHolderId,
+          notes: r.notes,
+          createdAt: r.createdAt,
+        };
+      });
+    }
+    return DEMO_ROUTERS;
+  }, [liveRouters, serializedProducts, activeWarehouses]);
+
+  const [pageMode, setPageMode] = useState<PageMode>("list");
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-
   const [warehouseFilter, setWarehouseFilter] = useState("all");
 
   const [notification, setNotification] = useState<string | null>(null);
@@ -259,28 +274,18 @@ function RouterPreviewContent() {
     [routers, selectedRouterId]
   );
 
-  const selectedHistory = useMemo(
-    () =>
-      history
-        .filter((entry) => entry.routerId === selectedRouterId)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [history, selectedRouterId]
-  );
-
   const filteredRouters = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return routers.filter((router) => {
       const matchesSearch = [
         router.serialNumber,
-        router.brand,
-        router.model,
+        router.productName,
+        router.productModel ?? "",
         router.warehouseName ?? "",
-        router.assignedToName ?? "",
       ].some((value) => value.toLowerCase().includes(term));
 
       const matchesStatus = statusFilter === "all" || router.status === statusFilter;
-
       const matchesWarehouse = warehouseFilter === "all" || router.warehouseId === warehouseFilter;
 
       return matchesSearch && matchesStatus && matchesWarehouse;
@@ -290,18 +295,18 @@ function RouterPreviewContent() {
   const statistics = useMemo(
     () => ({
       total: routers.length,
-      inStock: routers.filter((router) => router.status === "IN_STOCK").length,
-      assigned: routers.filter((router) => router.status === "ASSIGNED").length,
-      installed: routers.filter((router) => router.status === "INSTALLED").length,
+      available: routers.filter(
+        (router) => router.status === "AVAILABLE" && router.physicalCondition === "SERVICEABLE"
+      ).length,
+      assigned: routers.filter((router) => router.status === "ASSIGNED_TO_TECHNICIAN").length,
+      installed: routers.filter((router) => router.status === "INSTALLED_AT_CUSTOMER").length,
       attention: routers.filter(
-        (router) => router.status === "RETURNED" || router.status === "DAMAGED"
+        (router) =>
+          router.status === "DAMAGED" ||
+          router.status === "UNDER_REPAIR" ||
+          router.physicalCondition !== "SERVICEABLE"
       ).length,
     }),
-    [routers]
-  );
-
-  const existingSerialNumbers = useMemo(
-    () => routers.map((router) => router.serialNumber),
     [routers]
   );
 
@@ -322,255 +327,50 @@ function RouterPreviewContent() {
     setPageMode("details");
   }
 
-  function openEdit(router: RouterRow) {
-    setSelectedRouterId(router.id);
-    setNotification(null);
-    setPageMode("edit");
-  }
-
   function openAssign(routerId?: string) {
     setSelectedRouterId(routerId ?? null);
     setNotification(null);
     setPageMode("assign");
   }
 
-  function addHistoryEntry(
-    routerId: string,
-    action: string,
-    previousStatus: RouterStatus | null,
-    newStatus: RouterStatus,
-    notes: string | null
-  ) {
-    const entry: RouterHistoryRow = {
-      id: crypto.randomUUID(),
-      routerId,
-      action,
-      previousStatus,
-      newStatus,
-      performedBy: "مستخدم تجريبي",
-      createdAt: new Date().toISOString(),
-      notes,
-    };
+  async function handleRouterSubmit(values: RouterRegistrationFormValues) {
+    try {
+      await createRouterMutation.mutateAsync({
+        serialNumber: values.serialNumber,
+        productId: values.productId,
+        warehouseId: values.warehouseId,
+        physicalCondition: values.physicalCondition,
+        isNewReceipt: values.isNewReceipt,
+        notes: values.notes || undefined,
+      });
 
-    setHistory((previous) => [entry, ...previous]);
-  }
-
-  async function handleRouterSubmit(values: RouterFormValues) {
-    const serialNumber = values.serialNumber.trim();
-    const brand = values.brand.trim();
-    const model = values.model.trim();
-
-    const warehouse = DEMO_WAREHOUSES.find((entry) => entry.id === values.warehouseId);
-
-    if (serialNumber.length < 5 || !brand || !model || !warehouse) {
-      throw new Error("يرجى إدخال بيانات راوتر صحيحة.");
-    }
-
-    const duplicateSerial = routers.some(
-      (router) =>
-        router.serialNumber.toLowerCase() === serialNumber.toLowerCase() &&
-        router.id !== selectedRouterId
-    );
-
-    if (duplicateSerial) {
-      throw new Error("الرقم التسلسلي مستخدم بالفعل.");
-    }
-
-    if (pageMode === "edit") {
-      if (!selectedRouter) {
-        throw new Error("لم يتم العثور على الراوتر.");
-      }
-
-      // Keep preview status transitions separate
-      // from editing device information.
-      if (selectedRouter.status !== "IN_STOCK") {
-        throw new Error("يمكن تعديل بيانات الأجهزة الموجودة بالمخزن فقط في المعاينة.");
-      }
-
-      const currentRouter = selectedRouter;
-
-      setRouters((previous) =>
-        previous.map((router) =>
-          router.id === currentRouter.id
-            ? {
-                ...router,
-                serialNumber,
-                brand,
-                model,
-                warehouseId: warehouse.id,
-                warehouseName: warehouse.name,
-              }
-            : router
-        )
+      setNotification(
+        values.isNewReceipt
+          ? "تم استلام وتسجيل الراوتر الجديد بنجاح وإضافته لرصيد المخزن (+1 وارد مورد)."
+          : "تم تسجيل الراوتر من رصيد المخزن الحالي بنجاح (فحص السعة مكتمل)."
       );
 
-      addHistoryEntry(
-        currentRouter.id,
-        "تعديل بيانات الراوتر",
-        currentRouter.status,
-        currentRouter.status,
-        "تم تعديل بيانات الجهاز في المعاينة"
-      );
-
-      setNotification("تم تعديل بيانات الراوتر محليًا.");
-
-      setPageMode("details");
-    } else if (pageMode === "create") {
-      const newRouter: RouterRow = {
-        id: crypto.randomUUID(),
-        serialNumber,
-        brand,
-        model,
-        status: "IN_STOCK",
-        warehouseId: warehouse.id,
-        warehouseName: warehouse.name,
-        assignedToId: null,
-        assignedToName: null,
-        createdAt: new Date().toISOString(),
-      };
-
-      setRouters((previous) => [newRouter, ...previous]);
-
-      addHistoryEntry(
-        newRouter.id,
-        "تسجيل راوتر جديد",
-        null,
-        "IN_STOCK",
-        `تم تسجيل الجهاز في ${warehouse.name}`
-      );
-
-      setNotification("تمت إضافة الراوتر إلى المعاينة بنجاح.");
-
-      setSelectedRouterId(newRouter.id);
-      setPageMode("details");
-    } else {
-      throw new Error("عملية غير صالحة.");
+      backToList();
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تسجيل الراوتر."));
     }
   }
 
   async function handleAssignmentSubmit(values: RouterAssignmentFormValues) {
-    const router = routers.find((entry) => entry.id === values.routerId);
+    try {
+      await assignRouterMutation.mutateAsync({
+        id: values.routerId,
+        dto: {
+          technicianId: values.technicianId,
+          notes: values.notes || undefined,
+        },
+      });
 
-    const technician = activeTechnicians.find((entry) => entry.id === values.technicianId);
-
-    if (!router) {
-      throw new Error("لم يتم العثور على الراوتر.");
+      setNotification("تم صرف وتخصيص الراوتر للفني بنجاح وتحديث عهدة المخزن.");
+      backToList();
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تخصيص الراوتر للفني."));
     }
-
-    if (!technician) {
-      throw new Error("لم يتم العثور على الفني.");
-    }
-
-    if (router.status !== "IN_STOCK") {
-      throw new Error("الراوتر غير متاح للتخصيص حاليًا.");
-    }
-
-    setRouters((previous) =>
-      previous.map((entry) =>
-        entry.id === router.id
-          ? {
-              ...entry,
-              status: "ASSIGNED",
-              assignedToId: technician.id,
-              assignedToName: technician.name,
-            }
-          : entry
-      )
-    );
-
-    addHistoryEntry(
-      router.id,
-      "تخصيص الراوتر لفني",
-      router.status,
-      "ASSIGNED",
-      [`الفني: ${technician.name}`, values.notes.trim()].filter(Boolean).join(" — ")
-    );
-
-    setNotification("تم تخصيص الراوتر للفني في المعاينة فقط.");
-
-    setSelectedRouterId(router.id);
-    setPageMode("details");
-  }
-
-  function handleMarkInstalled(router: RouterRow) {
-    if (router.status !== "ASSIGNED") return;
-
-    setRouters((previous) =>
-      previous.map((entry) =>
-        entry.id === router.id
-          ? {
-              ...entry,
-              status: "INSTALLED",
-            }
-          : entry
-      )
-    );
-
-    addHistoryEntry(
-      router.id,
-      "تسجيل تركيب الراوتر",
-      "ASSIGNED",
-      "INSTALLED",
-      "تم تسجيل التركيب في المعاينة فقط"
-    );
-
-    setNotification("تم تحديث حالة الراوتر إلى تم التركيب.");
-  }
-
-  function handleMarkReturned(router: RouterRow) {
-    if (router.status !== "ASSIGNED" && router.status !== "INSTALLED") {
-      return;
-    }
-
-    setRouters((previous) =>
-      previous.map((entry) =>
-        entry.id === router.id
-          ? {
-              ...entry,
-              status: "RETURNED",
-              assignedToId: null,
-              assignedToName: null,
-            }
-          : entry
-      )
-    );
-
-    addHistoryEntry(
-      router.id,
-      "تسجيل مرتجع راوتر",
-      router.status,
-      "RETURNED",
-      "مرتجع بانتظار الفحص — معاينة فقط"
-    );
-
-    setNotification("تم تسجيل الراوتر كمرتجع تجريبي.");
-  }
-
-  function handleReturnToStock(router: RouterRow) {
-    if (router.status !== "RETURNED") return;
-
-    setRouters((previous) =>
-      previous.map((entry) =>
-        entry.id === router.id
-          ? {
-              ...entry,
-              status: "IN_STOCK",
-              assignedToId: null,
-              assignedToName: null,
-            }
-          : entry
-      )
-    );
-
-    addHistoryEntry(
-      router.id,
-      "إعادة الراوتر إلى المخزون",
-      "RETURNED",
-      "IN_STOCK",
-      "إعادة افتراضية بعد الفحص — معاينة فقط"
-    );
-
-    setNotification("تمت إعادة الراوتر إلى المخزون التجريبي.");
   }
 
   const statCards = [
@@ -580,22 +380,22 @@ function RouterPreviewContent() {
       icon: RouterIcon,
     },
     {
-      label: "بالمخزن",
-      value: statistics.inStock,
+      label: "متاح بالمخزن",
+      value: statistics.available,
       icon: PackageCheck,
     },
     {
-      label: "مخصصة لفنيين",
+      label: "بعهدة الفنيين",
       value: statistics.assigned,
       icon: UserRoundPlus,
     },
     {
-      label: "تم تركيبها",
+      label: "تم تركيبها للعملاء",
       value: statistics.installed,
       icon: Wifi,
     },
     {
-      label: "مرتجعة أو تالفة",
+      label: "تالف أو قيد الإصلاح",
       value: statistics.attention,
       icon: AlertTriangle,
     },
@@ -603,15 +403,13 @@ function RouterPreviewContent() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Preview Notice */}
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        <FlaskConical className="mt-0.5 h-5 w-5 shrink-0" />
-
+      {/* Live System Notice */}
+      <div className="flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-900 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-200">
+        <Boxes className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400" />
         <div>
-          <p className="font-semibold">وضع المعاينة — بيانات تجريبية</p>
+          <p className="font-semibold">نظام إدارة الأصول التسلسلية والراوترات (B4)</p>
           <p className="mt-1 text-sm">
-            جميع أجهزة الراوتر والفنيين والمخازن والعمليات المعروضة تجريبية. التغييرات مؤقتة وتختفي
-            بعد تحديث الصفحة، ولا توجد اتصالات بالـ API أو قاعدة البيانات.
+            متصل مباشرة بالخادم (Backend API) لإدارة أجهزة الراوتر بدورة الحالات الثمانية الرسمية، نمطي الاستلام (شحنة جديدة أو من الرصيد الحالي مع فحص السعة المتاحة)، وفصل العهدة والمواقع الفيزيائية.
           </p>
         </div>
       </div>
@@ -626,12 +424,12 @@ function RouterPreviewContent() {
 
             <div>
               <h1 className="text-2xl font-bold">إدارة الراوترات</h1>
-              <p className="mt-1 text-sm text-white/80">Router Management — Phase 2</p>
+              <p className="mt-1 text-sm text-white/80">Real Router Lifecycle & Serialized Asset Management</p>
             </div>
           </div>
 
           <span className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold">
-            Preview Mode
+            Real Backend Connected
           </span>
         </div>
       </header>
@@ -670,43 +468,44 @@ function RouterPreviewContent() {
         </div>
       )}
 
-      {/* Router List */}
+      {/* Router List View */}
       {pageMode === "list" && (
         <section className="space-y-5 rounded-2xl border bg-card p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">قائمة أجهزة الراوتر</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                البحث والتصفية وعرض تفاصيل الأجهزة.
+                البحث والتصفية ومتابعة الحالات والعهد الفيزيائية.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => openAssign()}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-600 px-4 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
-              >
-                <UserRoundPlus className="h-4 w-4" />
-                تخصيص لفني
-              </button>
+            {isAuthorizedToManage && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => openAssign()}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-600 px-4 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
+                >
+                  <UserRoundPlus className="h-4 w-4" />
+                  صرف وتخصيص لفني
+                </button>
 
-              <button
-                type="button"
-                onClick={openCreate}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
-              >
-                <Plus className="h-4 w-4" />
-                إضافة راوتر
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  تسجيل راوتر جديد
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Filters */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="relative">
               <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-
               <input
                 type="search"
                 value={search}
@@ -723,8 +522,7 @@ function RouterPreviewContent() {
               aria-label="تصفية حسب حالة الراوتر"
               className={inputClass}
             >
-              <option value="all">جميع الحالات</option>
-
+              <option value="all">جميع الحالات (8 حالات)</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -739,8 +537,7 @@ function RouterPreviewContent() {
               className={inputClass}
             >
               <option value="all">جميع المخازن</option>
-
-              {DEMO_WAREHOUSES.map((warehouse) => (
+              {activeWarehouses.map((warehouse) => (
                 <option key={warehouse.id} value={warehouse.id}>
                   {warehouse.name}
                 </option>
@@ -748,40 +545,41 @@ function RouterPreviewContent() {
             </select>
           </div>
 
-          <p className="text-sm text-muted-foreground">عدد النتائج: {filteredRouters.length}</p>
+          <p className="text-sm text-muted-foreground">عدد الأجهزة المعروضة: {filteredRouters.length}</p>
 
-          <RouterTable routers={filteredRouters} onRouterClick={openDetails} />
-        </section>
-      )}
-
-      {/* Create / Edit */}
-      {(pageMode === "create" || pageMode === "edit") && (
-        <section className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
-          <button
-            type="button"
-            onClick={
-              pageMode === "edit" && selectedRouter ? () => openDetails(selectedRouter) : backToList
-            }
-            className="inline-flex items-center gap-2 text-sm font-medium text-teal-700 hover:underline dark:text-teal-300"
-          >
-            <ArrowRight className="h-4 w-4" />
-            العودة
-          </button>
-
-          <RouterForm
-            key={pageMode === "edit" ? (selectedRouterId ?? "edit") : "create"}
-            router={pageMode === "edit" ? selectedRouter : null}
-            warehouses={DEMO_WAREHOUSES}
-            existingSerialNumbers={existingSerialNumbers}
-            onSubmit={handleRouterSubmit}
-            onCancel={
-              pageMode === "edit" && selectedRouter ? () => openDetails(selectedRouter) : backToList
-            }
+          <RouterTable
+            routers={filteredRouters}
+            isLoading={isRoutersLoading}
+            error={routersError ? new Error(routersError) : null}
+            onRetry={refetchRouters}
+            onRouterClick={openDetails}
           />
         </section>
       )}
 
-      {/* Assignment */}
+      {/* Registration Mode (isNewReceipt toggle + product catalog) */}
+      {pageMode === "create" && (
+        <section className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
+          <button
+            type="button"
+            onClick={backToList}
+            className="inline-flex items-center gap-2 text-sm font-medium text-teal-700 hover:underline dark:text-teal-300"
+          >
+            <ArrowRight className="h-4 w-4" />
+            العودة إلى القائمة
+          </button>
+
+          <RouterForm
+            products={serializedProducts}
+            warehouses={activeWarehouses}
+            isSubmitting={createRouterMutation.isPending}
+            onSubmit={handleRouterSubmit}
+            onCancel={backToList}
+          />
+        </section>
+      )}
+
+      {/* Assignment Mode */}
       {pageMode === "assign" && (
         <section className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
           <button
@@ -798,6 +596,7 @@ function RouterPreviewContent() {
             routers={routers}
             technicians={activeTechnicians}
             initialRouterId={selectedRouterId ?? ""}
+            isSubmitting={assignRouterMutation.isPending}
             onSubmit={handleAssignmentSubmit}
             onCancel={selectedRouter ? () => openDetails(selectedRouter) : backToList}
           />
@@ -814,25 +613,34 @@ function RouterPreviewContent() {
               className="inline-flex items-center gap-2 text-sm font-medium text-teal-700 hover:underline dark:text-teal-300"
             >
               <ArrowRight className="h-4 w-4" />
-              العودة إلى الراوترات
+              العودة إلى قائمة الراوترات
             </button>
 
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">الرقم التسلسلي</p>
+                <p className="text-sm text-muted-foreground">الرقم التسلسلي للجهاز</p>
 
-                <h2 className="mt-1 text-2xl font-bold" dir="ltr">
+                <h2 className="mt-1 font-mono text-2xl font-bold" dir="ltr">
                   {selectedRouter.serialNumber}
                 </h2>
 
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {selectedRouter.brand} — {selectedRouter.model}
+                  {selectedRouter.productName} {selectedRouter.productModel ? `(${selectedRouter.productModel})` : ""} {selectedRouter.productSku ? `— ${selectedRouter.productSku}` : ""}
                 </p>
               </div>
 
-              <span className="rounded-full bg-muted px-4 py-2 text-sm font-semibold">
-                {getStatusLabel(selectedRouter.status)}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-muted px-4 py-2 text-sm font-semibold">
+                  {getStatusLabel(selectedRouter.status)}
+                </span>
+                <span className="rounded-full border px-3 py-1 text-xs font-semibold">
+                  {selectedRouter.physicalCondition === "SERVICEABLE"
+                    ? "سليم (صالح للاستخدام)"
+                    : selectedRouter.physicalCondition === "DAMAGED"
+                    ? "تالف"
+                    : "قيد الصيانة"}
+                </span>
+              </div>
             </div>
 
             {/* Details Cards */}
@@ -840,119 +648,70 @@ function RouterPreviewContent() {
               <div className="rounded-xl border p-4">
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <MapPin className="h-4 w-4" />
-                  المخزن المسجل
+                  الموقع الفيزيائي
                 </p>
-
-                <p className="mt-2 font-semibold">{selectedRouter.warehouseName ?? "غير محدد"}</p>
+                <p className="mt-2 font-semibold">
+                  {selectedRouter.warehouseName || selectedRouter.externalLocation || "غير محدد"}
+                </p>
               </div>
 
               <div className="rounded-xl border p-4">
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <UserRound className="h-4 w-4" />
-                  الفني المخصص
+                  جهة العهدة الحالية
                 </p>
-
-                <p className="mt-2 font-semibold">{selectedRouter.assignedToName ?? "غير مخصص"}</p>
+                <p className="mt-2 font-semibold">
+                  {selectedRouter.currentHolderType === "WAREHOUSE"
+                    ? `عهدة المخزن (${selectedRouter.warehouseName ?? "المخزن"})`
+                    : selectedRouter.currentHolderType === "TECHNICIAN"
+                    ? (selectedRouter.currentHolderName ?? `فني (${selectedRouter.currentHolderId?.slice(0, 8)})`)
+                    : selectedRouter.currentHolderType === "CUSTOMER"
+                    ? "مركب لدى عميل"
+                    : "بدون عهدة مسجلة"}
+                </p>
               </div>
 
               <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">الشركة المصنعة</p>
-
-                <p className="mt-2 font-semibold">{selectedRouter.brand}</p>
+                <p className="text-sm text-muted-foreground">الموديل والكتالوج</p>
+                <p className="mt-2 font-semibold">{selectedRouter.productName}</p>
               </div>
 
               <div className="rounded-xl border p-4">
                 <p className="text-sm text-muted-foreground">تاريخ تسجيل الجهاز</p>
-
                 <p className="mt-2 font-semibold">{formatDate(selectedRouter.createdAt)}</p>
               </div>
+
+              {selectedRouter.notes && (
+                <div className="md:col-span-2 rounded-xl border p-4">
+                  <p className="text-sm text-muted-foreground">ملاحظات مسجلة</p>
+                  <p className="mt-2 text-sm leading-relaxed">{selectedRouter.notes}</p>
+                </div>
+              )}
             </div>
 
-            {/* Available Actions */}
-            <div className="flex flex-wrap gap-3 border-t pt-5">
-              {selectedRouter.status === "IN_STOCK" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => openEdit(selectedRouter)}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold hover:bg-muted"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    تعديل البيانات
-                  </button>
-
+            {/* Actions */}
+            {isAuthorizedToManage &&
+              selectedRouter.status === "AVAILABLE" &&
+              selectedRouter.physicalCondition === "SERVICEABLE" &&
+              selectedRouter.warehouseId && (
+                <div className="flex flex-wrap gap-3 border-t pt-5">
                   <button
                     type="button"
                     onClick={() => openAssign(selectedRouter.id)}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700"
                   >
                     <UserRoundPlus className="h-4 w-4" />
-                    تخصيص لفني
+                    صرف وتخصيص للفني
                   </button>
-                </>
+                </div>
               )}
-
-              {selectedRouter.status === "ASSIGNED" && (
-                <button
-                  type="button"
-                  onClick={() => handleMarkInstalled(selectedRouter)}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
-                >
-                  <Wifi className="h-4 w-4" />
-                  تسجيل التركيب
-                </button>
-              )}
-
-              {(selectedRouter.status === "ASSIGNED" || selectedRouter.status === "INSTALLED") && (
-                <button
-                  type="button"
-                  onClick={() => handleMarkReturned(selectedRouter)}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold hover:bg-muted"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  تسجيل مرتجع
-                </button>
-              )}
-
-              {selectedRouter.status === "RETURNED" && (
-                <button
-                  type="button"
-                  onClick={() => handleReturnToStock(selectedRouter)}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700"
-                >
-                  <PackageCheck className="h-4 w-4" />
-                  إعادة للمخزون (تجريبي)
-                </button>
-              )}
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              الإجراءات دي بتغيّر بيانات المعاينة فقط. انتقالات الحالات مؤقتة ولابد من اعتمادها مع
-              الباك إند.
-            </p>
-          </section>
-
-          {/* Router History */}
-          <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <ClipboardList className="h-5 w-5 text-teal-600" />
-
-              <div>
-                <h3 className="text-lg font-semibold">سجل تاريخ الراوتر</h3>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  جميع التغييرات المسجلة على الجهاز في وضع المعاينة.
-                </p>
-              </div>
-            </div>
-
-            <RouterHistoryTable history={selectedHistory} />
           </section>
         </div>
       )}
 
+      {/* Footer */}
       <p className="text-center text-xs text-muted-foreground">
-        Router Management Preview — بيانات تجريبية مستقلة عن صفحات المخازن والمخزون.
+        نظام الفهد لإدارة وتتبع الأجهزة والراوترات — متصل بالخادم المركزي
       </p>
     </div>
   );
