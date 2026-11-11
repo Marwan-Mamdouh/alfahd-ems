@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  ArrowRightLeft,
   Boxes,
   CheckCircle2,
   MapPin,
@@ -14,6 +15,7 @@ import {
   UserRound,
   UserRoundPlus,
   Wifi,
+  Wrench,
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
@@ -26,18 +28,25 @@ import {
   useRouters,
   useCreateRouter,
   useAssignRouter,
+  useTransitionRouter,
+  useUpdateRouterCondition,
   extractErrorMessage,
 } from "@/core/query/use-routers";
 
 import { RouterTable } from "@/components/routers/router-table";
 import { RouterForm } from "@/components/routers/router-form";
 import { RouterAssignmentForm } from "@/components/routers/router-assignment-form";
+import { RouterTransitionDialog } from "@/components/routers/router-transition-dialog";
+import { RouterConditionDialog } from "@/components/routers/router-condition-dialog";
+import { RouterTripleAudit } from "@/components/routers/router-triple-audit";
 
 import type {
   RouterRow,
   RouterStatus,
   RouterRegistrationFormValues,
   RouterAssignmentFormValues,
+  RouterTransitionFormValues,
+  RouterConditionFormValues,
 } from "@/components/routers/types";
 
 // =======================================================
@@ -231,6 +240,11 @@ function RouterPreviewContent() {
   // Live mutations
   const createRouterMutation = useCreateRouter();
   const assignRouterMutation = useAssignRouter();
+  const transitionRouterMutation = useTransitionRouter();
+  const updateConditionMutation = useUpdateRouterCondition();
+
+  const [isTransitionOpen, setIsTransitionOpen] = useState(false);
+  const [isConditionOpen, setIsConditionOpen] = useState(false);
 
   // Normalized router list
   const routers = useMemo<RouterRow[]>(() => {
@@ -370,6 +384,46 @@ function RouterPreviewContent() {
       backToList();
     } catch (err) {
       throw new Error(extractErrorMessage(err, "فشلت عملية تخصيص الراوتر للفني."));
+    }
+  }
+
+  async function handleTransitionSubmit(values: RouterTransitionFormValues) {
+    if (!selectedRouter) return;
+    try {
+      await transitionRouterMutation.mutateAsync({
+        id: selectedRouter.id,
+        dto: {
+          status: values.status,
+          reason: values.reason,
+          targetWarehouseId: values.targetWarehouseId,
+          notes: values.notes,
+        },
+      });
+
+      setNotification("تم تحديث دورة حياة الراوتر بنجاح وتوثيق السجل الرقابي.");
+      setIsTransitionOpen(false);
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تغيير حالة الراوتر."));
+    }
+  }
+
+  async function handleConditionSubmit(values: RouterConditionFormValues) {
+    if (!selectedRouter) return;
+    try {
+      await updateConditionMutation.mutateAsync({
+        id: selectedRouter.id,
+        dto: {
+          physicalCondition: values.physicalCondition,
+          warehouseId: values.locationType === "warehouse" ? values.warehouseId : undefined,
+          externalLocation: values.locationType === "external" ? values.externalLocation : undefined,
+          reason: values.reason,
+        },
+      });
+
+      setNotification("تم تحديث الحالة الفيزيائية والموقع للراوتر بنجاح وتحديث الرصيد.");
+      setIsConditionOpen(false);
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تحديث الحالة والموقع."));
     }
   }
 
@@ -690,22 +744,87 @@ function RouterPreviewContent() {
             </div>
 
             {/* Actions */}
-            {isAuthorizedToManage &&
-              selectedRouter.status === "AVAILABLE" &&
-              selectedRouter.physicalCondition === "SERVICEABLE" &&
-              selectedRouter.warehouseId && (
-                <div className="flex flex-wrap gap-3 border-t pt-5">
-                  <button
-                    type="button"
-                    onClick={() => openAssign(selectedRouter.id)}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700"
-                  >
-                    <UserRoundPlus className="h-4 w-4" />
-                    صرف وتخصيص للفني
-                  </button>
-                </div>
-              )}
+            {isAuthorizedToManage && (
+              <div className="flex flex-wrap items-center gap-3 border-t pt-5">
+                {/* 1. Assign to Technician: Available only if AVAILABLE, SERVICEABLE, and in warehouse */}
+                {selectedRouter.status === "AVAILABLE" &&
+                  selectedRouter.physicalCondition === "SERVICEABLE" &&
+                  selectedRouter.warehouseId && (
+                    <button
+                      type="button"
+                      onClick={() => openAssign(selectedRouter.id)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700"
+                    >
+                      <UserRoundPlus className="h-4 w-4" />
+                      صرف وتخصيص للفني
+                    </button>
+                  )}
+
+                {/* 2. Lifecycle Transition: Enabled if not in terminal state */}
+                {selectedRouter.status !== "LOST" &&
+                  selectedRouter.status !== "DECOMMISSIONED" && (
+                    <button
+                      type="button"
+                      onClick={() => setIsTransitionOpen(true)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-600 px-4 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      تغيير حالة الدورة
+                    </button>
+                  )}
+
+                {/* 3. Physical Condition / Location: Enabled if not in terminal state */}
+                {selectedRouter.status !== "LOST" &&
+                  selectedRouter.status !== "DECOMMISSIONED" && (
+                    <button
+                      type="button"
+                      onClick={() => setIsConditionOpen(true)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted"
+                    >
+                      <Wrench className="h-4 w-4" />
+                      تحديث الحالة والموقع
+                    </button>
+                  )}
+              </div>
+            )}
           </section>
+
+          {/* Triple Audit Histories */}
+          {isAuthorizedToManage && (
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-base font-bold text-foreground">
+                  السجلات الرقابية والتدقيق التاريخي للجهاز (Triple Audit Ledger)
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  تتبع حركة العهدة، تقارير الفحص والحالة الفيزيائية، وانتقالات دورة الحياة.
+                </p>
+              </div>
+
+              <RouterTripleAudit routerId={selectedRouter.id} />
+            </section>
+          )}
+
+          {/* Transition Dialog */}
+          <RouterTransitionDialog
+            router={selectedRouter}
+            warehouses={activeWarehouses}
+            isOpen={isTransitionOpen}
+            onClose={() => setIsTransitionOpen(false)}
+            onSubmit={handleTransitionSubmit}
+            onOpenAssign={() => openAssign(selectedRouter.id)}
+            isSubmitting={transitionRouterMutation.isPending}
+          />
+
+          {/* Condition Dialog */}
+          <RouterConditionDialog
+            router={selectedRouter}
+            warehouses={activeWarehouses}
+            isOpen={isConditionOpen}
+            onClose={() => setIsConditionOpen(false)}
+            onSubmit={handleConditionSubmit}
+            isSubmitting={updateConditionMutation.isPending}
+          />
         </div>
       )}
 
