@@ -1,12 +1,19 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, RotateCcw } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  RotateCcw,
+  ArrowLeftRight,
+  SlidersHorizontal,
+  Activity,
+} from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
 
-import type { InventoryMovementRow, InventoryMovementType } from "./types";
+import type { InventoryMovementRow } from "./types";
 
 interface InventoryMovementsTableProps {
   movements: InventoryMovementRow[];
@@ -15,33 +22,69 @@ interface InventoryMovementsTableProps {
   onRetry?: () => void;
 }
 
-const MOVEMENT_CONFIG = {
+interface MovementStyle {
+  label: string;
+  icon: typeof ArrowDownToLine;
+  className: string;
+}
+
+const MOVEMENT_CONFIG: Record<string, MovementStyle> = {
   INBOUND: {
-    label: "وارد",
+    label: "وارد مورد",
+    icon: ArrowDownToLine,
+    className:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300",
+  },
+  INBOUND_SUPPLIER: {
+    label: "وارد مورد",
     icon: ArrowDownToLine,
     className:
       "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300",
   },
   OUTBOUND: {
-    label: "صادر",
+    label: "صرف لفني",
+    icon: ArrowUpFromLine,
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+  },
+  OUTBOUND_TECHNICIAN: {
+    label: "صرف لفني",
     icon: ArrowUpFromLine,
     className:
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
   },
   RETURN: {
-    label: "مرتجع",
+    label: "مرتجع فني",
     icon: RotateCcw,
     className:
       "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
   },
-} satisfies Record<
-  InventoryMovementType,
-  {
-    label: string;
-    icon: typeof ArrowDownToLine;
-    className: string;
-  }
->;
+  RETURN_TECHNICIAN: {
+    label: "مرتجع فني",
+    icon: RotateCcw,
+    className:
+      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
+  },
+  TRANSFER_WAREHOUSE: {
+    label: "تحويل مخزني",
+    icon: ArrowLeftRight,
+    className:
+      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300",
+  },
+  ADJUSTMENT: {
+    label: "تسوية جردية",
+    icon: SlidersHorizontal,
+    className:
+      "border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  },
+};
+
+const DEFAULT_MOVEMENT_STYLE: MovementStyle = {
+  label: "حركة مخزنية",
+  icon: Activity,
+  className:
+    "border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300",
+};
 
 function formatDateTime(value: string): string {
   if (!value) return "—";
@@ -78,7 +121,7 @@ export function InventoryMovementsTable({
         key: "type",
         header: "نوع الحركة",
         render: (row) => {
-          const config = MOVEMENT_CONFIG[row.type];
+          const config = MOVEMENT_CONFIG[row.type] || DEFAULT_MOVEMENT_STYLE;
           const Icon = config.icon;
 
           return (
@@ -139,7 +182,7 @@ export function InventoryMovementsTable({
       onRetry={onRetry}
       getRowKey={(row) => row.id}
       emptyTitle="لا توجد حركات مخزون"
-      emptyDescription="لم يتم تسجيل أي عمليات وارد أو صادر أو مرتجعات بعد."
+      emptyDescription="لم يتم تسجيل أي عمليات وارد أو صادر أو تحويلات بعد."
     />
   );
 }
