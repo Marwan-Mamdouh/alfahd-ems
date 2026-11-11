@@ -211,5 +211,38 @@ The real data layer for Inventory balances and multi-movement stock operations i
 3. **Cross-Module Invalidation**:
    Every stock mutation modifies inventory counts, warehouse stock summaries, and product catalog low-stock statuses, triggering invalidations across `inventory.all`, `warehouses.all`, and `products.all`.
 
+---
+
+## 9. Real Router Lifecycle, Onboarding Modes & Capacity Guardrails (Task B4 / Issue #72)
+
+The real data layer for Router asset management integrates with `/routers`, `/routers/:id`, `/routers/:id/assign`, `/routers/:id/transition`, and `/routers/:id/condition`.
+
+### Router Hooks ([`use-routers.ts`](./use-routers.ts))
+
+| Hook | Type | Description | Permissions & Scoping | Cache Invalidation |
+| :--- | :--- | :--- | :--- | :--- |
+| `useRouters(params?)` | Query | Paginated routers with status, condition, warehouse, and serial filtering | All authenticated roles (`ADMIN`, `WAREHOUSE_STAFF`, `CS`, `TECH`) | `routersKeys.list(params)` |
+| `useRouter(id)` | Query | Single router details with active custody | All authenticated roles | `routersKeys.detail(id)` |
+| `useCreateRouter()` | Mutation | Registers physical router asset (`CreateRouterDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `routers.all`, `warehouses.all`, `inventory.all`, `products.all` |
+| `useAssignRouter()` | Mutation | Hands custody over to technician (`AssignRouterDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `routers.all`, `routers.detail(id)`, `warehouses.all`, `inventory.all` |
+| `useTransitionRouter()` | Mutation | Transitions lifecycle status (`TransitionRouterDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `routers.all`, `routers.detail(id)`, `routers.statusHistory(id)`, `warehouses.all`, `inventory.all` |
+| `useUpdateRouterCondition()` | Mutation | Updates physical condition/repair location (`UpdateRouterConditionDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `routers.all`, `routers.detail(id)`, `routers.conditionHistory(id)`, `warehouses.all`, `inventory.all` |
+| `useRouterAssignments(id)` | Query | Chronological custody history for a router | `ADMIN`, `WAREHOUSE_STAFF` | `routers.assignmentHistory(id)` |
+| `useRouterConditionHistory(id)` | Query | Hardware condition change audit history | `ADMIN`, `WAREHOUSE_STAFF` | `routers.conditionHistory(id)` |
+| `useRouterStatusHistory(id)` | Query | Lifecycle transition audit history | `ADMIN`, `WAREHOUSE_STAFF` | `routers.statusHistory(id)` |
+
+### Key Architectural Invariants
+1. **8-Status Lifecycle vs 3 Physical Conditions**:
+   - Statuses: `AVAILABLE`, `ASSIGNED_TO_TECHNICIAN`, `INSTALLED_AT_CUSTOMER`, `RETURNED`, `DAMAGED`, `UNDER_REPAIR`, `LOST`, `DECOMMISSIONED`.
+   - Physical Conditions: `SERVICEABLE`, `DAMAGED`, `UNDER_REPAIR`.
+   - A router is assignable to a technician **only** when `status === 'AVAILABLE'` AND `physicalCondition === 'SERVICEABLE'` AND placed in an active warehouse (`warehouseId !== null`).
+2. **Dual Onboarding Modes (`isNewReceipt`)**:
+   - `isNewReceipt: true`: Inbound delivery from supplier, increments warehouse inventory stock (+1 `INBOUND_SUPPLIER`).
+   - `isNewReceipt: false`: Existing unbarcoded warehouse inventory onboarding (+0 delta). Enforces capacity: $\text{usableCount} < \text{currentStock}$. Throws `409 Conflict` if capacity exhausted.
+   - Damaged opening unit (`isNewReceipt: false` + `DAMAGED`): Deducts 1 opening unit via `ADJUSTMENT` movement and writes audit log in `router_condition_history`.
+3. **Zero Generic PATCH**:
+   Routers are never updated via generic property mutation; they strictly use dedicated endpoints for assignments, transitions, and condition changes.
+
+
 
 
