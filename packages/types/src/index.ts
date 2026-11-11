@@ -598,6 +598,7 @@ export interface CreateProductDto {
 
 export interface UpdateProductDto {
   name?: string;
+  sku?: string;
   model?: string;
   category?: string;
   description?: string | null;
@@ -671,5 +672,23 @@ export interface InventoryBalanceDto {
   productId: string;
   quantity: number;
   updatedAt: string;
+}
+
+export type WarehouseInventoryDto = InventoryBalanceDto;
+
+export interface QueryInventoryDto {
+  warehouseId?: string;
+  productId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface QueryStockMovementsDto {
+  warehouseId?: string;
+  productId?: string;
+  movementType?: StockMovementType;
+  technicianId?: string;
+  limit?: number;
+  offset?: number;
 }
 
