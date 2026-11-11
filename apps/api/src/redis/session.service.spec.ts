@@ -167,6 +167,7 @@ describe('SessionService', () => {
       'rt:rotated:token-9',
       ROTATED_TOKEN_TTL_SECONDS,
     );
+    expect(ROTATED_TOKEN_TTL_SECONDS).toBe(REFRESH_SESSION_TTL_SECONDS);
     expect(fake.store.has('rt:token:token-9')).toBe(false);
     expect(fake.store.get('rt:rotated:token-9')).toBe('user-9');
     await expect(service.isRotated('token-9')).resolves.toBe(true);
@@ -235,20 +236,6 @@ describe('SessionService', () => {
     await service.revokeAllSessions('user-1');
     expect('keys' in fake.redis).toBe(false);
     expect(fake.redis.scan).not.toHaveBeenCalled();
-  });
-
-  it('records a token as rotated with a 7-day TTL and verifies rotation status', async () => {
-    await service.markRotated('user-1', 'token-1');
-    expect(fake.store.get('rt:rotated:token-1')).toBe('user-1');
-    expect(fake.redis.set).toHaveBeenCalledWith(
-      'rt:rotated:token-1',
-      'user-1',
-      'EX',
-      ROTATED_TOKEN_TTL_SECONDS,
-    );
-    expect(ROTATED_TOKEN_TTL_SECONDS).toBe(REFRESH_SESSION_TTL_SECONDS);
-    await expect(service.isRotated('token-1')).resolves.toBe(true);
-    await expect(service.isRotated('unknown-token')).resolves.toBe(false);
   });
 
   it('revokeSession does not mark a token as rotated', async () => {

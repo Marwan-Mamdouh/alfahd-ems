@@ -132,7 +132,7 @@ Body fallback (mobile, and any client without a cookie jar):
 
 ### POST /auth/logout
 
-Revokes the current session.
+Revokes **all** sessions for the authenticated account (account-wide, because rotation makes the access token's jti stale). Other devices for this user are signed out; this is an accepted tradeoff documented in spec.md.
 
 **Request**: (requires `Authorization: Bearer <accessToken>`)
 
@@ -144,8 +144,7 @@ Revokes the current session.
 ```
 
 **Side Effects**:
-- Backend revokes the session in Redis
-- **Backend clears the refresh cookie** (`Max-Age=0`)
+- Backend revokes every session indexed for the userId (revokeAllSessions) and clears the refresh cookie
 
 ---
 
