@@ -1,4 +1,4 @@
-import type { EmployeeDto, UserDto, UserStatus } from '@alfahd/types';
+import type { EmployeeDto, EmployeeLookupDto, UserDto, UserStatus } from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import type { User } from './index.js';
 
@@ -33,5 +33,21 @@ export function toEmployeeDto(user: User): EmployeeDto {
     profilePhotoKey: user.profilePhotoKey,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
+  };
+}
+
+export function toEmployeeLookupDto(user: User): EmployeeLookupDto {
+  const isTechnician = user.role === Role.TECHNICIAN;
+  const isStatusActive =
+    (user.status as UserStatus) === 'ACTIVE' || (!user.status && user.isActive);
+  const isEligible = isTechnician && isStatusActive && user.isActive !== false;
+
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role as Role,
+    status: (user.status as UserStatus) ?? (user.isActive ? 'ACTIVE' : 'INACTIVE'),
+    isEligible,
+    assignedWarehouseId: user.assignedWarehouseId,
   };
 }
