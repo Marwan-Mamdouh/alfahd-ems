@@ -11,6 +11,7 @@ export interface InventoryItemRow {
   description: string | null;
   lowStockThreshold?: number;
   isSerialized?: boolean;
+  isActive?: boolean;
 }
 
 export interface InventoryStockRow {

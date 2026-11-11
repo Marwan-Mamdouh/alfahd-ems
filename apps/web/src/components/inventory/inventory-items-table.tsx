@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Package, Eye } from "lucide-react";
+import { Package, Eye, Archive } from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
@@ -13,6 +13,8 @@ interface InventoryItemsTableProps {
   error?: Error | null;
   onRetry?: () => void;
   onItemClick?: (item: InventoryItemRow) => void;
+  onDeactivate?: (item: InventoryItemRow) => void;
+  canDeactivate?: boolean;
 }
 
 export function InventoryItemsTable({
@@ -21,6 +23,8 @@ export function InventoryItemsTable({
   error,
   onRetry,
   onItemClick,
+  onDeactivate,
+  canDeactivate = false,
 }: InventoryItemsTableProps) {
   const columns = useMemo<ColumnDef<InventoryItemRow>[]>(
     () => [
@@ -52,6 +56,20 @@ export function InventoryItemsTable({
         ),
       },
       {
+        key: "status",
+        header: "الحالة",
+        render: (item) =>
+          item.isActive !== false ? (
+            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+              نشط
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+              معطّل / مؤرشف
+            </span>
+          ),
+      },
+      {
         key: "description",
         header: "الوصف",
         hideOnMobile: true,
@@ -66,25 +84,42 @@ export function InventoryItemsTable({
       },
       {
         key: "actions",
-        header: "التفاصيل",
+        header: "الإجراءات",
         render: (item) => (
-          <button
-            type="button"
-            disabled={!onItemClick}
-            onClick={(event) => {
-              event.stopPropagation();
-              onItemClick?.(item);
-            }}
-            aria-label={`عرض تفاصيل ${item.name}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium text-teal-700 transition-colors hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
-          >
-            <Eye className="h-4 w-4" />
-            عرض
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!onItemClick}
+              onClick={(event) => {
+                event.stopPropagation();
+                onItemClick?.(item);
+              }}
+              aria-label={`عرض تفاصيل ${item.name}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-teal-700 transition-colors hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              عرض
+            </button>
+
+            {canDeactivate && onDeactivate && item.isActive !== false && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeactivate(item);
+                }}
+                aria-label={`تعطيل صنف ${item.name}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                تعطيل
+              </button>
+            )}
+          </div>
         ),
       },
     ],
-    [onItemClick]
+    [onItemClick, onDeactivate, canDeactivate]
   );
 
   return (
