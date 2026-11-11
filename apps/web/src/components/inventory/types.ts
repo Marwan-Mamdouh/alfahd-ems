@@ -19,13 +19,23 @@ export interface InventoryStockRow {
   itemName: string;
   model: string;
   category: string;
+  sku?: string;
   warehouseId: string;
   warehouseName: string;
   quantity: number;
   lowStockThreshold: number;
+  isSerialized?: boolean;
 }
 
-export type InventoryMovementType = "INBOUND" | "OUTBOUND" | "RETURN";
+export type InventoryMovementType =
+  | "INBOUND"
+  | "OUTBOUND"
+  | "RETURN"
+  | "INBOUND_SUPPLIER"
+  | "OUTBOUND_TECHNICIAN"
+  | "RETURN_TECHNICIAN"
+  | "TRANSFER_WAREHOUSE"
+  | "ADJUSTMENT";
 
 export interface InventoryMovementRow {
   id: string;
@@ -38,6 +48,9 @@ export interface InventoryMovementRow {
   performedBy: string;
   createdAt: string;
   notes: string | null;
+  supplierName?: string | null;
+  technicianId?: string | null;
+  technicianName?: string | null;
 }
 
 export interface InventoryItemFormValues {
@@ -56,5 +69,7 @@ export interface InventoryMovementFormValues {
   quantity: string;
   technicianId: string;
   supplierName: string;
+  toWarehouseId?: string;
+  newQuantity?: string;
   notes: string;
 }
