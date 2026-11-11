@@ -49,6 +49,21 @@ export interface RouterAssignmentFormValues {
   notes: string;
 }
 
+export interface RouterTransitionFormValues {
+  status: RouterStatus;
+  reason: string;
+  targetWarehouseId?: string;
+  notes?: string;
+}
+
+export interface RouterConditionFormValues {
+  physicalCondition: RouterPhysicalCondition;
+  locationType: "warehouse" | "external";
+  warehouseId?: string;
+  externalLocation?: string;
+  reason: string;
+}
+
 export interface RouterHistoryRow {
   id: string;
   routerId: string;
