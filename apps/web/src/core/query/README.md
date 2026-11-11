@@ -29,6 +29,7 @@ When mutations take place, they frequently impact related data domains. The tabl
 | :--- | :--- | :--- | :--- |
 | **Warehouse Update / Soft-Deactivate** | B2 (#70) | `queryKeys.warehouses.all` | `queryKeys.inventory.all` |
 | **Product Create / Update** | B2 (#70) | `queryKeys.products.all` | `queryKeys.inventory.all` |
+| **Product Soft-Deactivate / Archive** | B7 (#77) | `queryKeys.products.all` | `queryKeys.products.detail(id)`, `queryKeys.inventory.all` |
 | **Inbound / Outbound / Return / Transfer / Adjust** | B3 (#71) | `queryKeys.inventory.all` | `queryKeys.products.all`, `queryKeys.warehouses.detail(id).stock` |
 | **Router Create / Onboard (`isNewReceipt`)** | B4 (#72) | `queryKeys.routers.all` | `queryKeys.inventory.all`, `queryKeys.products.all` (if `isNewReceipt` added stock) |
 | **Router Assign to Technician** | B5 (#73) | `queryKeys.routers.detail(id)` | `queryKeys.routers.lists()`, `queryKeys.inventory.warehouseStock(whId)` |
@@ -289,6 +290,36 @@ The real data layer for IP Address Management integrates with `/ip-addresses`, `
    - Integrates `useIpImport()` and `CsvDropzone` for asynchronous BullMQ bulk import with real-time job progress and line-numbered inserted/skipped/error summaries.
 6. **Zero Generic Status Updates / No Hidden Hard Delete**:
    - All status transitions use discrete lifecycle endpoints; IPs are archived, never deleted.
+
+---
+
+## 11. Product Soft Deactivation Semantics & No-Hard-Delete Compliance (Task B7 / Issue #77)
+
+The real data layer for Products enforces global No-Hard-Delete Compliance (`PLAN.md`). Physical deletion (`DELETE FROM products`) is strictly eliminated across the system. Instead, `DELETE /products/:id` performs soft deactivation (`is_active = false`), preserving product/SKU identity, stock movement audit trails, warehouse balance relations, and router hardware associations.
+
+### Product Deactivation Hooks ([`use-products.ts`](./use-products.ts))
+
+| Hook | Type | Description | Permissions & Scoping | Cache Invalidation |
+| :--- | :--- | :--- | :--- | :--- |
+| `useProducts(params?)` | Query | Paginated catalog with `search`, `category`, and `activeOnly` filters | `ADMIN`, `WAREHOUSE_STAFF`, `CS`, `TECHNICIAN` | `productsKeys.list(params)` |
+| `useProduct(id)` | Query | Single product details including aggregate stock | All authenticated roles | `productsKeys.detail(id)` |
+| `useCreateProduct()` | Mutation | Registers a new product with uppercase SKU normalization | `ADMIN`, `WAREHOUSE_STAFF` | `products.all`, `inventory.all` |
+| `useUpdateProduct()` | Mutation | Updates metadata (name, model, category, lowStockThreshold, SKU) | `ADMIN`, `WAREHOUSE_STAFF` | `products.all`, `products.detail(id)`, `inventory.all` |
+| `useDeleteProduct()` | Mutation | **Soft-deactivates / archives** a product (`is_active = false`) | **Strictly `ADMIN` only** | `products.all`, `products.detail(id)`, `inventory.all` |
+
+### Key Architectural Invariants & Safeguards
+1. **No-Hard-Delete Law**:
+   - `DELETE /products/:id` strictly maps to `softDeactivate(id)` (`UPDATE products SET is_active = false, updated_at = NOW()`).
+   - The UI never renders a "حذف صنف" (hard delete) action; it only presents "تعطيل وأرشفة الصنف" (soft deactivation/archive) to Admin users.
+2. **Strict 409 Conflict Safeguards**:
+   - **Active Inventory Stock**: If active warehouse stock exists ($\sum \text{quantity} > 0$), deactivation is rejected with `409 Conflict` (`"Cannot deactivate product holding active inventory (${currentStock} units in stock)"`).
+   - **Active Router Hardware Assets**: If any serialized router assets remain active (`AVAILABLE`, `ASSIGNED_TO_TECHNICIAN`, `INSTALLED_AT_CUSTOMER`, `UNDER_REPAIR`), deactivation is rejected with `409 Conflict` (`"Cannot deactivate product with active router hardware assets (${activeRouters} units active)"`).
+   - **Movement History Invariant**: Historical `stock_movements` logs do **not** block soft deactivation, preserving audit trails without trapping obsolete SKUs.
+3. **Read & Selector Behavior**:
+   - Inbound delivery and stock movement selectors filter out inactive products (`item.isActive !== false`) so deactivated items cannot receive new stock.
+   - Catalog tables display an explicit badge: `نشط` (emerald) vs `معطّل / مؤرشف` (amber).
+   - Inactive products retain full visibility in historical movement logs and audit views.
+
 
 
 
