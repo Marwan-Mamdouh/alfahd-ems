@@ -28,6 +28,7 @@ import { UpdateEmployeeRequestDto } from './dto/update-employee.dto.js';
 import { UpdateEmployeeStatusRequestDto } from './dto/update-employee-status.dto.js';
 import { EmployeeQueryRequestDto } from './dto/employee-query.dto.js';
 import { EmployeeLookupQueryRequestDto } from './dto/employee-lookup-query.dto.js';
+import { routes } from '../common/constants/routes.constants.js';
 
 /**
  * 5 MB upload cap enforced by Multer itself: with memory storage the limit must
@@ -38,7 +39,7 @@ const MAX_PHOTO_FILE_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('employees')
 @ApiBearerAuth()
-@Controller('employees')
+@Controller(routes.employees.root)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
@@ -58,7 +59,7 @@ export class EmployeesController {
     return this.employeesService.findAll(query);
   }
 
-  @Get('lookup')
+  @Get(routes.employees.lookup)
   @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
   @ApiOperation({ summary: 'Minimal employee/technician lookup for selectors without PII' })
   @ApiOkResponse({ description: 'List of minimal employee lookup records' })
@@ -66,7 +67,7 @@ export class EmployeesController {
     return this.employeesService.lookup(query);
   }
 
-  @Get(':id')
+  @Get(routes.employees.id)
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request & { user: JwtUser },
@@ -74,7 +75,7 @@ export class EmployeesController {
     return this.employeesService.findOne(id, req.user);
   }
 
-  @Patch(':id')
+  @Patch(routes.employees.id)
   @Roles(Role.ADMIN)
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -83,7 +84,7 @@ export class EmployeesController {
     return this.employeesService.update(id, dto);
   }
 
-  @Patch(':id/status')
+  @Patch(routes.employees.status)
   @Roles(Role.ADMIN)
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
@@ -92,7 +93,7 @@ export class EmployeesController {
     return this.employeesService.updateStatus(id, dto.status, dto.reason);
   }
 
-  @Post(':id/photo')
+  @Post(routes.employees.photo)
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ADMIN)
   @UseInterceptors(

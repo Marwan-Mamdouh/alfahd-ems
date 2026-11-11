@@ -12,15 +12,16 @@ import {
   ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
+import { routes } from '../common/constants/routes.constants.js';
 
 @ApiTags('jobs')
 @ApiBearerAuth()
-@Controller('jobs')
+@Controller(routes.jobs.root)
 @UseGuards(JwtAuthGuard)
 export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
 
-  @Get(':id')
+  @Get(routes.jobs.id)
   getJobStatus(
     @Param('id') id: string,
     @Req() req: Request & { user: JwtUser },
@@ -28,7 +29,7 @@ export class JobsController {
     return this.jobsService.getJobStatus(id, req.user);
   }
 
-  @Get(':id/download')
+  @Get(routes.jobs.download)
   @ApiOperation({ summary: 'Download an authorized locally stored report' })
   @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   @ApiOkResponse({
