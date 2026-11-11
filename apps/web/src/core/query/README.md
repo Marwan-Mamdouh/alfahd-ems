@@ -184,4 +184,32 @@ The real data layer for Warehouses and Products integrates with backend endpoint
 | `useCreateProduct()` | Adds product with uppercase SKU normalization | `products.all`, `inventory.all` |
 | `useUpdateProduct()` | Updates catalog details and low stock threshold | `products.all`, `products.detail(id)`, `inventory.all` |
 
+---
+
+## 8. Real Inventory Balances & Multi-Movement Operations (Task B3 / Issue #71)
+
+The real data layer for Inventory balances and multi-movement stock operations integrates with `/inventory`, `/inventory/warehouses/:id`, and the 5 canonical mutation endpoints: `/inventory/inbound`, `/inventory/outbound`, `/inventory/returns`, `/inventory/transfer`, and `/inventory/adjust`.
+
+### Inventory Hooks ([`use-inventory.ts`](./use-inventory.ts))
+
+| Hook | Type | Description | Permissions & Scoping | Cache Invalidation |
+| :--- | :--- | :--- | :--- | :--- |
+| `useInventoryStock(params?)` | Query | Global stock balances across all warehouses | All authenticated roles | `inventoryKeys.balances` |
+| `useWarehouseInventoryStock(id, params?)` | Query | Stock balances for a specific warehouse | All authenticated roles | `inventoryKeys.warehouseStock(id)` |
+| `useInventoryMovements(params?, role)` | Query | Audit movement log | Least-privilege: enabled only for `ADMIN` & `WAREHOUSE_STAFF` (`isForbidden: true` for `CS`/`TECHNICIAN`) | `inventoryKeys.movements` |
+| `useRecordInbound()` | Mutation | Supplier stock receipt (`InboundStockDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `inventory.all`, `warehouses.all`, `products.all` |
+| `useRecordOutbound()` | Mutation | Technician stock issue (`OutboundStockDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `inventory.all`, `warehouses.all`, `products.all` |
+| `useRecordReturn()` | Mutation | Technician stock return (`ReturnStockDto`) | `ADMIN`, `WAREHOUSE_STAFF` | `inventory.all`, `warehouses.all`, `products.all` |
+| `useTransferStock()` | Mutation | Inter-warehouse transfer (`TransferStockDto`) | `ADMIN`, `WAREHOUSE_STAFF` (enforces `fromWarehouseId !== toWarehouseId`) | `inventory.all`, `warehouses.all`, `products.all` |
+| `useAdjustStock()` | Mutation | Inventory count adjustment (`AdjustStockDto`) | **Strictly `ADMIN` only** (requires `newQuantity` and mandatory `notes`) | `inventory.all`, `warehouses.all`, `products.all` |
+
+### Key Architectural Guardrails
+1. **Serialization Guardrail (`isSerialized`)**:
+   Quantity-only movements against serialized items (e.g. routers) are rejected by the API with 400 Bad Request. The UI checks `product.isSerialized === true` directly from catalog metadata and renders an Arabic warning routing to `/routers-preview`, disabling the movement form.
+2. **Server-Derived Audit Attribution**:
+   The `responsibleUserId` audit actor is strictly derived on the backend from the JWT session. No user selection input is exposed in forms.
+3. **Cross-Module Invalidation**:
+   Every stock mutation modifies inventory counts, warehouse stock summaries, and product catalog low-stock statuses, triggering invalidations across `inventory.all`, `warehouses.all`, and `products.all`.
+
+
 
