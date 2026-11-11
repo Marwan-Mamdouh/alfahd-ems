@@ -78,7 +78,7 @@ Call `POST /api/auth/login` with an incorrect password.
 
 ### A7. Change Password Flow
 
-Call `PATCH /api/users/me/password` with correct `oldPassword` and a new `newPassword`.
+Call `PATCH /api/auth/change-password` with correct `oldPassword` and a new `newPassword`.
 **Expected**:
 - 200 response
 - Stored `password_hash` now reflects the new argon2id hash

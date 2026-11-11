@@ -580,7 +580,7 @@ Open `http://localhost:3001/auth/forgot-password` → must return **200**, not 4
 - `SameSite`: `Lax` for the web path (same-origin via rewrite); note `None` remains for mobile.
 - Add the `/api/*` rewrite and its consequences: no CORS from the dashboard, no `NEXT_PUBLIC_API_URL` in the client bundle.
 - Add the axios rules that were missing: GET-only auto-retry (2 attempts, ~300ms/~900ms), request interceptor behaviour.
-- Add `POST /users/change-password` → 201 (it already flags this mismatch at line 264 — confirm the number rather than trusting the note).
+- Canonical `PATCH /auth/change-password` → 200 (the users route was removed by Issue #14).
 - Add a note that login/refresh are rate-limited at 5 per 10 min per IP → 429.
 
 **Verify**: re-read the document top to bottom; every claim must match `apps/api/src` and `apps/web/src` as they now stand.

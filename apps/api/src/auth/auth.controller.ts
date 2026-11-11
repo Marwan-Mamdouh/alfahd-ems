@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   HttpCode,
+  Patch,
   Post,
   Req,
   Res,
@@ -23,6 +24,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import {
   AuthOkResponseDto,
+  ChangePasswordRequestDto,
   ForgotPasswordRequestDto,
   LoginRequestDto,
   LoginResponseDto,
@@ -32,6 +34,7 @@ import {
 } from './dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RateLimitGuard } from './guards/rate-limit.guard.js';
+import { CurrentUser } from './decorators/current-user.decorator.js';
 import type { JwtUser } from './strategies/jwt.strategy.js';
 import {
   REFRESH_COOKIE_NAME,
@@ -176,6 +179,24 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'Invalid or expired token, or invalid password' })
   async resetPassword(@Body() dto: ResetPasswordRequestDto): Promise<AuthOkResponseDto> {
     await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { ok: true };
+  }
+
+  @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change your own password' })
+  @ApiOkResponse({ description: 'Password changed successfully', type: AuthOkResponseDto })
+  @ApiBadRequestResponse({ description: 'Current password incorrect or invalid new password' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  async changePassword(
+    @Body() dto: ChangePasswordRequestDto,
+    @CurrentUser() user: JwtUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthOkResponseDto> {
+    await this.authService.changePassword(user.userId, dto);
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
     return { ok: true };
   }
 }

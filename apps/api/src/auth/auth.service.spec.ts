@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeAll } from 'vitest';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { hash, verify } from 'argon2';
 import { AuthService, DUMMY_HASH } from './auth.service.js';
 
@@ -345,5 +350,47 @@ describe('logout — account-wide session revocation (Issue #9 follow-up)', () =
     expect(sessionService.revokeAllSessions).toHaveBeenCalledTimes(1);
     expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('user-1');
     expect(sessionService.revokeSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('changePassword - Issue #14', () => {
+  it('registered user + correct old password resolves and calls sessionService.revokeAllSessions with userId', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: PASSWORD,
+        newPassword: 'new-valid-password-123',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledWith(ACTIVE_USER.id);
+  });
+
+  it('wrong old password rejects with BadRequestException and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: 'wrong-old-password',
+        newPassword: 'new-valid-password-123',
+      }),
+    ).rejects.toThrow(new BadRequestException('Old password is incorrect'));
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('no matching row (rows: []) rejects with NotFoundException and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [] });
+
+    await expect(
+      service.changePassword('non-existent-user-id', {
+        oldPassword: PASSWORD,
+        newPassword: 'new-valid-password-123',
+      }),
+    ).rejects.toThrow(new NotFoundException('User not found'));
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
   });
 });

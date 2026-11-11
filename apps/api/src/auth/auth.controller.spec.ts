@@ -7,7 +7,13 @@ import { AuthController } from './auth.controller.js';
 import type { AuthService } from './auth.service.js';
 import type { RateLimitGuard } from './guards/rate-limit.guard.js';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '../config/refresh-cookie.js';
-import type { LoginRequestDto, LoginResponseDto, RefreshTokenResponseDto } from './dto.js';
+import type {
+  ChangePasswordRequestDto,
+  LoginRequestDto,
+  LoginResponseDto,
+  RefreshTokenResponseDto,
+} from './dto.js';
+import type { JwtUser } from './strategies/jwt.strategy.js';
 
 function makeController(
   authServiceOverrides: Partial<Record<keyof AuthService, unknown>> = {},
@@ -198,6 +204,39 @@ describe('AuthController', () => {
 
       expect(authService.logout).toHaveBeenCalledTimes(1);
       expect(authService.logout).toHaveBeenCalledWith('user-123');
+      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
+        path: REFRESH_COOKIE_PATH,
+      });
+      expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('changePassword - Issue #14', () => {
+    it('calls authService.changePassword, clears refresh cookie, and returns { ok: true }', async () => {
+      const { controller, authService } = makeController({
+        changePassword: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const dto: ChangePasswordRequestDto = {
+        oldPassword: 'oldPassword123',
+        newPassword: 'newPassword123',
+      };
+
+      const jwtUser: JwtUser = {
+        userId: 'user-id-456',
+        email: 'user@alfahd.local',
+        role: Role.TECHNICIAN,
+        tokenId: 'token-id-123',
+      };
+
+      const res = {
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      const result = await controller.changePassword(dto, jwtUser, res);
+
+      expect(authService.changePassword).toHaveBeenCalledTimes(1);
+      expect(authService.changePassword).toHaveBeenCalledWith('user-id-456', dto);
       expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
         path: REFRESH_COOKIE_PATH,
       });

@@ -265,9 +265,9 @@ Updates a user (ADMIN only). Updatable fields: `email`, `role`, `isActive` only 
 
 ---
 
-### POST /users/change-password
+### PATCH /auth/change-password
 
-Changes the authenticated user's own password (any authenticated role, not just ADMIN).
+Changes the authenticated user's own password (any authenticated role, own password only).
 
 **Request**:
 ```json
@@ -277,7 +277,7 @@ Changes the authenticated user's own password (any authenticated role, not just 
 }
 ```
 
-**Response (201)** — wrapped as `{ "data": { "ok": true } }`:
+**Response (200)** — wrapped as `{ "data": { "ok": true } }`:
 ```json
 {
   "ok": true
@@ -286,7 +286,9 @@ Changes the authenticated user's own password (any authenticated role, not just 
 
 **Response (400)**: `Old password is incorrect`
 
-> ⚠️ **Known contract/behaviour mismatch.** This endpoint, and `POST /users/:id/revoke-session`, actually return **201** (NestJS defaults `POST` to 201 and `UsersController` sets no `@HttpCode`), whereas this document previously said 200 and every endpoint in `AuthController` does set `@HttpCode(200)`. The e2e suite asserts the real 201. Clients should accept either until this is reconciled — ideally **before** the M4 #54 contract freeze, since the frontend developer codes against this document.
+**Side Effects**:
+- Success revokes **all** refresh sessions for the user, including the caller's, and clears the refresh cookie (`refresh_token` with `Path=/`), forcing the client to log in again with the new password.
+- Access tokens (stateless JWTs) may remain valid until expiry (≤15m).
 
 ---
 
@@ -301,6 +303,8 @@ Revokes all sessions for a user (ADMIN only).
   "revoked": 3
 }
 ```
+
+> ⚠️ **Known contract/behaviour mismatch.** `POST /users/:id/revoke-session` actually returns **201** (NestJS defaults `POST` to 201 and `UsersController` sets no `@HttpCode`), whereas this document previously said 200. The e2e suite asserts the real 201. Clients should accept either until this is reconciled.
 
 ---
 

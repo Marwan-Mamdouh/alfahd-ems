@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Role } from '@alfahd/types';
 import { BadRequestException } from '@nestjs/common';
-import { hash } from 'argon2';
 import { UsersService } from './users.service.js';
 import type { Db } from '../database/database.module.js';
 import type { EmailService } from '../email/email.service.js';
@@ -149,45 +148,6 @@ describe('UsersService', () => {
         BadRequestException,
       );
       await expect(service.deactivate('user-1', 'user-1')).rejects.toThrow(BadRequestException);
-
-      expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('changePassword revokes sessions (HARD-08)', () => {
-    // `verify` needs a real argon2 hash: a malformed one throws instead of
-    // returning false, masking the behaviour under test.
-    const withRealHash = async () => {
-      const realHash = await hash('oldPassword123');
-      dbMock.select = vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn().mockResolvedValue([{ ...baseUser, passwordHash: realHash }]),
-          })),
-        })),
-      }));
-    };
-
-    it('revokes all live sessions after a successful password change', async () => {
-      await withRealHash();
-
-      await service.changePassword('user-1', {
-        oldPassword: 'oldPassword123',
-        newPassword: 'brandNewPassword456',
-      });
-
-      expect(sessionServiceMock.revokeAllSessions).toHaveBeenCalledWith('user-1');
-    });
-
-    it('keeps sessions when the old password is wrong', async () => {
-      await withRealHash();
-
-      await expect(
-        service.changePassword('user-1', {
-          oldPassword: 'not-the-password',
-          newPassword: 'brandNewPassword456',
-        }),
-      ).rejects.toThrow('Old password is incorrect');
 
       expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
     });

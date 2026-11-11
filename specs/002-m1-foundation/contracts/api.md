@@ -82,6 +82,7 @@ export interface UpdateUserDto {
 - `POST /auth/refresh` 
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
+- `PATCH /auth/change-password` (Requires JWT)
 
 ### Users
 - `POST /users` (Role: ADMIN)
@@ -89,4 +90,3 @@ export interface UpdateUserDto {
 - `GET /users/:id` (Role: ADMIN)
 - `PATCH /users/:id` (Role: ADMIN)
 - `POST /users/:id/revoke-session` (Role: ADMIN)
-- `POST /users/change-password` (Role: ANY AUTHENTICATED USER)
