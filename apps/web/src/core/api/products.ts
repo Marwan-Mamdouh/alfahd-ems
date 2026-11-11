@@ -74,3 +74,12 @@ export async function updateProduct(
   return unwrap(response);
 }
 
+/**
+ * Deactivate a product (soft deactivation, ADMIN only).
+ * Physical hard deletion is never performed.
+ */
+export async function deleteProduct(id: string): Promise<void> {
+  await api.delete(ENDPOINTS.products.byId(id));
+}
+
+
