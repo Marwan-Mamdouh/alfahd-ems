@@ -2,6 +2,7 @@ import type {
   ChangePasswordRequestDto,
   CreateEmployeeDto,
   CreateUserDto,
+  EmployeeLookupQueryDto,
   UpdateEmployeeDto,
   UpdateUserDto,
   UserDto,
@@ -19,7 +20,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { hash, verify } from 'argon2';
-import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, warehouses, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
@@ -189,6 +190,30 @@ export class UsersService {
 
     const total = totalRows[0]?.value ? Number(totalRows[0].value) : 0;
     return { data, total };
+  }
+
+  async findEmployeesForLookup(query: EmployeeLookupQueryDto): Promise<User[]> {
+    const conditions = [];
+
+    if (query.role) {
+      conditions.push(eq(users.role, query.role));
+    }
+    if (query.warehouse_id) {
+      conditions.push(eq(users.assignedWarehouseId, query.warehouse_id));
+    }
+    if (query.status) {
+      conditions.push(eq(users.status, query.status));
+    }
+    if (query.q && query.q.trim()) {
+      const search = `%${query.q.trim()}%`;
+      // Strictly match name only — never search email or phone (PII minimization)
+      conditions.push(ilike(users.name, search));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const limit = query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 50;
+
+    return this.db.select().from(users).where(whereClause).orderBy(asc(users.name)).limit(limit);
   }
 
   async findEmployeeById(id: string): Promise<User> {

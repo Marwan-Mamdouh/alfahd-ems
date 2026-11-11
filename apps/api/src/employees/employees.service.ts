@@ -1,14 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import type { EmployeeDto, UserStatus } from '@alfahd/types';
+import type { EmployeeDto, EmployeeLookupDto, UserStatus } from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import { UsersService } from '../users/users.service.js';
 import { StorageService } from '../storage/storage.interface.js';
 import { SessionService } from '../redis/session.service.js';
 import { getImageMimeTypeFromBuffer } from '../common/utils/file.utils.js';
-import { toEmployeeDto } from '../database/schema/mappers.js';
+import { toEmployeeDto, toEmployeeLookupDto } from '../database/schema/mappers.js';
 import type { CreateEmployeeRequestDto } from './dto/create-employee.dto.js';
 import type { UpdateEmployeeRequestDto } from './dto/update-employee.dto.js';
 import type { EmployeeQueryRequestDto } from './dto/employee-query.dto.js';
+import type { EmployeeLookupQueryRequestDto } from './dto/employee-lookup-query.dto.js';
 import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
 
 @Injectable()
@@ -41,6 +42,11 @@ export class EmployeesService {
         total: result.total,
       },
     };
+  }
+
+  async lookup(query: EmployeeLookupQueryRequestDto): Promise<EmployeeLookupDto[]> {
+    const users = await this.usersService.findEmployeesForLookup(query);
+    return users.map(toEmployeeLookupDto);
   }
 
   async findOne(id: string, currentUser?: JwtUser): Promise<EmployeeDto> {
