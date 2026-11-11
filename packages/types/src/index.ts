@@ -270,6 +270,23 @@ export interface EmployeeQueryDto {
   pageSize?: number;
 }
 
+export interface EmployeeLookupDto {
+  id: string;
+  name: string;
+  role: Role;
+  status: UserStatus;
+  isEligible: boolean;
+  assignedWarehouseId?: string | null;
+}
+
+export interface EmployeeLookupQueryDto {
+  role?: Role;
+  warehouse_id?: string;
+  status?: UserStatus;
+  q?: string;
+  limit?: number;
+}
+
 // ─── Attendance DTOs ──────────────────────────────────────────────────────────
 export interface CheckInRequestDto {
   lat: number;
