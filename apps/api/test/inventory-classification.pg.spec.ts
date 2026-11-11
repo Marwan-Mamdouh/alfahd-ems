@@ -11,6 +11,7 @@ import { WarehousesRepository } from '../src/modules/repository/repositories/war
 import { InventoryRepository } from '../src/modules/repository/repositories/inventory.repository.js';
 import { RoutersRepository } from '../src/modules/repository/repositories/routers.repository.js';
 import { IpRepository } from '../src/modules/repository/repositories/ip.repository.js';
+import { UsersRepository } from '../src/modules/repository/repositories/users.repository.js';
 import { InventoryService } from '../src/modules/inventory/inventory.service.js';
 import { RoutersService } from '../src/modules/routers/routers.service.js';
 import { IpService } from '../src/modules/ip-management/ip.service.js';
@@ -31,6 +32,7 @@ describe.skipIf(!url)('serialized inventory consistency (PostgreSQL)', () => {
     inventoryRepo,
     new RoutersRepository(db),
     new IpRepository(db),
+    new UsersRepository(db),
   );
   const inventory = new InventoryService(repo);
   const routers = new RoutersService(repo, {} as never);
