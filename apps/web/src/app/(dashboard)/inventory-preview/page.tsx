@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
+import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
 
 import { InventoryItemsTable } from "@/components/inventory/inventory-items-table";
 import { InventoryItemForm } from "@/components/inventory/inventory-item-form";
@@ -247,6 +248,9 @@ function InventoryPreviewContent() {
 
   const [movements, setMovements] = useState<InventoryMovementRow[]>(DEMO_MOVEMENTS);
 
+  const { technicians: lookupTechnicians } = useTechniciansLookup();
+  const activeTechnicians = lookupTechnicians.length > 0 ? lookupTechnicians : DEMO_TECHNICIANS;
+
   const [activeTab, setActiveTab] = useState<InventoryTab>("items");
 
   const [pageMode, setPageMode] = useState<PageMode>("overview");
@@ -470,7 +474,7 @@ function InventoryPreviewContent() {
 
     const isInbound = values.type === "INBOUND";
 
-    const technician = DEMO_TECHNICIANS.find((entry) => entry.id === values.technicianId);
+    const technician = activeTechnicians.find((entry) => entry.id === values.technicianId);
 
     if (isInbound) {
       if (!values.supplierName.trim()) {
@@ -835,7 +839,7 @@ function InventoryPreviewContent() {
           <InventoryMovementForm
             items={itemOptions}
             warehouses={DEMO_WAREHOUSES}
-            technicians={DEMO_TECHNICIANS}
+            technicians={activeTechnicians}
             onSubmit={handleMovementSubmit}
             onCancel={backToOverview}
           />

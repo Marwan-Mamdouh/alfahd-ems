@@ -1,5 +1,6 @@
 import type {
   EmployeeQueryDto,
+  EmployeeLookupQueryDto,
   AttendanceQueryDto,
   RouterQueryDto,
   IpQueryDto,
@@ -33,6 +34,7 @@ export const employeesKeys = {
   list: (params?: EmployeeQueryDto) => [...employeesKeys.lists(), params] as const,
   details: () => [...employeesKeys.all, "detail"] as const,
   detail: (id: string) => [...employeesKeys.details(), id] as const,
+  lookup: (params?: EmployeeLookupQueryDto) => [...employeesKeys.all, "lookup", params] as const,
 };
 
 export const attendanceKeys = {
