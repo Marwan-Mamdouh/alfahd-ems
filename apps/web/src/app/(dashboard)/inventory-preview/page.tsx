@@ -22,6 +22,7 @@ import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
+  useDeleteProduct,
 } from "@/core/query/use-products";
 import { useWarehouses } from "@/core/query/use-warehouses";
 import {
@@ -40,6 +41,7 @@ import { InventoryItemForm } from "@/components/inventory/inventory-item-form";
 import { InventoryStockTable } from "@/components/inventory/inventory-stock-table";
 import { InventoryMovementForm } from "@/components/inventory/inventory-movement-form";
 import { InventoryMovementsTable } from "@/components/inventory/inventory-movements-table";
+import { ProductDeactivateDialog } from "@/components/inventory/product-deactivate-dialog";
 
 import type {
   InventoryItemRow,
@@ -62,6 +64,7 @@ const DEMO_ITEMS: InventoryItemRow[] = [
     category: "راوترات",
     description: "راوتر لاسلكي للاستخدام المنزلي.",
     isSerialized: true,
+    isActive: true,
   },
   {
     id: "item-2",
@@ -70,6 +73,7 @@ const DEMO_ITEMS: InventoryItemRow[] = [
     category: "راوترات",
     description: "راوتر فايبر.",
     isSerialized: true,
+    isActive: true,
   },
   {
     id: "item-3",
@@ -78,6 +82,7 @@ const DEMO_ITEMS: InventoryItemRow[] = [
     category: "كابلات",
     description: "كابل شبكات للاستخدام الداخلي.",
     isSerialized: false,
+    isActive: true,
   },
   {
     id: "item-4",
@@ -86,6 +91,7 @@ const DEMO_ITEMS: InventoryItemRow[] = [
     category: "كابلات",
     description: "كابل فايبر ضوئي.",
     isSerialized: false,
+    isActive: true,
   },
   {
     id: "item-5",
@@ -94,6 +100,7 @@ const DEMO_ITEMS: InventoryItemRow[] = [
     category: "إكسسوارات",
     description: "موصل لكابلات الإنترنت.",
     isSerialized: false,
+    isActive: true,
   },
 ];
 
@@ -217,6 +224,9 @@ function InventoryPreviewContent() {
   const { products: liveProducts } = useProducts();
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
+  const deleteProductMutation = useDeleteProduct();
+
+  const [deactivatingItem, setDeactivatingItem] = useState<InventoryItemRow | null>(null);
 
   const { warehouses: liveWarehouses } = useWarehouses();
   const activeWarehouses = useMemo(() => {
@@ -270,6 +280,7 @@ function InventoryPreviewContent() {
         description: p.description,
         lowStockThreshold: p.lowStockThreshold,
         isSerialized: p.isSerialized,
+        isActive: p.isActive,
       }));
     }
     return DEMO_ITEMS;
@@ -335,11 +346,13 @@ function InventoryPreviewContent() {
 
   const itemOptions = useMemo(
     () =>
-      items.map((item) => ({
-        id: item.id,
-        name: `${item.name} — ${item.model}`,
-        isSerialized: item.isSerialized,
-      })),
+      items
+        .filter((item) => item.isActive !== false)
+        .map((item) => ({
+          id: item.id,
+          name: `${item.name} — ${item.model}`,
+          isSerialized: item.isSerialized,
+        })),
     [items]
   );
 
@@ -482,6 +495,16 @@ function InventoryPreviewContent() {
       backToOverview();
     } catch (err) {
       throw new Error(extractErrorMessage(err, "فشلت عملية حفظ الصنف."));
+    }
+  }
+
+  async function handleDeactivateConfirm(item: InventoryItemRow) {
+    try {
+      await deleteProductMutation.mutateAsync(item.id);
+      setNotification(`تم تعطيل وأرشفة الصنف "${item.name}" بنجاح.`);
+      setDeactivatingItem(null);
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تعطيل الصنف."));
     }
   }
 
@@ -772,7 +795,12 @@ function InventoryPreviewContent() {
 
           {/* Data Tables */}
           {activeTab === "items" && (
-            <InventoryItemsTable items={filteredItems} onItemClick={openEditItem} />
+            <InventoryItemsTable
+              items={filteredItems}
+              onItemClick={openEditItem}
+              onDeactivate={(item) => setDeactivatingItem(item)}
+              canDeactivate={userRole === "ADMIN"}
+            />
           )}
 
           {activeTab === "stocks" && (
@@ -863,6 +891,17 @@ function InventoryPreviewContent() {
             onCancel={backToOverview}
           />
         </section>
+      )}
+
+      {/* Deactivate Product Confirmation Modal */}
+      {deactivatingItem && (
+        <ProductDeactivateDialog
+          item={deactivatingItem}
+          isOpen={Boolean(deactivatingItem)}
+          onClose={() => setDeactivatingItem(null)}
+          onConfirm={handleDeactivateConfirm}
+          isSubmitting={deleteProductMutation.isPending}
+        />
       )}
 
       {/* Footer */}
