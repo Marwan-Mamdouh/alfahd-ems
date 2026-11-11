@@ -13,7 +13,7 @@ export const PERMISSIONS = {
 
   "routers.manage": ["ADMIN", "WAREHOUSE_STAFF"],
 
-  "ips.view": ["ADMIN", "WAREHOUSE_STAFF", "CS"],
+  "ips.view": ["ADMIN", "TECHNICIAN"],
 
   "ips.manage": ["ADMIN"],
 
