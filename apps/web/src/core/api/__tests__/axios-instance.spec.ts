@@ -84,6 +84,29 @@ describe("Axios instance and interceptors", () => {
       expect(capturedConfig?.headers?.Authorization).toBeUndefined();
     });
 
+    it("omits Authorization header when calling external URLs preventing bearer leakage", async () => {
+      useAuthStore.getState().setSession("confidential-token-xyz", null);
+
+      let capturedConfig: InternalAxiosRequestConfig | undefined;
+      const testAdapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+        capturedConfig = config;
+        return {
+          data: { data: "ok" },
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config,
+        };
+      };
+
+      api.defaults.adapter = testAdapter;
+
+      await api.get("https://storage.googleapis.com/alfahd/report.xlsx");
+
+      expect(capturedConfig).toBeDefined();
+      expect(capturedConfig?.headers?.Authorization).toBeUndefined();
+    });
+
     it("strips Content-Type: application/json when request data is FormData", async () => {
       let capturedConfig: InternalAxiosRequestConfig | undefined;
       api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
@@ -298,6 +321,23 @@ describe("Axios instance and interceptors", () => {
 
       await expect(api.get("/warehouses/non-existent")).rejects.toThrow("Not Found");
       expect(attempts).toBe(1);
+    });
+
+    it("does not retry non-idempotent GET endpoints like /attendance/report preventing duplicate jobs", async () => {
+      let attempts = 0;
+      api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+        attempts++;
+        throw new AxiosError("Server Error", "500", config, null, {
+          status: 500,
+          statusText: "Internal Server Error",
+          data: {},
+          headers: {},
+          config,
+        });
+      };
+
+      await expect(api.get(ENDPOINTS.attendance.report)).rejects.toThrow("Server Error");
+      expect(attempts).toBe(1); // Never retried
     });
   });
 });
