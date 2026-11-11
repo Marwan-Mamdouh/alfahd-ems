@@ -1,16 +1,16 @@
 /**
  * Inventory Management — Frontend display models.
- *
- * Temporary types for Phase 2 UI development.
- * These are NOT the confirmed backend API DTOs.
  */
 
 export interface InventoryItemRow {
   id: string;
   name: string;
+  sku?: string;
   model: string;
   category: string;
   description: string | null;
+  lowStockThreshold?: number;
+  isSerialized?: boolean;
 }
 
 export interface InventoryStockRow {
@@ -42,9 +42,11 @@ export interface InventoryMovementRow {
 
 export interface InventoryItemFormValues {
   name: string;
+  sku: string;
   model: string;
   category: string;
   description: string;
+  lowStockThreshold: string;
 }
 
 export interface InventoryMovementFormValues {

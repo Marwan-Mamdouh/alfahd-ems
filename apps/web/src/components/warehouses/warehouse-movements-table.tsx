@@ -15,9 +15,22 @@ interface WarehouseMovementsTableProps {
   onRetry?: () => void;
 }
 
-const MOVEMENT_CONFIG = {
+const MOVEMENT_CONFIG: Record<
+  string,
+  {
+    label: string;
+    icon: typeof ArrowDownToLine;
+    className: string;
+  }
+> = {
   INBOUND: {
     label: "وارد",
+    icon: ArrowDownToLine,
+    className:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300",
+  },
+  INBOUND_SUPPLIER: {
+    label: "وارد مورد",
     icon: ArrowDownToLine,
     className:
       "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300",
@@ -28,13 +41,44 @@ const MOVEMENT_CONFIG = {
     className:
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
   },
+  OUTBOUND_TECHNICIAN: {
+    label: "صادر فني",
+    icon: ArrowUpFromLine,
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+  },
   RETURN: {
     label: "مرتجع",
     icon: RotateCcw,
     className:
       "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
   },
-} as const;
+  RETURN_TECHNICIAN: {
+    label: "مرتجع فني",
+    icon: RotateCcw,
+    className:
+      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
+  },
+  TRANSFER_WAREHOUSE: {
+    label: "تحويل مخزن",
+    icon: ArrowDownToLine,
+    className:
+      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300",
+  },
+  ADJUSTMENT: {
+    label: "تسوية رصيد",
+    icon: RotateCcw,
+    className:
+      "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300",
+  },
+};
+
+const DEFAULT_MOVEMENT_CONFIG = {
+  label: "حركة مخزون",
+  icon: ArrowDownToLine,
+  className:
+    "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300",
+};
 
 function formatDateTime(value: string): string {
   if (!value) return "—";
@@ -73,7 +117,7 @@ export function WarehouseMovementsTable({
         key: "type",
         header: "نوع الحركة",
         render: (row) => {
-          const config = MOVEMENT_CONFIG[row.type];
+          const config = MOVEMENT_CONFIG[row.type] ?? DEFAULT_MOVEMENT_CONFIG;
           const Icon = config.icon;
 
           return (
