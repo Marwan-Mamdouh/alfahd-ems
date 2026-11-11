@@ -14,6 +14,7 @@ export function makeProduct(overrides: Partial<Product> = {}): Product {
     createdAt: faker.date.past(),
     updatedAt: faker.date.recent(),
     isSerialized: false,
+    isActive: overrides.isActive ?? true,
     ...overrides,
   };
 }

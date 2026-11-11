@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, ilike, or, and, count, sum, lte, type SQL } from 'drizzle-orm';
+import { eq, ilike, or, and, count, sum, lte, inArray, type SQL } from 'drizzle-orm';
 import * as schema from '../../../database/schema/index.js';
 import {
   products,
@@ -15,6 +15,8 @@ export interface QueryProductsParams {
   search?: string;
   category?: string;
   isLowStock?: boolean;
+  activeOnly?: boolean;
+  isActive?: boolean;
   limit: number;
   offset: number;
 }
@@ -33,6 +35,10 @@ export class ProductsRepository extends BaseRepository<
 > {
   constructor(@Inject(DRIZZLE) protected override readonly db: NodePgDatabase<typeof schema>) {
     super(db, products);
+  }
+
+  private getClient(tx?: NodePgDatabase<typeof schema>): NodePgDatabase<typeof schema> {
+    return tx ?? this.db;
   }
 
   async findByIdForUpdate(
@@ -108,7 +114,14 @@ export class ProductsRepository extends BaseRepository<
       whereConditions.push(eq(schema.products.category, params.category));
     }
 
+    if (params.activeOnly || params.isActive === true) {
+      whereConditions.push(eq(schema.products.isActive, true));
+    } else if (params.isActive === false) {
+      whereConditions.push(eq(schema.products.isActive, false));
+    }
+
     const totalStockCol = sum(schema.warehouseInventory.quantity).mapWith(Number);
+    const whereClause = whereConditions.length ? and(...whereConditions) : undefined;
 
     const query = this.db
       .select({
@@ -120,7 +133,7 @@ export class ProductsRepository extends BaseRepository<
         schema.warehouseInventory,
         eq(schema.products.id, schema.warehouseInventory.productId),
       )
-      .where(whereConditions.length ? and(...whereConditions) : undefined)
+      .where(whereClause)
       .groupBy(schema.products.id)
       .having(
         params.isLowStock ? lte(totalStockCol, schema.products.lowStockThreshold) : undefined,
@@ -134,7 +147,10 @@ export class ProductsRepository extends BaseRepository<
       isLowStock: totalStock <= product.lowStockThreshold,
     }));
 
-    const [{ total }] = await this.db.select({ total: count() }).from(schema.products);
+    const [{ total }] = await this.db
+      .select({ total: count() })
+      .from(schema.products)
+      .where(whereClause);
 
     return { items, total: Number(total) };
   }
@@ -149,13 +165,34 @@ export class ProductsRepository extends BaseRepository<
     return updated;
   }
 
-  async countProductStock(productId: string): Promise<number> {
-    const [result] = await this.db
+  async countProductStock(productId: string, tx?: NodePgDatabase<typeof schema>): Promise<number> {
+    const client = this.getClient(tx);
+    const [result] = await client
       .select({ total: sum(schema.warehouseInventory.quantity).mapWith(Number) })
       .from(schema.warehouseInventory)
       .where(eq(schema.warehouseInventory.productId, productId));
 
     return result?.total ?? 0;
+  }
+
+  async countActiveRouters(productId: string, tx?: NodePgDatabase<typeof schema>): Promise<number> {
+    const client = this.getClient(tx);
+    const [{ total }] = await client
+      .select({ total: count() })
+      .from(schema.routers)
+      .where(
+        and(
+          eq(schema.routers.productId, productId),
+          inArray(schema.routers.status, [
+            'AVAILABLE',
+            'ASSIGNED_TO_TECHNICIAN',
+            'INSTALLED_AT_CUSTOMER',
+            'UNDER_REPAIR',
+          ]),
+        ),
+      );
+
+    return Number(total);
   }
 
   async hasMovementHistory(productId: string): Promise<boolean> {
@@ -168,23 +205,54 @@ export class ProductsRepository extends BaseRepository<
     return Boolean(movement);
   }
 
-  async canDeleteProduct(id: string): Promise<{ canDelete: boolean; reason?: string }> {
-    const currentStock = await this.countProductStock(id);
+  async canDeleteProduct(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<{ canDelete: boolean; reason?: string }> {
+    const currentStock = await this.countProductStock(id, tx);
     if (currentStock > 0) {
       return {
         canDelete: false,
-        reason: `Cannot delete product with active inventory (${currentStock} units in stock)`,
+        reason: `Cannot deactivate product holding active inventory (${currentStock} units in stock)`,
       };
     }
 
-    const hasHistory = await this.hasMovementHistory(id);
-    if (hasHistory) {
+    const activeRouters = await this.countActiveRouters(id, tx);
+    if (activeRouters > 0) {
       return {
         canDelete: false,
-        reason: 'Cannot delete product with historical stock movement audit records',
+        reason: `Cannot deactivate product with active router hardware assets (${activeRouters} units active)`,
       };
     }
 
     return { canDelete: true };
+  }
+
+  async softDeactivate(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<Product | undefined> {
+    const client = this.getClient(tx);
+    const [updated] = await client
+      .update(schema.products)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(schema.products.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  async softReactivate(
+    id: string,
+    tx?: NodePgDatabase<typeof schema>,
+  ): Promise<Product | undefined> {
+    const client = this.getClient(tx);
+    const [updated] = await client
+      .update(schema.products)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(schema.products.id, id))
+      .returning();
+
+    return updated;
   }
 }
