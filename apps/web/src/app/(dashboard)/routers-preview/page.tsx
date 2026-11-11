@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
+import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
 import { RouterTable } from "@/components/routers/router-table";
 import { RouterForm } from "@/components/routers/router-form";
 import { RouterAssignmentForm } from "@/components/routers/router-assignment-form";
@@ -239,6 +240,9 @@ function RouterPreviewContent() {
 
   const [history, setHistory] = useState<RouterHistoryRow[]>(DEMO_HISTORY);
 
+  const { technicians: lookupTechnicians } = useTechniciansLookup();
+  const activeTechnicians = lookupTechnicians.length > 0 ? lookupTechnicians : DEMO_TECHNICIANS;
+
   const [pageMode, setPageMode] = useState<PageMode>("list");
 
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
@@ -447,7 +451,7 @@ function RouterPreviewContent() {
   async function handleAssignmentSubmit(values: RouterAssignmentFormValues) {
     const router = routers.find((entry) => entry.id === values.routerId);
 
-    const technician = DEMO_TECHNICIANS.find((entry) => entry.id === values.technicianId);
+    const technician = activeTechnicians.find((entry) => entry.id === values.technicianId);
 
     if (!router) {
       throw new Error("لم يتم العثور على الراوتر.");
@@ -792,7 +796,7 @@ function RouterPreviewContent() {
           <RouterAssignmentForm
             key={selectedRouterId ?? "all-routers"}
             routers={routers}
-            technicians={DEMO_TECHNICIANS}
+            technicians={activeTechnicians}
             initialRouterId={selectedRouterId ?? ""}
             onSubmit={handleAssignmentSubmit}
             onCancel={selectedRouter ? () => openDetails(selectedRouter) : backToList}

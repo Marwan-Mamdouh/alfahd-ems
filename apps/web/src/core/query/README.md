@@ -107,4 +107,53 @@ export function ExportAttendanceButton({ startDate, endDate }: { startDate: stri
 
 For full modal dialog integration with automatic progress bars, see [`components/shared/jobs/README.md`](../../components/shared/jobs/README.md).
 
+---
+
+## 6. Employee & Technician Selector Lookup Hooks (Task B1 / Issue #69)
+
+Warehouse staff are permitted to assign routers and dispatch inventory, but `GET /employees` is strictly `ADMIN`-only and returns sensitive HR PII.
+
+To populate technician dropdowns and employee selectors safely, use the minimal lookup hooks in [`use-employee-lookup.ts`](./use-employee-lookup.ts). These call `GET /employees/lookup` (accessible by both `ADMIN` and `WAREHOUSE_STAFF`), projecting **zero PII** (`id`, `name`, `role`, `status`, `isEligible`, `assignedWarehouseId`).
+
+### Hooks
+
+| Hook | Parameters | Returns | Ideal For |
+| :--- | :--- | :--- | :--- |
+| `useTechniciansLookup(warehouseId?)` | Optional `warehouseId` filter | `{ technicians, isLoading, error }` | Router assignment dropdowns, Outbound stock dispatch forms. Only returns `ACTIVE` technicians with `isEligible: true`. |
+| `useEmployeeLookup(params?)` | `{ role, warehouse_id, status, q, limit }` | `{ employees, isLoading, error }` | General employee selectors across any department or status. |
+
+### Minimal Dropdown Wiring Example (Router Assignment)
+
+```tsx
+import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
+
+export function TechnicianSelect({
+  value,
+  onChange,
+  warehouseId,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  warehouseId?: string;
+}) {
+  const { technicians, isLoading } = useTechniciansLookup(warehouseId);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={isLoading}
+      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+    >
+      <option value="">{isLoading ? "Loading technicians..." : "Select a technician"}</option>
+      {technicians.map((tech) => (
+        <option key={tech.id} value={tech.id}>
+          {tech.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
 
