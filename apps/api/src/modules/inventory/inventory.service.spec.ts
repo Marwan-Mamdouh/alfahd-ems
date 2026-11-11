@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
 import type { WarehouseInventory, StockMovement } from '../../database/schema/index.js';
@@ -87,16 +87,33 @@ describe('InventoryService', () => {
     countByProductId: vi.fn().mockResolvedValue(0),
   };
 
+  const mockTechnicianUser = {
+    id: mockTechId,
+    name: 'Ali Tech',
+    role: 'TECHNICIAN',
+    status: 'ACTIVE',
+    isActive: true,
+  };
+
+  const mockUsersRepo = {
+    findById: vi.fn(),
+    findByIdForUpdate: vi.fn(),
+  };
+
   const mockRepositoryService = {
     transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
     inventory: mockInventoryRepo,
     warehouses: mockWarehousesRepo,
     products: mockProductsRepo,
     routers: mockRoutersRepo,
+    users: mockUsersRepo,
   };
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    mockUsersRepo.findByIdForUpdate.mockResolvedValue(mockTechnicianUser);
+    mockUsersRepo.findById.mockResolvedValue(mockTechnicianUser);
 
     mockProductsRepo.findByIdForUpdate.mockImplementation((id: string) =>
       mockProductsRepo.findById(id),
@@ -231,6 +248,36 @@ describe('InventoryService', () => {
         BadRequestException,
       );
       expect(mockInventoryRepo.recordMovementInTransaction).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException if target technician does not exist', async () => {
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue(null);
+
+      await expect(service.issueOutbound(dto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException if target employee is not a TECHNICIAN', async () => {
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockTechnicianUser,
+        role: 'ADMIN',
+      });
+
+      await expect(service.issueOutbound(dto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw ConflictException if target technician is ON_LEAVE or INACTIVE', async () => {
+      mockWarehousesRepo.findById.mockResolvedValue(mockWarehouse);
+      mockProductsRepo.findById.mockResolvedValue(mockProduct);
+      mockUsersRepo.findByIdForUpdate.mockResolvedValue({
+        ...mockTechnicianUser,
+        status: 'ON_LEAVE',
+      });
+
+      await expect(service.issueOutbound(dto)).rejects.toThrow(ConflictException);
     });
   });
 

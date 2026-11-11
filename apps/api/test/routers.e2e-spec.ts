@@ -331,6 +331,20 @@ describe('Routers (e2e)', () => {
         };
       },
     },
+    users: {
+      findById: async (id: string) => {
+        if (id === TECH_USER_ID) {
+          return { id, name: 'Tech User', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
+        }
+        return undefined;
+      },
+      findByIdForUpdate: async (id: string) => {
+        if (id === TECH_USER_ID) {
+          return { id, name: 'Tech User', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
+        }
+        return undefined;
+      },
+    },
   };
 
   beforeAll(async () => {

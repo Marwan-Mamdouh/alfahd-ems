@@ -19,6 +19,7 @@ import { WarehousesRepository } from '../src/modules/repository/repositories/war
 import { InventoryRepository } from '../src/modules/repository/repositories/inventory.repository.js';
 import { RoutersRepository } from '../src/modules/repository/repositories/routers.repository.js';
 import { IpRepository } from '../src/modules/repository/repositories/ip.repository.js';
+import { UsersRepository } from '../src/modules/repository/repositories/users.repository.js';
 import { IpService } from '../src/modules/ip-management/ip.service.js';
 import { IpImportWorker } from '../src/modules/ip-management/ip-import.worker.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
@@ -42,6 +43,7 @@ describe.skipIf(!dbUrl || !redisUrl)('IP import (PostgreSQL and Redis)', () => {
     new InventoryRepository(db),
     new RoutersRepository(db),
     new IpRepository(db),
+    new UsersRepository(db),
   );
   const redis = new URL(redisUrl ?? 'redis://127.0.0.1:56379');
   const connection = { host: redis.hostname, port: Number(redis.port) };

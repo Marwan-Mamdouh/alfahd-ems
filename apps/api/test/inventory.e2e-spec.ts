@@ -66,6 +66,20 @@ describe('Inventory (e2e)', () => {
     routers: {
       countByProductId: async (productId: string) => (productId === PRODUCT_ROUTER_ID ? 1 : 0),
     },
+    users: {
+      findById: async (id: string) => {
+        if (id === TECHNICIAN_ID) {
+          return { id, name: 'Tech 1', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
+        }
+        return undefined;
+      },
+      findByIdForUpdate: async (id: string) => {
+        if (id === TECHNICIAN_ID) {
+          return { id, name: 'Tech 1', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
+        }
+        return undefined;
+      },
+    },
     inventory: {
       getStock: async (warehouseId: string, productId: string) => {
         return stockStore.find((s) => s.warehouseId === warehouseId && s.productId === productId);
