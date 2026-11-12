@@ -360,3 +360,15 @@ In alignment with Review Remediation B3, all fictitious demo data arrays (`DEMO_
    - Stock balances: *"لا توجد بيانات مخزون — لم يتم تسجيل أي كميات للأصناف داخل المخازن حتى الآن."*
    - Movements log: *"لا توجد حركات مخزون — لم يتم تسجيل أي عمليات وارد أو صادر أو تحويلات بعد."*
 3. **Technician Movement Guardrails**: In `InventoryMovementForm`, when dispatching outbound stock or receiving returns, if no active technicians exist in the system, the selector is disabled, presents a disabled guidance placeholder (`لا يوجد فنيين نشطين متاحين`), and displays an amber warning banner preventing unassigned stock dispatch.
+
+---
+
+## 14. Truthful Router Empty States & Demo Fallback Elimination (Task B4 / Issue #78)
+
+In alignment with Review Remediation B4, all mock router seeds (`DEMO_ROUTERS`) and warehouse fallbacks (`DEMO_WAREHOUSES`) have been permanently purged from [`routers-preview/page.tsx`](../../app/(dashboard)/routers-preview/page.tsx).
+
+### Architectural Invariants:
+1. **Direct Query Mapping**: Live router queries (`useRouters()`) and active warehouses map directly to table rows and selectors without artificial mock seeds.
+2. **Authentic Empty States**: When no router hardware is registered in the database, `RouterTable` renders an authentic empty state:
+   - *"لا توجد أجهزة راوتر — لم يتم تسجيل أي أجهزة راوتر مطابقة لمعايير البحث الحالية."*
+3. **Assignment Guardrails**: In `RouterAssignmentForm`, when assigning router custody to a field technician, if no active technicians exist in the system, the selector is disabled, presents `<option value="" disabled>لا يوجد فنيين نشطين مسجلين</option>`, and displays an amber warning notice blocking assignment submission.
