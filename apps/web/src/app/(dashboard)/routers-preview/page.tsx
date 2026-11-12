@@ -49,114 +49,6 @@ import type {
   RouterConditionFormValues,
 } from "@/components/routers/types";
 
-// =======================================================
-// Fallback demonstration seeds when backend is empty
-// =======================================================
-
-const DEMO_WAREHOUSES = [
-  {
-    id: "warehouse-1",
-    name: "المخزن الرئيسي",
-  },
-  {
-    id: "warehouse-2",
-    name: "مخزن الجيزة",
-  },
-  {
-    id: "warehouse-3",
-    name: "مخزن الإسكندرية",
-  },
-];
-
-const DEMO_ROUTERS: RouterRow[] = [
-  {
-    id: "router-1",
-    serialNumber: "TPL-2026-00001",
-    productId: "prod-1",
-    productName: "TP-Link Archer C6",
-    productSku: "RTR-TPL-C6",
-    productModel: "Archer C6",
-    status: "AVAILABLE",
-    physicalCondition: "SERVICEABLE",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    externalLocation: null,
-    currentHolderType: "WAREHOUSE",
-    currentHolderId: "warehouse-1",
-    notes: "جهاز في المخزن الرئيسي",
-    createdAt: "2026-10-12T09:00:00+03:00",
-  },
-  {
-    id: "router-2",
-    serialNumber: "HW-2026-00002",
-    productId: "prod-2",
-    productName: "Huawei HG8245H",
-    productSku: "RTR-HW-8245",
-    productModel: "HG8245H",
-    status: "ASSIGNED_TO_TECHNICIAN",
-    physicalCondition: "SERVICEABLE",
-    warehouseId: null,
-    warehouseName: null,
-    externalLocation: null,
-    currentHolderType: "TECHNICIAN",
-    currentHolderId: "technician-1",
-    currentHolderName: "محمود أحمد",
-    notes: "بعهدة الفني محمود أحمد",
-    createdAt: "2026-10-13T10:00:00+03:00",
-  },
-  {
-    id: "router-3",
-    serialNumber: "TPL-2026-00003",
-    productId: "prod-1",
-    productName: "TP-Link Archer C80",
-    productSku: "RTR-TPL-C80",
-    productModel: "Archer C80",
-    status: "INSTALLED_AT_CUSTOMER",
-    physicalCondition: "SERVICEABLE",
-    warehouseId: null,
-    warehouseName: null,
-    externalLocation: null,
-    currentHolderType: "CUSTOMER",
-    currentHolderId: null,
-    notes: "مركب لدى عميل",
-    createdAt: "2026-10-14T11:00:00+03:00",
-  },
-  {
-    id: "router-4",
-    serialNumber: "ZX-2026-00004",
-    productId: "prod-3",
-    productName: "ZTE F680",
-    productSku: "RTR-ZX-F680",
-    productModel: "F680",
-    status: "RETURNED",
-    physicalCondition: "SERVICEABLE",
-    warehouseId: "warehouse-3",
-    warehouseName: "مخزن الإسكندرية",
-    externalLocation: null,
-    currentHolderType: "WAREHOUSE",
-    currentHolderId: "warehouse-3",
-    notes: "مرتجع من فني بانتظار الفحص",
-    createdAt: "2026-10-15T12:00:00+03:00",
-  },
-  {
-    id: "router-5",
-    serialNumber: "HW-2026-00005",
-    productId: "prod-2",
-    productName: "Huawei EG8145V5",
-    productSku: "RTR-HW-8145",
-    productModel: "EG8145V5",
-    status: "DAMAGED",
-    physicalCondition: "DAMAGED",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    externalLocation: null,
-    currentHolderType: "WAREHOUSE",
-    currentHolderId: "warehouse-2",
-    notes: "جهاز به كسر بالهوائي",
-    createdAt: "2026-10-16T13:00:00+03:00",
-  },
-];
-
 const STATUS_OPTIONS: {
   value: RouterStatus;
   label: string;
@@ -213,10 +105,9 @@ function RouterPreviewContent() {
 
   const { warehouses: liveWarehouses } = useWarehouses();
   const activeWarehouses = useMemo(() => {
-    const active = liveWarehouses
+    return liveWarehouses
       .filter((w) => w.isActive)
       .map((w) => ({ id: w.id, name: w.name }));
-    return active.length > 0 ? active : DEMO_WAREHOUSES;
   }, [liveWarehouses]);
 
   const { technicians: lookupTechnicians } = useTechniciansLookup();
@@ -233,30 +124,27 @@ function RouterPreviewContent() {
 
   // Normalized router list
   const routers = useMemo<RouterRow[]>(() => {
-    if (liveRouters.length > 0) {
-      return liveRouters.map((r) => {
-        const prod = serializedProducts.find((p) => p.id === r.productId);
-        const wh = activeWarehouses.find((w) => w.id === r.warehouseId);
-        return {
-          id: r.id,
-          serialNumber: r.serialNumber,
-          productId: r.productId,
-          productName: r.product?.name ?? prod?.name ?? "راوتر",
-          productSku: r.product?.sku ?? prod?.sku,
-          productModel: r.product?.model ?? prod?.model,
-          status: r.status,
-          physicalCondition: r.physicalCondition,
-          warehouseId: r.warehouseId,
-          warehouseName: r.warehouse?.name ?? wh?.name ?? (r.warehouseId ? "المخزن" : null),
-          externalLocation: r.externalLocation,
-          currentHolderType: r.currentHolderType,
-          currentHolderId: r.currentHolderId,
-          notes: r.notes,
-          createdAt: r.createdAt,
-        };
-      });
-    }
-    return DEMO_ROUTERS;
+    return liveRouters.map((r) => {
+      const prod = serializedProducts.find((p) => p.id === r.productId);
+      const wh = activeWarehouses.find((w) => w.id === r.warehouseId);
+      return {
+        id: r.id,
+        serialNumber: r.serialNumber,
+        productId: r.productId,
+        productName: r.product?.name ?? prod?.name ?? "راوتر",
+        productSku: r.product?.sku ?? prod?.sku,
+        productModel: r.product?.model ?? prod?.model,
+        status: r.status,
+        physicalCondition: r.physicalCondition,
+        warehouseId: r.warehouseId,
+        warehouseName: r.warehouse?.name ?? wh?.name ?? (r.warehouseId ? "المخزن" : null),
+        externalLocation: r.externalLocation,
+        currentHolderType: r.currentHolderType,
+        currentHolderId: r.currentHolderId,
+        notes: r.notes,
+        createdAt: r.createdAt,
+      };
+    });
   }, [liveRouters, serializedProducts, activeWarehouses]);
 
   const [pageMode, setPageMode] = useState<PageMode>("list");
