@@ -329,3 +329,20 @@ The real data layer for Products enforces global No-Hard-Delete Compliance (`PLA
 
 
 
+
+---
+
+## 12. Centralized Error Extraction & Re-Export Architecture (Task B2 / Issue #76)
+
+To prevent drift and eliminate duplicate utility functions across query hook modules, error unwrapping is consolidated into a single authoritative module:
+
+- **Authoritative Implementation**: [`@/core/api/errors.ts`](../api/errors.ts) provides `extractErrorMessage(err: unknown, defaultMessage: string): string`.
+  - Unwraps `AxiosError` payloads from NestJS exception filters (`err.response?.data?.message`).
+  - Joins validation pipe message arrays (`string[]`) cleanly with standard comma separation (`", "`).
+  - Extracts standard JavaScript `Error` message (`err.message`).
+  - Safely falls back to caller-supplied `defaultMessage` for non-error primitives or unexpected shapes.
+- **Query Hook Re-Exports**: Re-exported directly from [`use-warehouses.ts`](./use-warehouses.ts), [`use-inventory.ts`](./use-inventory.ts), [`use-routers.ts`](./use-routers.ts), and [`use-ip-addresses.ts`](./use-ip-addresses.ts):
+  ```typescript
+  export { extractErrorMessage } from "@/core/api/errors";
+  ```
+  This guarantees 100% backward compatibility with all preview pages and forms without maintaining multiple copy-pasted versions.
