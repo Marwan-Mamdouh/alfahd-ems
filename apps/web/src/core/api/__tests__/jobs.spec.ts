@@ -8,6 +8,7 @@ import {
   enqueueRouterExport,
   uploadIpCsvFile,
   downloadReportFile,
+  parseContentDispositionFilename,
 } from "../jobs";
 import type { JobStatusResponseDto } from "../types";
 
@@ -231,6 +232,124 @@ describe("Jobs API Client Functions", () => {
       // Verifies axios.get was called directly rather than through the authenticated api instance
       expect(axiosGetSpy).toHaveBeenCalledWith(externalUrl, { responseType: "blob" });
       expect(mockAnchor.download).toBe("external-report.xlsx");
+    });
+    it("uses filename from Content-Disposition header when present on server response", async () => {
+      const mockBlob = new Blob(["excel-content"], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+        return {
+          data: mockBlob,
+          status: 200,
+          statusText: "OK",
+          headers: {
+            "content-disposition": 'attachment; filename="server-attendance-2026.xlsx"',
+          },
+          config,
+        };
+      };
+
+      const clickMock = vi.fn();
+      const mockAnchor = { href: "", download: "", click: clickMock };
+
+      vi.stubGlobal("window", {
+        URL: {
+          createObjectURL: vi.fn().mockReturnValue("blob:mock-uuid"),
+          revokeObjectURL: vi.fn(),
+        },
+      });
+
+      vi.stubGlobal("document", {
+        createElement: vi.fn().mockReturnValue(mockAnchor),
+        body: {
+          appendChild: vi.fn(),
+          removeChild: vi.fn(),
+        },
+      });
+
+      // Caller provides fallback "default-fallback.xlsx", but server sent "server-attendance-2026.xlsx"
+      await downloadReportFile("job-report-1", "default-fallback.xlsx");
+
+      expect(mockAnchor.download).toBe("server-attendance-2026.xlsx");
+      expect(clickMock).toHaveBeenCalled();
+    });
+
+    it("parses RFC 5987 UTF-8 encoded filename* from Content-Disposition over fallback", async () => {
+      const mockBlob = new Blob(["excel-content"]);
+
+      api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+        return {
+          data: mockBlob,
+          status: 200,
+          statusText: "OK",
+          headers: {
+            "content-disposition":
+              "attachment; filename=\"fallback.xlsx\"; filename*=UTF-8''%D8%AA%D9%82%D8%B1%D9%8A%D8%B1%2D%D8%A7%D9%84%D8%AD%D8%B6%D9%88%D8%B1.xlsx",
+          },
+          config,
+        };
+      };
+
+      const clickMock = vi.fn();
+      const mockAnchor = { href: "", download: "", click: clickMock };
+
+      vi.stubGlobal("window", {
+        URL: {
+          createObjectURL: vi.fn().mockReturnValue("blob:mock-uuid"),
+          revokeObjectURL: vi.fn(),
+        },
+      });
+
+      vi.stubGlobal("document", {
+        createElement: vi.fn().mockReturnValue(mockAnchor),
+        body: {
+          appendChild: vi.fn(),
+          removeChild: vi.fn(),
+        },
+      });
+
+      await downloadReportFile("job-report-1", "default.xlsx");
+
+      expect(mockAnchor.download).toBe("تقرير-الحضور.xlsx");
+    });
+  });
+
+  describe("parseContentDispositionFilename unit tests", () => {
+    it("returns fallback when header is missing or empty", () => {
+      expect(parseContentDispositionFilename(undefined)).toBe("report.xlsx");
+      expect(parseContentDispositionFilename(null)).toBe("report.xlsx");
+      expect(parseContentDispositionFilename("")).toBe("report.xlsx");
+      expect(parseContentDispositionFilename("", "custom.xlsx")).toBe("custom.xlsx");
+    });
+
+    it("parses quoted standard filename", () => {
+      const header = 'attachment; filename="monthly-report-october.xlsx"';
+      expect(parseContentDispositionFilename(header)).toBe("monthly-report-october.xlsx");
+    });
+
+    it("parses unquoted filename", () => {
+      const header = "attachment; filename=export-data.xlsx";
+      expect(parseContentDispositionFilename(header)).toBe("export-data.xlsx");
+    });
+
+    it("parses RFC 5987 encoded filename*", () => {
+      const header = "attachment; filename*=UTF-8''attendance%20summary.xlsx";
+      expect(parseContentDispositionFilename(header)).toBe("attendance summary.xlsx");
+    });
+
+    it("prioritizes RFC 5987 filename* over standard filename attribute", () => {
+      const header =
+        'attachment; filename="ascii-fallback.xlsx"; filename*=UTF-8\'\'arabic-%D8%AA%D9%82%D8%B1%D9%8A%D8%B1.xlsx';
+      expect(parseContentDispositionFilename(header)).toBe("arabic-تقرير.xlsx");
+    });
+
+    it("sanitizes directory traversal patterns from filename", () => {
+      const header = 'attachment; filename="../../etc/shadow.xlsx"';
+      expect(parseContentDispositionFilename(header)).toBe("shadow.xlsx");
+
+      const winHeader = 'attachment; filename="C:\\Windows\\System32\\calc.xlsx"';
+      expect(parseContentDispositionFilename(winHeader)).toBe("calc.xlsx");
     });
   });
 });
