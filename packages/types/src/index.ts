@@ -672,8 +672,6 @@ export interface TransferStockDto {
   quantity: number;
   notes?: string;
   responsibleUserId?: string;
-  sourceWarehouseId?: string;
-  targetWarehouseId?: string;
 }
 
 export interface AdjustStockDto {
@@ -681,7 +679,6 @@ export interface AdjustStockDto {
   warehouseId: string;
   newQuantity: number;
   notes: string;
-  quantity?: number;
   responsibleUserId?: string;
 }
 

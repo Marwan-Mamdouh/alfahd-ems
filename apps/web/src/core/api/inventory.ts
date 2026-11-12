@@ -116,8 +116,8 @@ export async function transferStock(
 }> {
   const payload: TransferStockDto = {
     productId: dto.productId,
-    fromWarehouseId: dto.fromWarehouseId ?? dto.sourceWarehouseId!,
-    toWarehouseId: dto.toWarehouseId ?? dto.targetWarehouseId!,
+    fromWarehouseId: dto.fromWarehouseId,
+    toWarehouseId: dto.toWarehouseId,
     quantity: dto.quantity,
     notes: dto.notes,
   };

@@ -40,14 +40,9 @@ export const ENDPOINTS = {
   },
 
   attendance: {
-    list: "/attendance",
-    records: "/attendance",
-    today: "/attendance/today",
-    byEmployee: (id: string) => `/attendance/employee/${id}`,
-    summary: "/attendance/summary",
     checkIn: "/attendance/check-in",
     checkOut: "/attendance/check-out",
-    override: (id: string) => `/attendance/${id}/override`,
+    override: (id: string) => `/attendance/${id}`,
     record: (id: string) => `/attendance/${id}`,
     byId: (id: string) => `/attendance/${id}`,
     detail: (id: string) => `/attendance/${id}`,
