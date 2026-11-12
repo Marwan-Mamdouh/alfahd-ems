@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/core/query/query-keys";
 import {
@@ -27,20 +26,9 @@ export interface UseRoutersOptions {
 }
 
 /**
- * Extracts a user-facing error message from an API error (specifically for 409 Conflict and 400 validation blockers).
+ * User-facing error message extractor re-exported from @/core/api/errors.
  */
-export function extractErrorMessage(err: unknown, defaultMessage: string): string {
-  if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { message?: string | string[] } | undefined;
-    if (data?.message) {
-      return Array.isArray(data.message) ? data.message.join(", ") : data.message;
-    }
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return defaultMessage;
-}
+export { extractErrorMessage } from "@/core/api/errors";
 
 /**
  * Hook to fetch paginated routers with optional filtering.
