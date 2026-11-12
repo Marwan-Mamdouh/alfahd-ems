@@ -154,7 +154,7 @@ export function useWarehouseStaff(
     userRole === Role.ADMIN || userRole === Role.WAREHOUSE_STAFF;
 
   const result = useEmployeeLookup(
-    warehouseId ? { warehouse_id: warehouseId } : undefined,
+    warehouseId ? { warehouseId } : undefined,
     { enabled: (options?.enabled ?? true) && isAuthorized && Boolean(warehouseId) }
   );
 

@@ -20,6 +20,7 @@ import { FakeStorageService } from '../src/storage/fake-storage.service.js';
 import { AttendanceReportWorker } from '../src/attendance/attendance.worker.js';
 import type { Db } from '../src/database/database.module.js';
 import { insufficientStockMessage } from '../src/modules/repository/repositories/inventory.repository.js';
+import { validateActiveTechnician } from '../src/modules/repository/repositories/users.repository.js';
 import type {
   Router,
   RouterAssignment,
@@ -27,6 +28,7 @@ import type {
   RouterStatusHistory,
   WarehouseInventory,
   NewStockMovement,
+  User,
 } from '../src/database/schema/index.js';
 
 describe('Routers (e2e)', () => {
@@ -343,6 +345,13 @@ describe('Routers (e2e)', () => {
           return { id, name: 'Tech User', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
         }
         return undefined;
+      },
+      ensureActiveTechnician: async (id: string, _tx?: unknown, action?: string) => {
+        const user =
+          id === TECH_USER_ID
+            ? { id, name: 'Tech User', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true }
+            : null;
+        return validateActiveTechnician(user as unknown as User, id, action);
       },
     },
   };

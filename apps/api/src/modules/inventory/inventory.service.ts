@@ -1,12 +1,6 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../database/schema/index.js';
-import { Role } from '@alfahd/types';
 import { RepositoryService } from '../repository/repository.service.js';
 import type {
   WarehouseInventory,
@@ -59,26 +53,6 @@ export class InventoryService {
     return product;
   }
 
-  private async ensureTechnicianValid(
-    technicianId: string,
-    tx: NodePgDatabase<typeof schema>,
-  ): Promise<void> {
-    const technician = await this.repo.users.findByIdForUpdate(technicianId, tx);
-    if (!technician) {
-      throw new NotFoundException(`Technician with ID "${technicianId}" was not found`);
-    }
-    if (technician.role !== Role.TECHNICIAN) {
-      throw new BadRequestException(
-        `Employee with ID "${technicianId}" does not have role TECHNICIAN (Role: ${technician.role})`,
-      );
-    }
-    if (technician.status !== 'ACTIVE' || !technician.isActive) {
-      throw new ConflictException(
-        `Cannot issue or return stock for technician "${technician.name}" because status is ${technician.status}`,
-      );
-    }
-  }
-
   private assertNonSerializedProduct(product: Product): void {
     if (product.isSerialized) {
       throw new BadRequestException(
@@ -120,7 +94,7 @@ export class InventoryService {
       const product = await this.ensureProductExists(dto.productId, tx);
       this.assertNonSerializedProduct(product);
       await this.ensureWarehouseExists(dto.warehouseId, tx);
-      await this.ensureTechnicianValid(dto.technicianId, tx);
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'issue or return stock');
 
       const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
       const currentQty = current?.quantity ?? 0;
@@ -154,7 +128,7 @@ export class InventoryService {
       const product = await this.ensureProductExists(dto.productId, tx);
       this.assertNonSerializedProduct(product);
       await this.ensureWarehouseExists(dto.warehouseId, tx);
-      await this.ensureTechnicianValid(dto.technicianId, tx);
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'issue or return stock');
 
       const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
       const currentQty = current?.quantity ?? 0;

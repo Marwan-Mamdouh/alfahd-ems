@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
+import { validateActiveTechnician } from '../repository/repositories/users.repository.js';
 import type { WarehouseInventory, StockMovement } from '../../database/schema/index.js';
 import type {
   InboundStockDto,
@@ -98,6 +99,10 @@ describe('InventoryService', () => {
   const mockUsersRepo = {
     findById: vi.fn(),
     findByIdForUpdate: vi.fn(),
+    ensureActiveTechnician: vi.fn(async (id: string, tx?: unknown, action?: string) => {
+      const user = await mockUsersRepo.findByIdForUpdate(id, tx);
+      return validateActiveTechnician(user, id, action);
+    }),
   };
 
   const mockRepositoryService = {
