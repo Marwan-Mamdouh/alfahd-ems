@@ -346,3 +346,17 @@ To prevent drift and eliminate duplicate utility functions across query hook mod
   export { extractErrorMessage } from "@/core/api/errors";
   ```
   This guarantees 100% backward compatibility with all preview pages and forms without maintaining multiple copy-pasted versions.
+
+---
+
+## 13. Truthful Inventory Empty States & Demo Fallback Elimination (Task B3 / Issue #77)
+
+In alignment with Review Remediation B3, all fictitious demo data arrays (`DEMO_ITEMS`, `DEMO_WAREHOUSES`, `DEMO_STOCKS`, `DEMO_MOVEMENTS`) have been completely purged from [`inventory-preview/page.tsx`](../../app/(dashboard)/inventory-preview/page.tsx).
+
+### Architectural Invariants:
+1. **Direct Data Flow**: Real queries (`liveProducts`, `liveStocks`, `liveMovements`, `liveWarehouses`, `lookupTechnicians`) map directly to presentational state collections without conditional fallback to mock constants.
+2. **Authentic Empty States**: When the database returns empty results (`[]`), tables render authentic empty state messages rather than misleading mock items:
+   - Items catalog: *"لا توجد أصناف — لم يتم تسجيل أي أصناف في كتالوج المخزون حتى الآن."*
+   - Stock balances: *"لا توجد بيانات مخزون — لم يتم تسجيل أي كميات للأصناف داخل المخازن حتى الآن."*
+   - Movements log: *"لا توجد حركات مخزون — لم يتم تسجيل أي عمليات وارد أو صادر أو تحويلات بعد."*
+3. **Technician Movement Guardrails**: In `InventoryMovementForm`, when dispatching outbound stock or receiving returns, if no active technicians exist in the system, the selector is disabled, presents a disabled guidance placeholder (`لا يوجد فنيين نشطين متاحين`), and displays an amber warning banner preventing unassigned stock dispatch.

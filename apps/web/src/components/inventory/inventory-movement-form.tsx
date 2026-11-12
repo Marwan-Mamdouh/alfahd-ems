@@ -34,6 +34,7 @@ interface InventoryMovementFormProps {
   warehouses: SelectOption[];
   technicians: SelectOption[];
   userRole?: Role | null;
+  initialType?: InventoryMovementType;
   onSubmit: (values: InventoryMovementFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
@@ -97,12 +98,14 @@ export function InventoryMovementForm({
   warehouses,
   technicians,
   userRole,
+  initialType,
   onSubmit,
   onCancel,
   isSubmitting = false,
 }: InventoryMovementFormProps) {
   const [values, setValues] = useState<InventoryMovementFormValues>({
     ...EMPTY_VALUES,
+    ...(initialType ? { type: initialType } : {}),
   });
 
   const [errors, setErrors] = useState<Partial<Record<keyof InventoryMovementFormValues, string>>>(
