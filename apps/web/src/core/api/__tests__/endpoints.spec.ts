@@ -22,12 +22,21 @@ describe("ENDPOINTS Registry", () => {
     expect((ENDPOINTS.employees as Record<string, unknown>).deactivate).toBeUndefined();
   });
 
-  it("defines exact attendance endpoints", () => {
+  it("defines exact attendance endpoints matching canonical routes", () => {
     expect(ENDPOINTS.attendance.checkIn).toBe("/attendance/check-in");
-    expect(ENDPOINTS.attendance.records).toBe("/attendance");
-    expect(ENDPOINTS.attendance.today).toBe("/attendance/today");
-    expect(ENDPOINTS.attendance.report).toBe("/attendance/report");
+    expect(ENDPOINTS.attendance.checkOut).toBe("/attendance/check-out");
+    expect(ENDPOINTS.attendance.override("rec-456")).toBe("/attendance/rec-456");
     expect(ENDPOINTS.attendance.record("rec-456")).toBe("/attendance/rec-456");
+    expect(ENDPOINTS.attendance.byId("rec-456")).toBe("/attendance/rec-456");
+    expect(ENDPOINTS.attendance.detail("rec-456")).toBe("/attendance/rec-456");
+    expect(ENDPOINTS.attendance.report).toBe("/attendance/report");
+
+    // Ensure fabricated endpoints do not exist
+    expect((ENDPOINTS.attendance as Record<string, unknown>).today).toBeUndefined();
+    expect((ENDPOINTS.attendance as Record<string, unknown>).list).toBeUndefined();
+    expect((ENDPOINTS.attendance as Record<string, unknown>).records).toBeUndefined();
+    expect((ENDPOINTS.attendance as Record<string, unknown>).byEmployee).toBeUndefined();
+    expect((ENDPOINTS.attendance as Record<string, unknown>).summary).toBeUndefined();
   });
 
   it("defines exact warehouses endpoints matching canonical routes", () => {
