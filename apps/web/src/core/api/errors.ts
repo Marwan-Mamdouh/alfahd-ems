@@ -20,3 +20,21 @@ export function serverMessage(err: unknown): string | null {
   if (Array.isArray(message)) return message.join("، ");
   return null;
 }
+
+/**
+ * Extracts a user-facing error message from an API error (specifically for 409 Conflict and 400 validation blockers)
+ * or a standard Error instance. Falls back to defaultMessage when no message is available.
+ */
+export function extractErrorMessage(err: unknown, defaultMessage: string): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { message?: string | string[] } | undefined;
+    if (data?.message) {
+      return Array.isArray(data.message) ? data.message.join(", ") : data.message;
+    }
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return defaultMessage;
+}
+
