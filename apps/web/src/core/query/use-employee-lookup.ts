@@ -44,7 +44,7 @@ export function useTechniciansLookup(
   const params: EmployeeLookupQueryDto = {
     role: Role.TECHNICIAN,
     status: "ACTIVE",
-    ...(warehouseId ? { warehouse_id: warehouseId } : {}),
+    ...(warehouseId ? { warehouseId } : {}),
   };
 
   const lookup = useEmployeeLookup(params, options);

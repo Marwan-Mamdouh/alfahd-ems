@@ -78,7 +78,7 @@ describe('EmployeesController', () => {
     it('delegates lookup parameters to employeesService.lookup', async () => {
       const query = {
         role: Role.TECHNICIAN,
-        warehouse_id: 'warehouse-1',
+        warehouseId: 'warehouse-1',
         limit: 25,
       };
 

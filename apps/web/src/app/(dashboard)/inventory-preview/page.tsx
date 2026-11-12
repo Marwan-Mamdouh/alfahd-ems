@@ -110,12 +110,6 @@ const DEMO_WAREHOUSES = [
   { id: "warehouse-3", name: "مخزن الإسكندرية" },
 ];
 
-const DEMO_TECHNICIANS = [
-  { id: "technician-1", name: "محمود أحمد" },
-  { id: "technician-2", name: "علي حسن" },
-  { id: "technician-3", name: "يوسف محمد" },
-];
-
 const DEMO_STOCKS: InventoryStockRow[] = [
   {
     id: "stock-1",
@@ -237,7 +231,7 @@ function InventoryPreviewContent() {
   }, [liveWarehouses]);
 
   const { technicians: lookupTechnicians } = useTechniciansLookup();
-  const activeTechnicians = lookupTechnicians.length > 0 ? lookupTechnicians : DEMO_TECHNICIANS;
+  const activeTechnicians = lookupTechnicians;
 
   const {
     stockItems: liveStocks,

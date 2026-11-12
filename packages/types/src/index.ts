@@ -286,6 +286,8 @@ export interface EmployeeLookupDto {
 
 export interface EmployeeLookupQueryDto {
   role?: Role;
+  warehouseId?: string;
+  /** @deprecated Wire backward-compatibility alias for warehouseId */
   warehouse_id?: string;
   status?: UserStatus;
   q?: string;

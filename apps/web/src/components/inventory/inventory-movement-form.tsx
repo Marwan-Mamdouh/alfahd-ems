@@ -492,14 +492,22 @@ export function InventoryMovementForm({
               value={values.technicianId}
               onChange={(e) => updateField("technicianId", e.target.value)}
               className={fieldClass}
+              disabled={technicians.length === 0}
             >
-              <option value="">اختر الفني</option>
+              <option value="" disabled={technicians.length === 0}>
+                {technicians.length === 0 ? "لا يوجد فنيين نشطين متاحين" : "اختر الفني"}
+              </option>
               {technicians.map((technician) => (
                 <option key={technician.id} value={technician.id}>
                   {technician.name}
                 </option>
               ))}
             </select>
+            {technicians.length === 0 && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                لا يمكن إتمام العملية لعدم وجود فنيين نشطين مسجلين في النظام.
+              </p>
+            )}
             {errors.technicianId && (
               <p className="mt-1 text-xs text-red-600">{errors.technicianId}</p>
             )}

@@ -55,11 +55,11 @@ export function RouterAssignmentForm({
   // Domain rule: A router is assignable to a technician ONLY if AVAILABLE, SERVICEABLE, and in a warehouse.
   const assignableRouters = useMemo(
     () =>
-      routers.filter(
-        (router) =>
-          router.status === "AVAILABLE" &&
-          router.physicalCondition === "SERVICEABLE" &&
-          Boolean(router.warehouseId)
+      (routers ?? []).filter(
+        (r) =>
+          r.status === "AVAILABLE" &&
+          r.physicalCondition === "SERVICEABLE" &&
+          Boolean(r.warehouseId)
       ),
     [routers]
   );
@@ -210,14 +210,22 @@ export function RouterAssignmentForm({
             value={values.technicianId}
             onChange={(e) => updateField("technicianId", e.target.value)}
             className={INPUT_CLASS}
+            disabled={technicians.length === 0}
           >
-            <option value="">اختر الفني الميداني</option>
+            <option value="" disabled={technicians.length === 0}>
+              {technicians.length === 0 ? "لا يوجد فنيين نشطين مسجلين" : "اختر الفني الميداني"}
+            </option>
             {technicians.map((technician) => (
               <option key={technician.id} value={technician.id}>
                 {technician.name}
               </option>
             ))}
           </select>
+          {technicians.length === 0 && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              لا يمكن صرف الراوتر لعدم وجود فنيين نشطين مسجلين في النظام حالياً.
+            </p>
+          )}
           {errors.technicianId && (
             <p className="mt-1 text-xs text-red-600">{errors.technicianId}</p>
           )}

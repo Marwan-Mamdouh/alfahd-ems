@@ -198,8 +198,9 @@ export class UsersService {
     if (query.role) {
       conditions.push(eq(users.role, query.role));
     }
-    if (query.warehouse_id) {
-      conditions.push(eq(users.assignedWarehouseId, query.warehouse_id));
+    const targetWarehouseId = query.warehouseId ?? query.warehouse_id;
+    if (targetWarehouseId) {
+      conditions.push(eq(users.assignedWarehouseId, targetWarehouseId));
     }
     if (query.status) {
       conditions.push(eq(users.status, query.status));

@@ -121,7 +121,11 @@ To populate technician dropdowns and employee selectors safely, use the minimal 
 | Hook | Parameters | Returns | Ideal For |
 | :--- | :--- | :--- | :--- |
 | `useTechniciansLookup(warehouseId?)` | Optional `warehouseId` filter | `{ technicians, isLoading, error }` | Router assignment dropdowns, Outbound stock dispatch forms. Only returns `ACTIVE` technicians with `isEligible: true`. |
-| `useEmployeeLookup(params?)` | `{ role, warehouse_id, status, q, limit }` | `{ employees, isLoading, error }` | General employee selectors across any department or status. |
+| `useEmployeeLookup(params?)` | `{ role, warehouseId, status, q, limit }` | `{ employees, isLoading, error }` | General employee selectors across any department or status. Normalized to camelCase `warehouseId` (with wire alias support). |
+
+> [!IMPORTANT]
+> **Truthful Empty States & Elimination of Demo Fallbacks:**
+> In accordance with Issue #75 review remediations, `DEMO_TECHNICIANS` fallbacks have been completely eliminated from `routers-preview` and `inventory-preview`. When no active technicians exist or query lookup returns an empty list, the UI renders an explicit disabled state with guidance (`لا يوجد فنيين نشطين مسجلين`) rather than masking empty data with fictitious mock personnel.
 
 ### Minimal Dropdown Wiring Example (Router Assignment)
 
@@ -172,7 +176,7 @@ The real data layer for Warehouses and Products integrates with backend endpoint
 | `useCreateWarehouse()` | Creates warehouse (`CreateWarehouseDto`) | `warehouses.all`, `inventory.all` |
 | `useUpdateWarehouse()` | Updates warehouse (`UpdateWarehouseDto`) | `warehouses.all`, `warehouses.detail(id)`, `inventory.all` |
 | `useDeleteWarehouse()` | Soft-deactivates warehouse with 409 conflict detection | `warehouses.all`, `inventory.all` |
-| `useWarehouseStaff(id)` | Resolves staff via `/employees/lookup?warehouse_id=...` | Delegated to `employeesKeys.lookup` |
+| `useWarehouseStaff(id)` | Resolves staff via `/employees/lookup?warehouseId=...` | Delegated to `employeesKeys.lookup` |
 | `useWarehouseStock(id)` | Fetches warehouse inventory balances | `warehousesKeys.stock(id)` |
 | `useWarehouseMovements(id, role)` | Fetches movement history (Least-privilege scoped: only runs for `ADMIN` and `WAREHOUSE_STAFF`) | `inventoryKeys.movements` |
 

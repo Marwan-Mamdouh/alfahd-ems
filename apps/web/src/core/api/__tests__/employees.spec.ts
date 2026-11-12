@@ -46,14 +46,14 @@ describe("Employees API Client Functions", () => {
 
       const result = await fetchEmployeeLookup({
         role: Role.TECHNICIAN,
-        warehouse_id: "warehouse-1",
+        warehouseId: "warehouse-1",
         limit: 10,
       });
 
       expect(capturedUrl).toBe("/employees/lookup");
       expect(capturedParams).toEqual({
         role: Role.TECHNICIAN,
-        warehouse_id: "warehouse-1",
+        warehouseId: "warehouse-1",
         limit: 10,
       });
       expect(result).toEqual(mockLookups);

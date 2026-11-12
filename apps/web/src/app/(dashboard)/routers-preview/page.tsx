@@ -68,21 +68,6 @@ const DEMO_WAREHOUSES = [
   },
 ];
 
-const DEMO_TECHNICIANS = [
-  {
-    id: "technician-1",
-    name: "محمود أحمد",
-  },
-  {
-    id: "technician-2",
-    name: "علي حسن",
-  },
-  {
-    id: "technician-3",
-    name: "يوسف محمد",
-  },
-];
-
 const DEMO_ROUTERS: RouterRow[] = [
   {
     id: "router-1",
@@ -235,7 +220,7 @@ function RouterPreviewContent() {
   }, [liveWarehouses]);
 
   const { technicians: lookupTechnicians } = useTechniciansLookup();
-  const activeTechnicians = lookupTechnicians.length > 0 ? lookupTechnicians : DEMO_TECHNICIANS;
+  const activeTechnicians = lookupTechnicians;
 
   // Live mutations
   const createRouterMutation = useCreateRouter();

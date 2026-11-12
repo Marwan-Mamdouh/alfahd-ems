@@ -10,7 +10,6 @@ import { randomUUID } from 'node:crypto';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema/index.js';
 import {
-  Role,
   ALLOWED_ROUTER_TRANSITIONS,
   type RouterPhysicalCondition,
   type RouterDto,
@@ -258,20 +257,7 @@ export class RoutersService {
       await this.repo.warehouses.findByIdForUpdate(warehouseId, tx);
 
       // Verify target technician exists, has role TECHNICIAN, and is in ACTIVE status
-      const technician = await this.repo.users.findByIdForUpdate(dto.technicianId, tx);
-      if (!technician) {
-        throw new NotFoundException(`Technician with ID "${dto.technicianId}" was not found`);
-      }
-      if (technician.role !== Role.TECHNICIAN) {
-        throw new BadRequestException(
-          `Employee with ID "${dto.technicianId}" does not have role TECHNICIAN (Role: ${technician.role})`,
-        );
-      }
-      if (technician.status !== 'ACTIVE' || !technician.isActive) {
-        throw new ConflictException(
-          `Cannot assign router to technician "${technician.name}" because status is ${technician.status}`,
-        );
-      }
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'assign router');
 
       // 3. Release active warehouse custody
       await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);
