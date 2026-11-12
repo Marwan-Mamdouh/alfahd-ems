@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Role } from "@alfahd/types";
+import { useAuthStore } from "@/core/auth/auth.store";
 import {
   enqueueAttendanceReport,
   enqueueRouterExport,
@@ -25,6 +27,10 @@ export function useAttendanceReport(options?: {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const authUser = useAuthStore((s) => s.user);
+  const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
+  const isAdmin = userRole === Role.ADMIN;
+
   const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
     jobId,
     enabled: Boolean(jobId),
@@ -38,6 +44,14 @@ export function useAttendanceReport(options?: {
 
   const generateReport = useCallback(
     async (query?: AttendanceQueryDto) => {
+      const currentRole = useAuthStore.getState().user?.role;
+      if (currentRole !== Role.ADMIN) {
+        const msg = "Unauthorized: Only administrators can generate attendance reports";
+        setSubmitError(msg);
+        options?.onError?.(msg);
+        throw new Error(msg);
+      }
+
       try {
         setIsSubmitting(true);
         setSubmitError(null);
@@ -73,6 +87,7 @@ export function useAttendanceReport(options?: {
     jobId,
     job,
     status,
+    isAdmin,
     isGenerating: isSubmitting || isPolling,
     isCompleted,
     isFailed,
@@ -94,6 +109,10 @@ export function useRouterExport(options?: {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const authUser = useAuthStore((s) => s.user);
+  const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
+  const isAdmin = userRole === Role.ADMIN;
+
   const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
     jobId,
     enabled: Boolean(jobId),
@@ -107,6 +126,14 @@ export function useRouterExport(options?: {
 
   const exportRouters = useCallback(
     async (dto?: RouterReportQueryDto) => {
+      const currentRole = useAuthStore.getState().user?.role;
+      if (currentRole !== Role.ADMIN) {
+        const msg = "Unauthorized: Only administrators can export router inventory";
+        setSubmitError(msg);
+        options?.onError?.(msg);
+        throw new Error(msg);
+      }
+
       try {
         setIsSubmitting(true);
         setSubmitError(null);
@@ -142,6 +169,7 @@ export function useRouterExport(options?: {
     jobId,
     job,
     status,
+    isAdmin,
     isExporting: isSubmitting || isPolling,
     isCompleted,
     isFailed,
@@ -163,6 +191,10 @@ export function useIpImport(options?: {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const authUser = useAuthStore((s) => s.user);
+  const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
+  const isAdmin = userRole === Role.ADMIN;
+
   const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
     jobId,
     enabled: Boolean(jobId),
@@ -176,6 +208,14 @@ export function useIpImport(options?: {
 
   const importFile = useCallback(
     async (file: File) => {
+      const currentRole = useAuthStore.getState().user?.role;
+      if (currentRole !== Role.ADMIN) {
+        const msg = "Unauthorized: Only administrators can import IP addresses";
+        setSubmitError(msg);
+        options?.onError?.(msg);
+        throw new Error(msg);
+      }
+
       try {
         setIsSubmitting(true);
         setSubmitError(null);
@@ -203,6 +243,7 @@ export function useIpImport(options?: {
     jobId,
     job,
     status,
+    isAdmin,
     isImporting: isSubmitting || isPolling,
     isCompleted,
     isFailed,

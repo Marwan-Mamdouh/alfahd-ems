@@ -11,6 +11,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Role } from "@alfahd/types";
+import { useAuthStore } from "@/core/auth/auth.store";
 import { CsvDropzone } from "@/components/shared/csv/csv-dropzone";
 import { ImportSummary } from "@/components/shared/csv/import-summary";
 import { useJobPolling } from "@/core/query/use-job-polling";
@@ -50,6 +52,10 @@ export function JobProgressDialog({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  const authUser = useAuthStore((s) => s.user);
+  const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
+  const isAdmin = userRole === Role.ADMIN;
+
   const activeJobId = uploadedJobId ?? initialJobId;
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -73,6 +79,12 @@ export function JobProgressDialog({
 
   const handleStartUpload = async () => {
     if (!selectedFile || !uploadEndpoint) return;
+
+    const currentRole = useAuthStore.getState().user?.role;
+    if (currentRole !== Role.ADMIN) {
+      setSubmitError("Unauthorized: Only administrators can trigger imports");
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -118,11 +130,20 @@ export function JobProgressDialog({
           {/* STEP 1: File selection for import mode when no job is active */}
           {mode === "import" && !activeJobId && (
             <div className="space-y-4">
+              {!isAdmin && (
+                <div
+                  role="alert"
+                  className="flex items-center gap-2 p-3 text-sm text-destructive rounded-lg bg-destructive/10 border border-destructive/20"
+                >
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>عذراً، عمليات الاستيراد والتقارير مقتصرة على مديري النظام فقط (ADMIN).</span>
+                </div>
+              )}
               <CsvDropzone
                 onFileSelect={setSelectedFile}
                 selectedFile={selectedFile}
                 requiredHeaders={requiredCsvHeaders}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !isAdmin}
               />
               {submitError && (
                 <div
@@ -220,7 +241,7 @@ export function JobProgressDialog({
             <Button
               type="button"
               onClick={handleStartUpload}
-              disabled={!selectedFile || isSubmitting}
+              disabled={!selectedFile || isSubmitting || !isAdmin}
               className="gap-2"
               data-testid="start-import-btn"
             >
