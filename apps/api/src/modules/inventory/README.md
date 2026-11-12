@@ -26,6 +26,10 @@ Derived from **SOW Section 2.1.6, Section 4.1, Section 6** and **CRM SRS Section
   * Classification is authoritative: products are identified as serialized via category (`Routers`, `Router`), SKU prefix/naming (`RTR-`), or presence of registered router assets in the database (`countByProductId > 0`).
   * Generic quantity-only mutations on serialized SKUs throw `400 Bad Request` to prevent inventory balance divergence (e.g. zeroing stock while serialized assets remain active). Serialized inventory is managed exclusively through `RoutersModule`.
   * Ordinary non-router inventory (cables, connectors, tools) remains 100% compatible.
+* **Centralized Technician Revalidation (Issue #75 - B1):**
+  * Both `issueOutbound` and `receiveReturn` revalidate the target technician using the shared `UsersRepository.ensureActiveTechnician(technicianId, tx, 'issue or return stock')` domain validator under a row-level lock (`FOR UPDATE`).
+  * Verifies existence (throws `NotFoundException` if missing), enforces `Role.TECHNICIAN` (throws `BadRequestException` if wrong role), and strictly asserts `status === 'ACTIVE'` and `isActive === true` (throws `ConflictException` if `ON_LEAVE` or `INACTIVE`).
+  * Deduplicated across `InventoryService` and `RoutersService` via `UsersRepository` to prevent verification rule and error message drift.
 * **Database Transactions:** All balance changes and movement records are committed atomically via caller-provided or method-managed PostgreSQL transactions (`db.transaction()`).
 
 ---

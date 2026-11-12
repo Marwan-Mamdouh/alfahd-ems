@@ -6,6 +6,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { RoutersService } from './routers.service.js';
 import { RepositoryService } from '../repository/repository.service.js';
 import { insufficientStockMessage } from '../repository/repositories/inventory.repository.js';
+import { validateActiveTechnician } from '../repository/repositories/users.repository.js';
 import type * as schema from '../../database/schema/index.js';
 import type {
   Router,
@@ -109,6 +110,10 @@ describe('RoutersService', () => {
   const mockUsersRepo = {
     findById: vi.fn(),
     findByIdForUpdate: vi.fn(),
+    ensureActiveTechnician: vi.fn(async (id: string, tx?: unknown, action?: string) => {
+      const user = await mockUsersRepo.findByIdForUpdate(id, tx);
+      return validateActiveTechnician(user, id, action);
+    }),
   };
 
   const mockExternalTx = {} as unknown as NodePgDatabase<typeof schema>;

@@ -7,10 +7,12 @@ import { setupTestApp, getAuthHeader, createAuthToken } from './test-utils.js';
 import { makeInboundStockDto } from './fakers/index.js';
 import { envelopeData } from './utils/supertest.util.js';
 import { RepositoryService } from '../src/modules/repository/repository.service.js';
+import { validateActiveTechnician } from '../src/modules/repository/repositories/users.repository.js';
 import type {
   WarehouseInventory,
   StockMovement,
   NewStockMovement,
+  User,
 } from '../src/database/schema/index.js';
 
 describe('Inventory (e2e)', () => {
@@ -78,6 +80,13 @@ describe('Inventory (e2e)', () => {
           return { id, name: 'Tech 1', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true };
         }
         return undefined;
+      },
+      ensureActiveTechnician: async (id: string, _tx?: unknown, action?: string) => {
+        const user =
+          id === TECHNICIAN_ID
+            ? { id, name: 'Tech 1', role: Role.TECHNICIAN, status: 'ACTIVE', isActive: true }
+            : null;
+        return validateActiveTechnician(user as unknown as User, id, action);
       },
     },
     inventory: {
