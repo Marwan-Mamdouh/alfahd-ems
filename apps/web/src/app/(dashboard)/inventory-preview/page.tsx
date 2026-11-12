@@ -52,130 +52,6 @@ import type {
   InventoryMovementType,
 } from "@/components/inventory/types";
 
-// ============================================================
-// Fallback demonstration seeds when backend is empty
-// ============================================================
-
-const DEMO_ITEMS: InventoryItemRow[] = [
-  {
-    id: "item-1",
-    name: "راوتر TP-Link",
-    model: "Archer C6",
-    category: "راوترات",
-    description: "راوتر لاسلكي للاستخدام المنزلي.",
-    isSerialized: true,
-    isActive: true,
-  },
-  {
-    id: "item-2",
-    name: "راوتر Huawei",
-    model: "HG8245H",
-    category: "راوترات",
-    description: "راوتر فايبر.",
-    isSerialized: true,
-    isActive: true,
-  },
-  {
-    id: "item-3",
-    name: "كابل إنترنت",
-    model: "CAT6",
-    category: "كابلات",
-    description: "كابل شبكات للاستخدام الداخلي.",
-    isSerialized: false,
-    isActive: true,
-  },
-  {
-    id: "item-4",
-    name: "كابل فايبر",
-    model: "Single Mode",
-    category: "كابلات",
-    description: "كابل فايبر ضوئي.",
-    isSerialized: false,
-    isActive: true,
-  },
-  {
-    id: "item-5",
-    name: "موصل RJ45",
-    model: "CAT6 RJ45",
-    category: "إكسسوارات",
-    description: "موصل لكابلات الإنترنت.",
-    isSerialized: false,
-    isActive: true,
-  },
-];
-
-const DEMO_WAREHOUSES = [
-  { id: "warehouse-1", name: "المخزن الرئيسي" },
-  { id: "warehouse-2", name: "مخزن الجيزة" },
-  { id: "warehouse-3", name: "مخزن الإسكندرية" },
-];
-
-const DEMO_STOCKS: InventoryStockRow[] = [
-  {
-    id: "stock-1",
-    itemId: "item-3",
-    itemName: "كابل إنترنت",
-    model: "CAT6",
-    category: "كابلات",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    quantity: 45,
-    lowStockThreshold: 10,
-    isSerialized: false,
-  },
-  {
-    id: "stock-2",
-    itemId: "item-4",
-    itemName: "كابل فايبر",
-    model: "Single Mode",
-    category: "كابلات",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    quantity: 8,
-    lowStockThreshold: 15,
-    isSerialized: false,
-  },
-  {
-    id: "stock-3",
-    itemId: "item-5",
-    itemName: "موصل RJ45",
-    model: "CAT6 RJ45",
-    category: "إكسسوارات",
-    warehouseId: "warehouse-3",
-    warehouseName: "مخزن الإسكندرية",
-    quantity: 100,
-    lowStockThreshold: 20,
-    isSerialized: false,
-  },
-];
-
-const DEMO_MOVEMENTS: InventoryMovementRow[] = [
-  {
-    id: "movement-1",
-    itemId: "item-3",
-    itemName: "كابل إنترنت",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    type: "INBOUND_SUPPLIER",
-    quantity: 50,
-    performedBy: "مدير النظام",
-    createdAt: "2026-10-15T09:00:00+03:00",
-    notes: "استلام شحنة من المورد السويدي",
-  },
-  {
-    id: "movement-2",
-    itemId: "item-3",
-    itemName: "كابل إنترنت",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    type: "OUTBOUND_TECHNICIAN",
-    quantity: 5,
-    performedBy: "أمين المخزن",
-    createdAt: "2026-10-16T11:30:00+03:00",
-    notes: "صرف للفني محمود أحمد لأعمال التركيبات",
-  },
-];
-
 type InventoryTab = "items" | "stocks" | "movements";
 type PageMode = "overview" | "create-item" | "edit-item" | "movement";
 
@@ -215,7 +91,12 @@ function InventoryPreviewContent() {
   const userRole = user?.role ?? null;
 
   // Live queries
-  const { products: liveProducts } = useProducts();
+  const {
+    products: liveProducts,
+    isLoading: isProductsLoading,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useProducts();
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
@@ -224,10 +105,9 @@ function InventoryPreviewContent() {
 
   const { warehouses: liveWarehouses } = useWarehouses();
   const activeWarehouses = useMemo(() => {
-    const active = liveWarehouses
+    return liveWarehouses
       .filter((w) => w.isActive)
       .map((w) => ({ id: w.id, name: w.name }));
-    return active.length > 0 ? active : DEMO_WAREHOUSES;
   }, [liveWarehouses]);
 
   const { technicians: lookupTechnicians } = useTechniciansLookup();
@@ -264,63 +144,54 @@ function InventoryPreviewContent() {
 
   // Normalized items catalog
   const items = useMemo(() => {
-    if (liveProducts.length > 0) {
-      return liveProducts.map((p) => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        model: p.model,
-        category: p.category,
-        description: p.description,
-        lowStockThreshold: p.lowStockThreshold,
-        isSerialized: p.isSerialized,
-        isActive: p.isActive,
-      }));
-    }
-    return DEMO_ITEMS;
+    return liveProducts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      model: p.model,
+      category: p.category,
+      description: p.description,
+      lowStockThreshold: p.lowStockThreshold,
+      isSerialized: p.isSerialized,
+      isActive: p.isActive,
+    }));
   }, [liveProducts]);
 
   // Normalized stock balances
   const stocks = useMemo<InventoryStockRow[]>(() => {
-    if (liveStocks.length > 0) {
-      return liveStocks.map((s) => ({
-        id: s.id,
-        itemId: s.productId,
-        itemName: s.product?.name ?? "صنف غير معروف",
-        model: s.product?.model ?? "—",
-        category: s.product?.category ?? "—",
-        sku: s.product?.sku,
-        warehouseId: s.warehouseId,
-        warehouseName: s.warehouse?.name ?? "مخزن غير معروف",
-        quantity: s.quantity,
-        lowStockThreshold: s.product?.lowStockThreshold ?? 10,
-        isSerialized: s.product?.isSerialized,
-      }));
-    }
-    return DEMO_STOCKS;
+    return liveStocks.map((s) => ({
+      id: s.id,
+      itemId: s.productId,
+      itemName: s.product?.name ?? "صنف غير معروف",
+      model: s.product?.model ?? "—",
+      category: s.product?.category ?? "—",
+      sku: s.product?.sku,
+      warehouseId: s.warehouseId,
+      warehouseName: s.warehouse?.name ?? "مخزن غير معروف",
+      quantity: s.quantity,
+      lowStockThreshold: s.product?.lowStockThreshold ?? 10,
+      isSerialized: s.product?.isSerialized,
+    }));
   }, [liveStocks]);
 
   // Normalized movements log
   const movements = useMemo<InventoryMovementRow[]>(() => {
-    if (liveMovements.length > 0) {
-      return liveMovements.map((m) => {
-        const prod = items.find((p) => p.id === m.productId);
-        const wh = liveWarehouses.find((w) => w.id === m.warehouseId);
-        return {
-          id: m.id,
-          itemId: m.productId,
-          itemName: prod?.name ?? "صنف غير معروف",
-          warehouseId: m.warehouseId,
-          warehouseName: wh?.name ?? "مخزن",
-          type: m.movementType as InventoryMovementType,
-          quantity: m.quantity,
-          performedBy: m.responsibleUserId ? `مستخدم (${m.responsibleUserId.slice(0, 8)})` : "النظام",
-          createdAt: m.createdAt,
-          notes: m.notes ?? null,
-        };
-      });
-    }
-    return DEMO_MOVEMENTS;
+    return liveMovements.map((m) => {
+      const prod = items.find((p) => p.id === m.productId);
+      const wh = liveWarehouses.find((w) => w.id === m.warehouseId);
+      return {
+        id: m.id,
+        itemId: m.productId,
+        itemName: prod?.name ?? "صنف غير معروف",
+        warehouseId: m.warehouseId,
+        warehouseName: wh?.name ?? "مخزن",
+        type: m.movementType as InventoryMovementType,
+        quantity: m.quantity,
+        performedBy: m.responsibleUserId ? `مستخدم (${m.responsibleUserId.slice(0, 8)})` : "النظام",
+        createdAt: m.createdAt,
+        notes: m.notes ?? null,
+      };
+    });
   }, [liveMovements, items, liveWarehouses]);
 
   const [activeTab, setActiveTab] = useState<InventoryTab>("items");
@@ -791,6 +662,9 @@ function InventoryPreviewContent() {
           {activeTab === "items" && (
             <InventoryItemsTable
               items={filteredItems}
+              isLoading={isProductsLoading}
+              error={productsError ? new Error(productsError) : null}
+              onRetry={refetchProducts}
               onItemClick={openEditItem}
               onDeactivate={(item) => setDeactivatingItem(item)}
               canDeactivate={userRole === "ADMIN"}
