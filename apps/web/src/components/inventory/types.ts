@@ -2,6 +2,8 @@
  * Inventory Management — Frontend display models.
  */
 
+import type { StockMovementType } from "@alfahd/types";
+
 export interface InventoryItemRow {
   id: string;
   name: string;
@@ -28,15 +30,8 @@ export interface InventoryStockRow {
   isSerialized?: boolean;
 }
 
-export type InventoryMovementType =
-  | "INBOUND"
-  | "OUTBOUND"
-  | "RETURN"
-  | "INBOUND_SUPPLIER"
-  | "OUTBOUND_TECHNICIAN"
-  | "RETURN_TECHNICIAN"
-  | "TRANSFER_WAREHOUSE"
-  | "ADJUSTMENT";
+export type LegacyMovementAlias = "INBOUND" | "OUTBOUND" | "RETURN";
+export type InventoryMovementType = StockMovementType | LegacyMovementAlias;
 
 export interface InventoryMovementRow {
   id: string;

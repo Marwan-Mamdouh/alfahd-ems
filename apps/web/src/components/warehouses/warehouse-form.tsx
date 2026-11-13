@@ -2,13 +2,15 @@
 
 import { useState, type FormEvent } from "react";
 import { Loader2, MapPin, Save, X } from "lucide-react";
-import { useEmployeeLookup } from "@/core/query/use-employee-lookup";
+import type { EmployeeLookupDto } from "@/core/api/types";
 import { Role } from "@alfahd/types";
 
 import type { WarehouseFormValues, WarehouseRow } from "./types";
 
 interface WarehouseFormProps {
   warehouse?: WarehouseRow | null;
+  managers?: EmployeeLookupDto[];
+  isLoadingManagers?: boolean;
   onSubmit: (values: WarehouseFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
@@ -47,6 +49,8 @@ const labelClass = "mb-2 block text-sm font-medium text-foreground";
 
 export function WarehouseForm({
   warehouse,
+  managers = [],
+  isLoadingManagers = false,
   onSubmit,
   onCancel,
   isSubmitting = false,
@@ -57,9 +61,6 @@ export function WarehouseForm({
   const [errors, setErrors] = useState<Partial<Record<keyof WarehouseFormValues, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [localSubmitting, setLocalSubmitting] = useState(false);
-
-  // Load managers for selector (ADMIN and WAREHOUSE_STAFF)
-  const { employees: managers, isLoading: isLoadingManagers } = useEmployeeLookup();
 
   const loading = isSubmitting || localSubmitting;
 
