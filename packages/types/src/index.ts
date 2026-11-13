@@ -310,6 +310,36 @@ export interface AttendanceQueryDto {
   employee_id?: string;
 }
 
+export interface AttendanceListQueryDto extends AttendanceQueryDto {
+  status?: AttendanceStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AttendanceListItemDto {
+  id: string;
+  userId: string;
+  employeeName: string;
+  department: Department | null;
+  workDate: string;
+  checkInAt: string;
+  checkOutAt: string | null;
+  checkInDistanceM: number;
+  hoursWorked: number | null;
+  status: AttendanceStatus;
+  overrideReason: string | null;
+  overriddenBy: string | null;
+  overriddenAt: string | null;
+}
+
+export interface AttendanceListResponseDto {
+  items: AttendanceListItemDto[];
+  page: number;
+  pageSize: number;
+  filteredTotal: number;
+  totals: { total: number; onTime: number; late: number };
+}
+
 export interface JobStatusResponseDto {
   id: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
@@ -471,4 +501,3 @@ export interface IpImportResultDto {
 export interface RouterReportQueryDto {
   warehouseId?: string;
 }
-

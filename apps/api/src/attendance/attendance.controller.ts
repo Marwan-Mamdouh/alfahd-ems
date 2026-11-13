@@ -22,11 +22,43 @@ import { AttendanceService } from './attendance.service.js';
 import { CheckInDto } from './dto/check-in.dto.js';
 import { OverrideAttendanceRequestDto } from './dto/override-attendance.dto.js';
 import { AttendanceQueryRequestDto } from './dto/attendance-query.dto.js';
+import {
+  ApiBearerAuth,
+  ApiExtraModels,
+  ApiOkResponse,
+  ApiOperation,
+  ApiResponse,
+  getSchemaPath,
+} from '@nestjs/swagger';
+import { AttendanceListRequestDto, AttendanceListResponseDto } from './dto/attendance-list.dto.js';
 
 @Controller('attendance')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
+
+  @Get()
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'List attendance records and contextual totals',
+    description:
+      'Employee history uses employee_id without a department filter. Empty results return an empty items array; totals ignore status and pagination.',
+  })
+  @ApiExtraModels(AttendanceListResponseDto)
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: { data: { $ref: getSchemaPath(AttendanceListResponseDto) } },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid filters or date range' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'ADMIN role required' })
+  @ApiResponse({ status: 404, description: 'Employee does not exist' })
+  list(@Query() query: AttendanceListRequestDto): Promise<AttendanceListResponseDto> {
+    return this.attendanceService.list(query);
+  }
 
   @Post('check-in')
   @Roles(Role.TECHNICIAN)
