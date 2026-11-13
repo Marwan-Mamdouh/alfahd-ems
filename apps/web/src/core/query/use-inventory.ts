@@ -127,6 +127,16 @@ export function useInventoryMovements(
 }
 
 /**
+ * Shared helper to invalidate inventory balances, movements, warehouse lists, and products
+ * following any stock mutation. Preserves non-awaited invocation behavior.
+ */
+function invalidateStockQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+  queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
+  queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+}
+
+/**
  * Mutation hook to record inbound stock from a supplier (ADMIN, WAREHOUSE_STAFF).
  * Automatically invalidates inventory balances, movements, warehouse lists, and products.
  */
@@ -135,11 +145,7 @@ export function useRecordInbound() {
 
   return useMutation({
     mutationFn: (dto: InboundStockDto) => recordInboundStock(dto),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-    },
+    onSuccess: () => invalidateStockQueries(queryClient),
   });
 }
 
@@ -151,11 +157,7 @@ export function useRecordOutbound() {
 
   return useMutation({
     mutationFn: (dto: OutboundStockDto) => recordOutboundStock(dto),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-    },
+    onSuccess: () => invalidateStockQueries(queryClient),
   });
 }
 
@@ -167,11 +169,7 @@ export function useRecordReturn() {
 
   return useMutation({
     mutationFn: (dto: ReturnStockDto) => recordReturnStock(dto),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-    },
+    onSuccess: () => invalidateStockQueries(queryClient),
   });
 }
 
@@ -183,11 +181,7 @@ export function useTransferStock() {
 
   return useMutation({
     mutationFn: (dto: TransferStockDto) => transferStock(dto),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-    },
+    onSuccess: () => invalidateStockQueries(queryClient),
   });
 }
 
@@ -199,10 +193,6 @@ export function useAdjustStock() {
 
   return useMutation({
     mutationFn: (dto: AdjustStockDto) => adjustStock(dto),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-    },
+    onSuccess: () => invalidateStockQueries(queryClient),
   });
 }
