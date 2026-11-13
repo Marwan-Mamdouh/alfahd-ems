@@ -133,27 +133,50 @@ describe('Auth (e2e) — refresh cookie transport', () => {
           _script: string,
           _keys: number,
           key: string,
-          now: number,
+          now: number | string,
           window: number,
           max: number,
         ) => {
+          if (_script.includes('GETDEL')) {
+            const sessionK = key;
+            const rotatedK = String(now);
+            const userId = redisKeys.get(sessionK) ?? null;
+            if (userId) {
+              redisKeys.delete(sessionK);
+              redisKeys.set(rotatedK, userId);
+            }
+            return userId;
+          }
           const zset = redisZsets.get(key);
           if (!zset) return 0;
           for (const [member, score] of zset) {
-            if (score <= now - window) zset.delete(member);
+            if (score <= Number(now) - window) zset.delete(member);
           }
           if (zset.size < max) return 0;
           const expiryScore = [...zset.values()].sort((a, b) => a - b)[zset.size - max];
-          return Math.max(1, Math.ceil((expiryScore + window - now) / 1000));
+          return Math.max(1, Math.ceil((expiryScore + window - Number(now)) / 1000));
         },
       ),
+      del: vi.fn(async (...keys: string[]) => {
+        let count = 0;
+        for (const k of keys) {
+          if (redisKeys.delete(k)) count++;
+          redisSets.delete(k);
+          redisZsets.delete(k);
+        }
+        return count;
+      }),
       set: vi.fn(async (key: string, value: string, _mode: string, _ttl?: number) => {
         redisKeys.set(key, value);
         redisSetArgs.set(key, value);
         return 'OK';
       }),
       get: vi.fn(async (key: string) => redisKeys.get(key) ?? null),
-      getdel: vi.fn(async () => null),
+      getdel: vi.fn(async (key: string) => {
+        const value = redisKeys.get(key) ?? null;
+        redisKeys.delete(key);
+        return value;
+      }),
       exists: vi.fn(async (key: string) => (redisKeys.has(key) ? 1 : 0)),
       smembers: vi.fn(async (key: string) => [...(redisSets.get(key) ?? [])]),
       // ZRANGE 0 -1 over the session index (member ids ordered by expiry score).
@@ -296,6 +319,8 @@ describe('Auth (e2e) — refresh cookie transport', () => {
     return cookie.split(';')[0];
   }
 
+  const tokenFrom = (setCookie: string) => setCookie.split('=')[1];
+
   async function login(email = admin.email): Promise<{ accessToken: string; cookie: string }> {
     const res = await request(app.getHttpServer())
       .post('/auth/login')
@@ -358,13 +383,13 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       expect(res.body.message).toBe('Invalid credentials');
     });
 
-    it('rejects a deactivated user without setting a cookie', async () => {
+    it('rejects a deactivated user with 403 Forbidden without setting a cookie', async () => {
       admin.isActive = false;
 
       const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: admin.email, password: PASSWORD })
-        .expect(401);
+        .expect(403);
 
       expect(res.headers['set-cookie']).toBeUndefined();
       admin.isActive = true;
@@ -386,63 +411,157 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       expect(typeof res.body.data.accessToken).toBe('string');
     });
 
-    it('does NOT return a refreshToken in the body', async () => {
-      // The old frontend interceptor read this field and wrote it into the store,
-      // overwriting a valid token with undefined and forcing a logout.
-      const { cookie } = await login();
+    it('rotates refresh token on use: sets new cookie, returns new token in body, and invalidates old token (web flow)', async () => {
+      const { cookie: cookie1 } = await login();
+      const oldTokenId = tokenFrom(cookie1);
 
       const res = await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie1)
         .send({})
         .expect(200);
 
-      expect(res.body.data).not.toHaveProperty('refreshToken');
-    });
+      const cookie2 = refreshCookieFrom(res);
+      const newTokenId = tokenFrom(cookie2);
 
-    it('does not rotate the refresh token', async () => {
-      const { cookie } = await login();
-      const tokenId = cookie.split('=')[1];
+      expect(cookie2).not.toBe(cookie1);
+      expect(newTokenId).not.toBe(oldTokenId);
+      expect(res.body.data.refreshToken).toBe(newTokenId);
+      expect(typeof res.body.data.accessToken).toBe('string');
 
+      const cookies = res.headers['set-cookie'] as unknown as string[];
+      const setCookie = cookies?.find((c) => c.startsWith('refresh_token='));
+      expect(setCookie).toBeDefined();
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/Path=\/(;|$)/i);
+
+      // Replaying cookie1 again -> 401 (rotation: single-use)
       await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie1)
         .send({})
-        .expect(200);
-      // Same token id must still work: rotation is deferred (FR-004).
-      const res = await request(app.getHttpServer())
+        .expect(401);
+
+      // Refreshing with cookie2 (the rotated cookie) -> 200
+      const res2 = await request(app.getHttpServer())
         .post('/auth/refresh')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie2)
         .send({})
         .expect(200);
 
-      expect(res.body.data).toBeTruthy();
-      expect(cookie.split('=')[1]).toBe(tokenId);
+      expect(res2.body.data.accessToken).toBeDefined();
     });
 
-    it('still accepts a body token for mobile clients', async () => {
-      const { accessToken, cookie } = await login();
-      const tokenId = cookie.split('=')[1];
+    it('rotates refresh token via body and rejects replaying original token (mobile flow)', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: PASSWORD })
+        .expect(200);
 
-      const res = await request(app.getHttpServer())
+      const tokenId = loginRes.body.data.refreshToken;
+      expect(tokenId).toBeDefined();
+
+      const refreshRes = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refreshToken: tokenId })
         .expect(200);
 
-      expect(typeof res.body.data.accessToken).toBe('string');
-      expect(accessToken).toBeTruthy();
+      const rotatedToken = refreshRes.body.data.refreshToken;
+      expect(rotatedToken).toBeDefined();
+      expect(rotatedToken).not.toBe(tokenId);
+      expect(typeof refreshRes.body.data.accessToken).toBe('string');
+
+      // Replaying the original body token -> 401
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken: tokenId })
+        .expect(401);
+
+      // Using the rotated token -> 200
+      const refreshRes2 = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken: rotatedToken })
+        .expect(200);
+
+      expect(refreshRes2.body.data.accessToken).toBeDefined();
     });
 
     it('rejects a request with neither cookie nor body token', async () => {
       await request(app.getHttpServer()).post('/auth/refresh').send({}).expect(401);
     });
 
-    it('rejects an unknown token id', async () => {
-      await request(app.getHttpServer())
+    it('rejects an unknown token id and clears cookie', async () => {
+      const res = await request(app.getHttpServer())
         .post('/auth/refresh')
         .set('Cookie', 'refresh_token=not-a-real-token')
         .send({})
         .expect(401);
+
+      const cookies = res.headers['set-cookie'] as unknown as string[] | undefined;
+      const cleared = cookies?.find((c) => c.startsWith('refresh_token='));
+      expect(cleared).toBeDefined();
+    });
+
+    it('does not clear cookie on replay of rotated refresh token (retains winning cookie for other tabs)', async () => {
+      const { cookie: cookie1 } = await login();
+
+      const refreshRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(200);
+
+      const cookie2 = refreshCookieFrom(refreshRes);
+
+      // Replay of cookie1 (e.g. losing concurrent tab) -> 401
+      const replayRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(401);
+
+      // Must NOT clear the cookie: winning tab's cookie must survive
+      const replayCookies = replayRes.headers['set-cookie'] as unknown as string[] | undefined;
+      const clearedCookie = replayCookies?.find((c) => c.startsWith('refresh_token='));
+      expect(clearedCookie).toBeUndefined();
+
+      // Subsequent refresh with cookie2 (the winning cookie) -> 200
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie2)
+        .send({})
+        .expect(200);
+    });
+
+    it('handles concurrent refreshes with the same cookie: exactly one succeeds and the losing 401 does not clear the cookie', async () => {
+      const { cookie } = await login();
+
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).send({}),
+        request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).send({}),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      expect(statuses).toEqual([200, 401]);
+
+      const failedRes = res1.status === 401 ? res1 : res2;
+      const successRes = res1.status === 200 ? res1 : res2;
+
+      // The 401 must not clear the cookie (the winner's cookie must survive)
+      const failedCookies = failedRes.headers['set-cookie'] as unknown as string[] | undefined;
+      const clearedCookie = failedCookies?.find((c) => c.startsWith('refresh_token='));
+      expect(clearedCookie).toBeUndefined();
+
+      // The winning refresh provided a valid rotated cookie
+      const rotatedCookie = refreshCookieFrom(successRes);
+      expect(rotatedCookie).toBeDefined();
+
+      // Subsequent refresh with rotated cookie succeeds
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', rotatedCookie)
+        .send({})
+        .expect(200);
     });
 
     it('rejects a revoked token (logout invalidates the session)', async () => {
@@ -508,6 +627,32 @@ describe('Auth (e2e) — refresh cookie transport', () => {
 
     it('requires a bearer token', async () => {
       await request(app.getHttpServer()).post('/auth/logout').expect(401);
+    });
+
+    it('invalidates rotated sessions even when called with a pre-rotation access token (account-wide logout)', async () => {
+      const { accessToken: access1, cookie: cookie1 } = await login();
+
+      // Refresh rotates the session and issues cookie2
+      const refreshRes = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie1)
+        .send({})
+        .expect(200);
+
+      const cookie2 = refreshCookieFrom(refreshRes);
+
+      // Logout with access1 (carrying stale pre-rotation jti) -> 200
+      await request(app.getHttpServer())
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${access1}`)
+        .expect(200);
+
+      // Subsequent refresh with cookie2 must return 401
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie2)
+        .send({})
+        .expect(401);
     });
   });
 

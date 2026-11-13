@@ -1,9 +1,11 @@
-import { Role, type LoginResponseDto } from '@alfahd/types';
+import { Role, type LoginResponseDto, type RefreshTokenResponseDto } from '@alfahd/types';
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +19,12 @@ import { users, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
 import { SessionService } from '../redis/session.service.js';
+import type { ChangePasswordRequestDto } from './dto.js';
+
+// Fixed argon2id dummy hash with the same cost parameters as ARGON2_OPTIONS
+// (m=65536, t=3, p=1). Safe to parse and verify; always returns false.
+export const DUMMY_HASH =
+  '$argon2id$v=19$m=65536,p=1,t=3$Qyj4rKb7LqEEH5DTNIuaMg$hK00Pkq2YCFstEGrCMjt0Fb/+owHrnS7uT4w6dRZk7s';
 
 export interface AccessTokenPayload {
   sub: string;
@@ -60,10 +68,27 @@ export class AuthService {
   }
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
-    const user = await this.findActiveUserByEmail(email);
-    if (!user || !(await verify(user.passwordHash, password))) {
+    const rows = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+    const user = rows[0];
+
+    // Constant-time failure path: if user does not exist, run a dummy argon2 verify
+    // so wall time is comparable to an existing user with wrong credentials, preventing
+    // user enumeration through timing differences.
+    if (!user) {
+      await verify(DUMMY_HASH, password);
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    const isPasswordValid = await verify(user.passwordHash, password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Inactive/deactivated users with valid credentials must be rejected with 403 Forbidden.
+    if (!user.isActive) {
+      throw new ForbiddenException('Account is inactive');
+    }
+
     const tokenId = randomUUID();
     await this.sessionService.createSession(user.id, tokenId);
     return {
@@ -73,31 +98,73 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string, ip?: string): Promise<{ accessToken: string }> {
-    const session = await this.sessionService.findSessionByTokenId(refreshToken);
-    if (!session) {
-      const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
-      if (revokedUserId) {
-        this.logger.warn('Revoked refresh token reuse detected', {
+  async refresh(refreshToken: string, ip?: string): Promise<RefreshTokenResponseDto> {
+    const userId = await this.sessionService.consumeSessionForRotation(refreshToken);
+    if (!userId) {
+      if (await this.sessionService.isRotated(refreshToken)) {
+        this.logger.warn('Rotated refresh token replayed', {
           tokenId: refreshToken,
-          userId: revokedUserId,
           ip: ip ?? 'unknown',
           timestamp: new Date().toISOString(),
-          reason: 'revoked_token_reuse',
+          reason: 'rotated_token_replay',
         });
+      } else {
+        const revokedUserId = await this.sessionService.getRevokedTokenUserId(refreshToken);
+        if (revokedUserId) {
+          this.logger.warn('Revoked refresh token reuse detected', {
+            tokenId: refreshToken,
+            userId: revokedUserId,
+            ip: ip ?? 'unknown',
+            timestamp: new Date().toISOString(),
+            reason: 'revoked_token_reuse',
+          });
+        }
       }
+      // Replay or unknown token => 401. Deliberate scope decision: do not revoke
+      // all sessions for the user to avoid logging out every tab on benign races.
+      // The losing tab may still receive 401 and redirect to login, but its cookie
+      // is not cleared so concurrent/winning sessions survive.
       throw new UnauthorizedException('Invalid refresh token');
     }
-    const rows = await this.db.select().from(users).where(eq(users.id, session.userId)).limit(1);
+
+    const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
     const user = rows[0];
     if (!user || !user.isActive) {
+      // Inactive/deactivated user: clear the rotated marker so the controller
+      // clears the dead cookie, and revoke in denylist for attribution.
+      await this.sessionService.clearRotated(refreshToken);
+      await this.sessionService.revokeSession(userId, refreshToken);
       throw new UnauthorizedException('Invalid refresh token');
     }
-    return { accessToken: this.signAccessToken(user, refreshToken) };
+
+    const newTokenId = randomUUID();
+    await this.sessionService.createSession(user.id, newTokenId);
+    await this.sessionService.revokeSession(user.id, refreshToken);
+
+    return {
+      accessToken: this.signAccessToken(user, newTokenId),
+      refreshToken: newTokenId,
+    };
   }
 
-  async logout(userId: string, tokenId: string): Promise<void> {
-    await this.sessionService.revokeSession(userId, tokenId);
+  /**
+   * Facade delegating to SessionService.isRotated. Used by the controller to
+   * prevent clearing a newly-rotated cookie when a losing concurrent tab fails.
+   */
+  async wasRotatedRefreshToken(tokenId: string): Promise<boolean> {
+    return this.sessionService.isRotated(tokenId);
+  }
+
+  /**
+   * Log out a user by revoking all sessions for their account.
+   *
+   * Token rotation causes previously-issued access tokens to hold a stale
+   * jti (the pre-rotation tokenId). Revoking all sessions for the account
+   * ensures logout terminates live sessions across devices without requiring
+   * a stateful session-grouping lookup.
+   */
+  async logout(userId: string): Promise<void> {
+    await this.sessionService.revokeAllSessions(userId);
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -149,6 +216,36 @@ export class AuthService {
     // Reset via a (possibly stolen) token must kill every session that could
     // have been established under the old credential — otherwise an attacker
     // holding an old refresh token keeps access for up to 7 days.
+    await this.sessionService.revokeAllSessions(userId);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordRequestDto): Promise<void> {
+    const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const user = rows[0];
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (!(await verify(user.passwordHash, dto.oldPassword))) {
+      throw new BadRequestException('Old password is incorrect');
+    }
+    // Only checked after the old-password verify succeeds: rejecting the equality
+    // before authentication would let anyone probe validation without proving
+    // they know the current password.
+    if (dto.newPassword === dto.oldPassword) {
+      throw new BadRequestException('New password must differ from the current password');
+    }
+
+    const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
+    await this.db
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+
+    // Issue #14 choice: revoke every session, including the caller's, and let the
+    // client log in again with the new credential. Re-issuing the caller's session
+    // here would keep a pre-change token alive across the security boundary.
+    // Access tokens (stateless JWTs) can still work until they expire (<=15m);
+    // refresh is dead immediately, which is what "force re-login" means here.
     await this.sessionService.revokeAllSessions(userId);
   }
 }

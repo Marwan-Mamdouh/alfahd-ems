@@ -1,0 +1,246 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Request, Response } from 'express';
+import { UnauthorizedException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import { Role } from '@alfahd/types';
+import { AuthController } from './auth.controller.js';
+import type { AuthService } from './auth.service.js';
+import type { RateLimitGuard } from './guards/rate-limit.guard.js';
+import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '../config/refresh-cookie.js';
+import type {
+  ChangePasswordRequestDto,
+  LoginRequestDto,
+  LoginResponseDto,
+  RefreshTokenResponseDto,
+} from './dto.js';
+import type { JwtUser } from './strategies/jwt.strategy.js';
+
+function makeController(
+  authServiceOverrides: Partial<Record<keyof AuthService, unknown>> = {},
+  configOverrides: Partial<Record<string, unknown>> = {},
+) {
+  const authService = {
+    login: vi.fn(),
+    refresh: vi.fn(),
+    logout: vi.fn(),
+    wasRotatedRefreshToken: vi.fn().mockResolvedValue(false),
+    ...authServiceOverrides,
+  } as unknown as AuthService;
+
+  const configService = {
+    get: vi.fn((key: string) => {
+      if (key in configOverrides) return configOverrides[key];
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
+      return undefined;
+    }),
+  } as unknown as ConfigService;
+
+  const rateLimitGuard = {
+    recordFailure: vi.fn().mockResolvedValue(undefined),
+  } as unknown as RateLimitGuard;
+
+  const controller = new AuthController(authService, configService, rateLimitGuard);
+  return { controller, authService, configService, rateLimitGuard };
+}
+
+describe('AuthController', () => {
+  describe('login — delivery channels contract (Issue #8)', () => {
+    /**
+     * Issue #8 mobile contract decision:
+     * Contract decision: "superset, both channels always".
+     *
+     * The login endpoint delivers the refresh token via both the httpOnly
+     * cookie (for web clients requiring XSS protection) and the JSON response
+     * body (for mobile clients without a cookie jar). Mobile ignores the Set-Cookie
+     * header, web ignores the body refreshToken property. Both channels are
+     * always active so no ?client=mobile query parameter is required.
+     */
+    it('sets the httpOnly refresh cookie via res.cookie(...) and returns refreshToken in the response body', async () => {
+      const mockResult: LoginResponseDto = {
+        accessToken: 'access.jwt.token',
+        refreshToken: 'uuid-v4-refresh-token',
+        user: {
+          id: 'user-id-123',
+          email: 'admin@alfahd.local',
+          role: Role.ADMIN,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      const { controller } = makeController({
+        login: vi.fn().mockResolvedValue(mockResult),
+      });
+
+      const req = {} as Request;
+      const res = {
+        cookie: vi.fn(),
+      } as unknown as Response;
+
+      const dto: LoginRequestDto = {
+        email: 'admin@alfahd.local',
+        password: 'correct-password',
+      };
+
+      const response = await controller.login(dto, req, res);
+
+      // Verify delivery channel 1: httpOnly cookie via res.cookie
+      expect(res.cookie).toHaveBeenCalledTimes(1);
+      expect(res.cookie).toHaveBeenCalledWith(
+        REFRESH_COOKIE_NAME,
+        'uuid-v4-refresh-token',
+        expect.objectContaining({
+          httpOnly: true,
+          path: '/',
+        }),
+      );
+
+      // Verify delivery channel 2: refreshToken present in body for mobile clients
+      expect(response).toBeDefined();
+      expect(response.refreshToken).toBe('uuid-v4-refresh-token');
+      expect(response.accessToken).toBe('access.jwt.token');
+      expect(response.user.email).toBe('admin@alfahd.local');
+    });
+  });
+
+  describe('refresh — rotation and cookie lifecycle', () => {
+    it('cookie-first: rotates refresh cookie and returns service result', async () => {
+      const mockResult: RefreshTokenResponseDto = {
+        accessToken: 'new.jwt',
+        refreshToken: 'new-token-id',
+      };
+
+      const { controller, authService } = makeController({
+        refresh: vi.fn().mockResolvedValue(mockResult),
+      });
+
+      const req = {
+        cookies: { [REFRESH_COOKIE_NAME]: 'old-token' },
+        ip: '127.0.0.1',
+      } as unknown as Request;
+      const res = {
+        cookie: vi.fn(),
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      const result = await controller.refresh({}, req, res);
+
+      expect(authService.refresh).toHaveBeenCalledWith('old-token', '127.0.0.1');
+      expect(res.cookie).toHaveBeenCalledTimes(1);
+      expect(res.cookie).toHaveBeenCalledWith(
+        REFRESH_COOKIE_NAME,
+        'new-token-id',
+        expect.objectContaining({ httpOnly: true, path: '/' }),
+      );
+      expect(result).toEqual(mockResult);
+    });
+
+    it('failure: clears rejected cookie with REFRESH_COOKIE_PATH on UnauthorizedException for unknown token', async () => {
+      const { controller, authService } = makeController({
+        refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
+        wasRotatedRefreshToken: vi.fn().mockResolvedValue(false),
+      });
+
+      const req = {
+        cookies: { [REFRESH_COOKIE_NAME]: 'invalid-token' },
+      } as unknown as Request;
+      const res = {
+        cookie: vi.fn(),
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      await expect(controller.refresh({}, req, res)).rejects.toThrow(UnauthorizedException);
+
+      expect(authService.wasRotatedRefreshToken).toHaveBeenCalledWith('invalid-token');
+      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
+        path: REFRESH_COOKIE_PATH,
+      });
+    });
+
+    it('failure: does NOT clear cookie on UnauthorizedException if token was rotated', async () => {
+      const { controller, authService } = makeController({
+        refresh: vi.fn().mockRejectedValue(new UnauthorizedException('Invalid refresh token')),
+        wasRotatedRefreshToken: vi.fn().mockResolvedValue(true),
+      });
+
+      const req = {
+        cookies: { [REFRESH_COOKIE_NAME]: 'old-rotated-token' },
+      } as unknown as Request;
+      const res = {
+        cookie: vi.fn(),
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      await expect(controller.refresh({}, req, res)).rejects.toThrow(UnauthorizedException);
+
+      expect(authService.wasRotatedRefreshToken).toHaveBeenCalledWith('old-rotated-token');
+      expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes all sessions for userId and clears refresh cookie', async () => {
+      const { controller, authService } = makeController({
+        logout: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const req = {
+        user: {
+          userId: 'user-123',
+          email: 'admin@alfahd.local',
+          role: Role.ADMIN,
+          tokenId: 'token-abc',
+        },
+      } as unknown as Request & {
+        user: { userId: string; email: string; role: Role; tokenId: string };
+      };
+
+      const res = {
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      const result = await controller.logout(req as never, res);
+
+      expect(authService.logout).toHaveBeenCalledTimes(1);
+      expect(authService.logout).toHaveBeenCalledWith('user-123');
+      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
+        path: REFRESH_COOKIE_PATH,
+      });
+      expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('changePassword - Issue #14', () => {
+    it('calls authService.changePassword, clears refresh cookie, and returns { ok: true }', async () => {
+      const { controller, authService } = makeController({
+        changePassword: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const dto: ChangePasswordRequestDto = {
+        oldPassword: 'oldPassword123',
+        newPassword: 'newPassword123',
+      };
+
+      const jwtUser: JwtUser = {
+        userId: 'user-id-456',
+        email: 'user@alfahd.local',
+        role: Role.TECHNICIAN,
+        tokenId: 'token-id-123',
+      };
+
+      const res = {
+        clearCookie: vi.fn(),
+      } as unknown as Response;
+
+      const result = await controller.changePassword(dto, jwtUser, res);
+
+      expect(authService.changePassword).toHaveBeenCalledTimes(1);
+      expect(authService.changePassword).toHaveBeenCalledWith('user-id-456', dto);
+      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
+        path: REFRESH_COOKIE_PATH,
+      });
+      expect(result).toEqual({ ok: true });
+    });
+  });
+});

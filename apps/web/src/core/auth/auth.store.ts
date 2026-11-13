@@ -26,9 +26,9 @@ interface AuthState {
    * Store an authenticated session.
    *
    * Two arguments, not three: the old signature took a `refreshToken` and
-   * persisted it, which is exactly the exposure this feature removes. The login
-   * response still carries `refreshToken` in its body for the mobile client —
-   * the web client ignores it.
+   * persisted it, which is exactly the exposure this feature removes. Both the
+   * login and refresh responses carry `refreshToken` in their bodies for mobile
+   * clients — the web client ignores it and relies on the HTTP-only cookie.
    */
   setSession: (accessToken: string, user: UserDto | null) => void;
   setUser: (user: UserDto) => void;

@@ -96,9 +96,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * Exchange the `httpOnly` refresh cookie for a new access token.
  *
  * Sends an **empty body** — the cookie carries the token and the web client
- * cannot read it. The response is `{ accessToken }` and nothing else: there is no
- * `refreshToken` field and no rotation. Reading `refreshToken` off this response
- * writes `undefined` into the store and forces a logout on the second 401.
+ * cannot read it. On rotation (issue #9), the response body carries `refreshToken`
+ * for mobile clients, but the web client ignores it and relies on the updated
+ * HTTP-only cookie.
  */
 async function refreshAccessToken(): Promise<string> {
   // Captured BEFORE the await: if clearSession() runs while the refresh is in

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   HttpCode,
+  Patch,
   Post,
   Req,
   Res,
@@ -11,6 +12,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -22,6 +24,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import {
   AuthOkResponseDto,
+  ChangePasswordRequestDto,
   ForgotPasswordRequestDto,
   LoginRequestDto,
   LoginResponseDto,
@@ -31,6 +34,7 @@ import {
 } from './dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RateLimitGuard } from './guards/rate-limit.guard.js';
+import { CurrentUser } from './decorators/current-user.decorator.js';
 import type { JwtUser } from './strategies/jwt.strategy.js';
 import {
   REFRESH_COOKIE_NAME,
@@ -58,6 +62,7 @@ export class AuthController {
   @ApiOkResponse({ description: 'Authentication successful', type: LoginResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid email or password input' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiForbiddenResponse({ description: 'Account is inactive' })
   @ApiResponse({
     status: 429,
     description: 'Too many failed login attempts; Retry-After is in seconds',
@@ -110,16 +115,19 @@ export class AuthController {
     }
 
     try {
-      return await this.authService.refresh(token, req.ip);
+      const result = await this.authService.refresh(token, req.ip);
+      res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, this.cookieOptions());
+      return result;
     } catch (error) {
-      // Clear a REJECTED cookie. `httpOnly` means JavaScript cannot delete it,
-      // and `POST /auth/logout` — the only other thing that clears it — needs a
-      // valid access token, which the caller does not have here. Leaving a dead
-      // cookie in the browser traps the web client: the middleware guard sees the
-      // cookie and bounces every navigation to /dashboard, while every API call
-      // 401s, so the user can never reach the login form.
-      if (error instanceof UnauthorizedException) {
-        res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+      // Clear a genuinely dead or invalid cookie (missing/expired/admin-revoked).
+      // If the token was rotated on a previous refresh request (e.g. concurrent
+      // tabs where a losing request presents the pre-rotation token), do NOT
+      // clear the cookie, so the winning tab's updated session is not deleted.
+      if (
+        error instanceof UnauthorizedException &&
+        !(await this.authService.wasRotatedRefreshToken(token))
+      ) {
+        this.clearRefreshCookie(res);
       }
       throw error;
     }
@@ -136,10 +144,8 @@ export class AuthController {
     @Req() req: Request & { user: JwtUser },
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthOkResponseDto> {
-    await this.authService.logout(req.user.userId, req.user.tokenId);
-    // Path must match the path used when setting the cookie, or the browser
-    // retains it and the session appears to survive logout.
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+    await this.authService.logout(req.user.userId);
+    this.clearRefreshCookie(res);
     return { ok: true };
   }
 
@@ -150,6 +156,12 @@ export class AuthController {
       REFRESH_COOKIE_SECURE: this.configService.get<boolean>('REFRESH_COOKIE_SECURE'),
       JWT_REFRESH_EXPIRES_IN: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
     });
+  }
+
+  // Path must match the path used when setting the cookie, or the browser
+  // retains it and the session appears to survive logout/revocation.
+  private clearRefreshCookie(res: Response): void {
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
   }
 
   @Post(routes.auth.forgotPassword)
@@ -172,6 +184,24 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'Invalid or expired token, or invalid password' })
   async resetPassword(@Body() dto: ResetPasswordRequestDto): Promise<AuthOkResponseDto> {
     await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { ok: true };
+  }
+
+  @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change your own password' })
+  @ApiOkResponse({ description: 'Password changed successfully', type: AuthOkResponseDto })
+  @ApiBadRequestResponse({ description: 'Current password incorrect or invalid new password' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  async changePassword(
+    @Body() dto: ChangePasswordRequestDto,
+    @CurrentUser() user: JwtUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthOkResponseDto> {
+    await this.authService.changePassword(user.userId, dto);
+    this.clearRefreshCookie(res);
     return { ok: true };
   }
 }

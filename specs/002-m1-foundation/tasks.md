@@ -115,6 +115,9 @@
   - `GET /users/:id` → Admin only, calls `usersService.findOne()`
   - `PATCH /users/:id` → Admin only, calls `usersService.update()` or `usersService.deactivate()`
   - `POST /users/change-password` → Any authenticated user, calls `usersService.changePassword()`
+  > **Revision 2026-11-11 (Issue #14):** the change-password endpoint moved to
+  PATCH /auth/change-password (all authenticated roles); POST /users/change-password was
+  removed. Password verification is argon2id (per 003), not bcrypt.
   > **Note**: All endpoints require `JwtAuthGuard`. Admin-only endpoints additionally require `@Roles(Role.ADMIN)` + `RolesGuard`.
 - [X] T019 [US4] Implement `POST /auth/forgot-password` in `apps/api/src/auth/auth.controller.ts`:
   - Look up user by email; if not found return 200 anyway (do NOT reveal whether email exists)

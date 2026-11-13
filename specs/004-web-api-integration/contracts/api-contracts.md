@@ -9,7 +9,7 @@ These contracts define the interface between the Next.js frontend and the NestJS
 
 **Wire format (global, from `main.ts` `ResponseInterceptor`):** every success response is wrapped as `{ "data": <payload> }` — there is no `success` flag. This wrapping is **unconditional**: it applies to every endpoint in this document, including the ones that return `{ "ok": true }`. Errors return `{ "statusCode": <n>, "message": "<text>", "path": "<url>", "timestamp": "<iso>" }`. Examples below show the **inner payload**; the frontend must always unwrap one `data` level first (the `unwrap()` helper in `axios-instance.ts` does this).
 
-> **Correction from the previous revision of this file.** It previously listed, as side effects, that login "sets an `httpOnly` cookie" and that refresh "rotates the refresh token (old one invalidated)" and "sets a new `httpOnly` cookie". Neither was true of the backend at the time of writing: there was no cookie handling anywhere in `apps/api`, and `AuthService.refresh()` returns a new access token while re-signing with the **same** token id. Those statements described intended behaviour that did not exist. Cookie behaviour below is now real and implemented by this feature; **rotation still does not happen** and must not be assumed.
+> **Correction from the previous revision of this file.** It previously listed, as side effects, that login "sets an `httpOnly` cookie" and that refresh "rotates the refresh token (old one invalidated)" and "sets a new `httpOnly` cookie". Neither was true of the backend at the time of writing: there was no cookie handling anywhere in `apps/api`, and `AuthService.refresh()` returns a new access token while re-signing with the **same** token id. Those statements described intended behaviour that did not exist. Cookie behaviour below is now real and implemented by this feature; **refresh token rotation is implemented by Issue #9** (each refresh consumes the presented token, issues a new refresh token in cookie and body, and invalidates the old one).
 
 ## CORS (implemented — required for mobile, not for the web dashboard)
 
@@ -115,15 +115,16 @@ Body fallback (mobile, and any client without a cookie jar):
 
 **Resolution order**: cookie first, then body. If neither is present → 401.
 
-**Response (200)** — wrapped as `{ "data": { "accessToken": "..." } }`. **Returns the access token only.** No `refreshToken` field, no rotation — the same refresh token stays valid.
+**Response (200)** — wrapped as `{ "data": { "accessToken": "...", "refreshToken": "..." } }`. Returns the new access token and rotated refresh token. The endpoint sets a new `refresh_token` HTTP-only cookie for web clients. The old token id is atomically consumed and invalidated, so any replay of the old token returns 401.
 
-> The previous version of the frontend interceptor read `refreshToken` off this response and wrote it into the store. Since the field does not exist, this set the stored token to `undefined`, guaranteeing a forced logout on the second 401 in a session. The interceptor no longer reads it.
+> Mobile clients persist the new `refreshToken` from the response body; the web client keeps using the updated `httpOnly` cookie and ignores the body field.
 
-**Response (401)**: Invalid, expired, or revoked refresh token.
+**Response (401)**: Invalid, expired, or revoked refresh token (including any replayed token).
 
 **Side Effects**:
-- Backend validates the Redis session and denylist for the token id
-- **None otherwise** — no rotation, no `Set-Cookie`
+- Backend atomically consumes the old token id (`GETDEL`) and marks it revoked in the Redis denylist
+- Backend creates a new session in Redis for the rotated token id
+- Backend sets a new `refresh_token` cookie (`Set-Cookie`) with the rotated token id
 
 **Required client behaviour**: send the request with credentials (`withCredentials: true`), otherwise the cookie is not sent and the call 401s.
 
@@ -131,7 +132,7 @@ Body fallback (mobile, and any client without a cookie jar):
 
 ### POST /auth/logout
 
-Revokes the current session.
+Revokes **all** sessions for the authenticated account (account-wide, because rotation makes the access token's jti stale). Other devices for this user are signed out; this is an accepted tradeoff documented in spec.md.
 
 **Request**: (requires `Authorization: Bearer <accessToken>`)
 
@@ -143,8 +144,7 @@ Revokes the current session.
 ```
 
 **Side Effects**:
-- Backend revokes the session in Redis
-- **Backend clears the refresh cookie** (`Max-Age=0`)
+- Backend revokes every session indexed for the userId (revokeAllSessions) and clears the refresh cookie
 
 ---
 
@@ -265,9 +265,9 @@ Updates a user (ADMIN only). Updatable fields: `email`, `role`, `isActive` only 
 
 ---
 
-### POST /users/change-password
+### PATCH /auth/change-password
 
-Changes the authenticated user's own password (any authenticated role, not just ADMIN).
+Changes the authenticated user's own password (any authenticated role, own password only).
 
 **Request**:
 ```json
@@ -277,7 +277,7 @@ Changes the authenticated user's own password (any authenticated role, not just 
 }
 ```
 
-**Response (201)** — wrapped as `{ "data": { "ok": true } }`:
+**Response (200)** — wrapped as `{ "data": { "ok": true } }`:
 ```json
 {
   "ok": true
@@ -286,7 +286,9 @@ Changes the authenticated user's own password (any authenticated role, not just 
 
 **Response (400)**: `Old password is incorrect`
 
-> ⚠️ **Known contract/behaviour mismatch.** This endpoint, and `POST /users/:id/revoke-session`, actually return **201** (NestJS defaults `POST` to 201 and `UsersController` sets no `@HttpCode`), whereas this document previously said 200 and every endpoint in `AuthController` does set `@HttpCode(200)`. The e2e suite asserts the real 201. Clients should accept either until this is reconciled — ideally **before** the M4 #54 contract freeze, since the frontend developer codes against this document.
+**Side Effects**:
+- Success revokes **all** refresh sessions for the user, including the caller's, and clears the refresh cookie (`refresh_token` with `Path=/`), forcing the client to log in again with the new password.
+- Access tokens (stateless JWTs) may remain valid until expiry (≤15m).
 
 ---
 
@@ -301,6 +303,8 @@ Revokes all sessions for a user (ADMIN only).
   "revoked": 3
 }
 ```
+
+> ⚠️ **Known contract/behaviour mismatch.** `POST /users/:id/revoke-session` actually returns **201** (NestJS defaults `POST` to 201 and `UsersController` sets no `@HttpCode`), whereas this document previously said 200. The e2e suite asserts the real 201. Clients should accept either until this is reconciled.
 
 ---
 
@@ -341,7 +345,7 @@ At most one refresh request is in flight. Concurrent 401s await the same promise
 
 On app mount the frontend calls `POST /api/auth/refresh` **with an empty body** — the cookie carries the token. On success it populates the store; on 401 it clears state and leaves the user on login. It **must not retry in a loop**; guard it so it fires exactly once per page load.
 
-> The refresh response contains `accessToken` **only** — no user object, and there is **no profile endpoint** (`endpoints.ts` declares `auth.me`, but the backend implements no `GET /auth/me`; calling it 404s). The frontend therefore decodes the display fields from the access token's JWT payload. This is a **display source, not a security check** — the server already verified the token. The contract is unchanged for this reason: adding a `user` field to `RefreshTokenResponseDto` would break the frozen M4 #54 contract and the mobile client. Note `createdAt` is not in the JWT either, so any created-date column must come from `GET /users`.
+> The refresh response contains `{accessToken, refreshToken}` (rotated) — no user object, and there is **no profile endpoint** (`endpoints.ts` declares `auth.me`, but the backend implements no `GET /auth/me`; calling it 404s). The frontend therefore decodes the display fields from the access token's JWT payload. This is a **display source, not a security check** — the server already verified the token. The contract is unchanged for this reason: adding a `user` field to `RefreshTokenResponseDto` would break the frozen M4 #54 contract and the mobile client. Note `createdAt` is not in the JWT either, so any created-date column must come from `GET /users`.
 
 ### Cross-Tab Sync
 

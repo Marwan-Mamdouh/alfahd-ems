@@ -1,7 +1,20 @@
 import { describe, expect, it, vi, beforeAll } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
-import { hash } from 'argon2';
-import { AuthService } from './auth.service.js';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { hash, verify } from 'argon2';
+import { AuthService, DUMMY_HASH } from './auth.service.js';
+
+vi.mock('argon2', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('argon2')>();
+  return {
+    ...actual,
+    verify: vi.fn(actual.verify),
+  };
+});
 import type { Db } from '../database/database.module.js';
 import type { EmailService } from '../email/email.service.js';
 import type { SessionService } from '../redis/session.service.js';
@@ -59,7 +72,10 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
     createPasswordResetToken: vi.fn().mockResolvedValue(undefined),
     consumePasswordResetToken: vi.fn(),
     revokeAllSessions: vi.fn().mockResolvedValue(0),
-    findSessionByTokenId: vi.fn().mockResolvedValue(null),
+    consumeSessionForRotation: vi.fn().mockResolvedValue(null),
+    clearRotated: vi.fn().mockResolvedValue(undefined),
+    revokeSession: vi.fn().mockResolvedValue(undefined),
+    isRotated: vi.fn().mockResolvedValue(false),
     getRevokedTokenUserId: vi.fn().mockResolvedValue(null),
   } as unknown as SessionService;
 
@@ -75,7 +91,7 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
 
   const service = new AuthService(db, sessionService, jwtService, configService, emailService);
 
-  return { service, emailService, sessionService };
+  return { service, emailService, sessionService, jwtService };
 }
 
 describe('forgotPassword — must not reveal whether an account exists', () => {
@@ -116,6 +132,23 @@ describe('forgotPassword — must not reveal whether an account exists', () => {
 });
 
 describe('login — wrong password and unknown email are indistinguishable', () => {
+  it('returns access token, refresh token, and user dto for valid credentials', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    const result = await service.login('admin@alfahd.local', PASSWORD);
+
+    expect(result).toHaveProperty('accessToken', 'signed.jwt.token');
+    expect(result).toHaveProperty('refreshToken');
+    expect(result.user).toEqual({
+      id: ACTIVE_USER.id,
+      email: ACTIVE_USER.email,
+      role: ACTIVE_USER.role,
+      isActive: true,
+      createdAt: ACTIVE_USER.createdAt.toISOString(),
+    });
+    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+  });
+
   it('throws the same UnauthorizedException for a wrong password', async () => {
     const { service } = makeService({ rows: [ACTIVE_USER] });
 
@@ -142,6 +175,41 @@ describe('login — wrong password and unknown email are indistinguishable', () 
     );
 
     expect(sessionService.createPasswordResetToken).not.toHaveBeenCalled();
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenException (403) for an inactive user with valid credentials', async () => {
+    const { service, sessionService } = makeService({
+      rows: [{ ...ACTIVE_USER, isActive: false }],
+    });
+
+    await expect(service.login('admin@alfahd.local', PASSWORD)).rejects.toThrow(ForbiddenException);
+
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+  });
+
+  it('runs the same single hash verify against a dummy hash when the user does not exist (no user-enumeration path)', async () => {
+    // Non-enumeration timing mitigation: verify must run against DUMMY_HASH for unknown emails
+    // so wall time matches an existing account with an invalid password.
+    const verifyMock = vi.mocked(verify);
+
+    // Path 1: Nonexistent email
+    const { service: ghostService } = makeService({ rows: [] });
+    verifyMock.mockClear();
+    await expect(ghostService.login('ghost@fahdgroup.com', 'wrong-password')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(verifyMock).toHaveBeenCalledTimes(1);
+    expect(verifyMock).toHaveBeenCalledWith(DUMMY_HASH, 'wrong-password');
+
+    // Path 2: Existing user with wrong password
+    const { service: existingService } = makeService({ rows: [ACTIVE_USER] });
+    verifyMock.mockClear();
+    await expect(existingService.login('admin@alfahd.local', 'wrong-password')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(verifyMock).toHaveBeenCalledTimes(1);
+    expect(verifyMock).toHaveBeenCalledWith(ACTIVE_USER.passwordHash, 'wrong-password');
   });
 });
 
@@ -168,11 +236,33 @@ describe('resetPassword — revokes live sessions (HARD-08)', () => {
 });
 
 describe('refresh — attributes revoked-token replay to the targeted account (HARD-03)', () => {
+  it('logs benign rotated refresh token replay with reason rotated_token_replay', async () => {
+    const { service, sessionService } = makeService();
+    const warnSpy = vi.fn();
+    (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(true);
+
+    await expect(service.refresh('rotated-token', '203.0.113.9')).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toBe('Rotated refresh token replayed');
+    expect(warnSpy.mock.calls[0][1]).toMatchObject({
+      tokenId: 'rotated-token',
+      ip: '203.0.113.9',
+      reason: 'rotated_token_replay',
+    });
+    expect(sessionService.getRevokedTokenUserId).not.toHaveBeenCalled();
+  });
+
   it('logs the stored userId when a revoked refresh token is replayed', async () => {
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(false);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(ACTIVE_USER.id);
 
     await expect(service.refresh('stolen-token', '203.0.113.9')).rejects.toThrow(
@@ -194,10 +284,128 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
     const { service, sessionService } = makeService();
     const warnSpy = vi.fn();
     (service as unknown as { logger: { warn: unknown } }).logger = { warn: warnSpy };
-    vi.mocked(sessionService.findSessionByTokenId).mockResolvedValue(null);
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(null);
+    vi.mocked(sessionService.isRotated).mockResolvedValue(false);
     vi.mocked(sessionService.getRevokedTokenUserId).mockResolvedValue(null);
 
     await expect(service.refresh('unknown-token')).rejects.toThrow(UnauthorizedException);
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('refresh — token rotation (Issue #9)', () => {
+  it('rotates refresh token on use: consumes old, creates new session, revokes old, and signs with new jti', async () => {
+    const { service, sessionService, jwtService } = makeService({ rows: [ACTIVE_USER] });
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
+
+    const result = await service.refresh('old-token-id', '127.0.0.1');
+
+    expect(result.accessToken).toBe('signed.jwt.token');
+    expect(result.refreshToken).toBeDefined();
+    expect(result.refreshToken).not.toBe('old-token-id');
+    expect(result.refreshToken).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+
+    expect(sessionService.consumeSessionForRotation).toHaveBeenCalledWith('old-token-id');
+    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+    expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sub: ACTIVE_USER.id,
+        jti: result.refreshToken,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects deactivated user with consumed token, clears rotated marker, revokes token in denylist, and does not create new session', async () => {
+    const { service, sessionService } = makeService({
+      rows: [{ ...ACTIVE_USER, isActive: false }],
+    });
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
+
+    await expect(service.refresh('old-token-id')).rejects.toThrow(UnauthorizedException);
+
+    expect(sessionService.clearRotated).toHaveBeenCalledWith('old-token-id');
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+    expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
+  });
+
+  it('wasRotatedRefreshToken delegates to sessionService.isRotated', async () => {
+    const { service, sessionService } = makeService();
+    vi.mocked(sessionService.isRotated).mockResolvedValue(true);
+
+    await expect(service.wasRotatedRefreshToken('some-token')).resolves.toBe(true);
+    expect(sessionService.isRotated).toHaveBeenCalledWith('some-token');
+  });
+});
+
+describe('logout — account-wide session revocation (Issue #9 follow-up)', () => {
+  it('revokes all sessions for the account and does not call revokeSession with stale jti', async () => {
+    const { service, sessionService } = makeService();
+
+    await service.logout('user-1');
+
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('user-1');
+    expect(sessionService.revokeSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('changePassword - Issue #14', () => {
+  it('registered user + correct old password resolves and calls sessionService.revokeAllSessions with userId', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: PASSWORD,
+        newPassword: 'new-valid-password-123',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionService.revokeAllSessions).toHaveBeenCalledWith(ACTIVE_USER.id);
+  });
+
+  it('wrong old password rejects with BadRequestException and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: 'wrong-old-password',
+        newPassword: 'new-valid-password-123',
+      }),
+    ).rejects.toThrow(new BadRequestException('Old password is incorrect'));
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('no matching row (rows: []) rejects with NotFoundException and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [] });
+
+    await expect(
+      service.changePassword('non-existent-user-id', {
+        oldPassword: PASSWORD,
+        newPassword: 'new-valid-password-123',
+      }),
+    ).rejects.toThrow(new NotFoundException('User not found'));
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('new password identical to the current one rejects with BadRequestException after the old-password verify, and does not call revokeAllSessions', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+
+    await expect(
+      service.changePassword(ACTIVE_USER.id, {
+        oldPassword: PASSWORD,
+        newPassword: PASSWORD,
+      }),
+    ).rejects.toThrow(
+      new BadRequestException('New password must differ from the current password'),
+    );
+
+    expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
   });
 });

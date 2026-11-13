@@ -1,4 +1,5 @@
 import type {
+  ChangePasswordRequestDto as ChangePasswordRequest,
   ForgotPasswordRequestDto as ForgotPasswordRequest,
   LoginRequestDto as LoginRequest,
   LoginResponseDto as LoginResponse,
@@ -66,6 +67,18 @@ export class ResetPasswordRequestDto implements ResetPasswordRequest {
   newPassword!: string;
 }
 
+export class ChangePasswordRequestDto implements ChangePasswordRequest {
+  @ApiProperty({ example: 'OldPassword123!', minLength: 1, description: 'Current user password' })
+  @IsString()
+  @MinLength(1)
+  oldPassword!: string;
+
+  @ApiProperty({ example: 'NewSecurePassword123!', minLength: 8, description: 'New password' })
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+
 export class LoginResponseDto implements LoginResponse {
   @ApiProperty({
     example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
@@ -89,6 +102,12 @@ export class RefreshTokenResponseDto implements RefreshTokenResponse {
     description: 'New JWT access token',
   })
   accessToken!: string;
+
+  @ApiProperty({
+    example: '3f0c9a3e-5f1b-4f0e-9d5a-2b8c7d6e1a44',
+    description: 'Rotated refresh token that replaces the one just used (mobile clients)',
+  })
+  refreshToken!: string;
 }
 
 export class AuthOkResponseDto {

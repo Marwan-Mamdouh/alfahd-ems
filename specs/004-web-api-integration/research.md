@@ -20,11 +20,15 @@
 
 ## R-002: Refresh Token Rotation — SUPERSEDED
 
+> **UPDATE (2026-11-11, Issue #9): rotation is implemented. The decision below is historical and no longer describes the backend.**
+
 **Decision (original)**: implement rotation on every refresh.
 
 **Why it is superseded**: `AuthService.refresh()` (`apps/api/src/auth/auth.service.ts`) re-signs with the **same** `tokenId`. No rotation exists, and implementing it is not this feature's job. The spec records it as `FR-004 (DEFERRED, backend-owned)`.
 
 **Consequence**: the frontend must not assume a new refresh token arrives. Reading `refreshToken` off the refresh response — which the existing interceptor does — sets it to `undefined` and forces a logout on the second 401.
+
+**Update (2026-11-11, Issue #9)**: Refresh token rotation was implemented on `POST /auth/refresh` by issue #9. Each refresh issues a new access token and rotated refresh token, atomically consumes the previous token via `GETDEL`, and marks it revoked. The web client continues to use the HTTP-only cookie and ignores the body token.
 
 ## R-003: API Integration Pattern — CONFIRMED
 

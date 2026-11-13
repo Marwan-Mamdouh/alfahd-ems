@@ -13,6 +13,7 @@ import { ARGON2_OPTIONS } from './../src/database/schema/mappers.js';
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const CS_ID = '22222222-2222-4222-8222-222222222222';
 const TECH_ID = '33333333-3333-4333-8333-333333333333';
+const WAREHOUSE_ID = '55555555-5555-4555-8555-555555555555';
 const PASSWORD = 'securePassword123';
 
 interface FakeUser {
@@ -68,6 +69,15 @@ describe('Users (e2e)', () => {
     createdAt: new Date('2026-09-29T10:00:00.000Z'),
     updatedAt: new Date('2026-09-29T10:00:00.000Z'),
   };
+  const warehouseUser: FakeUser = {
+    id: WAREHOUSE_ID,
+    email: 'warehouse@fahdgroup.com',
+    passwordHash: '',
+    role: 'WAREHOUSE_STAFF',
+    isActive: true,
+    createdAt: new Date('2026-09-30T10:00:00.000Z'),
+    updatedAt: new Date('2026-09-30T10:00:00.000Z'),
+  };
 
   /** Token minting mirrors AuthService: a JWT whose `role` drives RolesGuard. */
   async function tokenFor(user: FakeUser): Promise<string> {
@@ -76,6 +86,21 @@ describe('Users (e2e)', () => {
       .send({ email: user.email, password: PASSWORD })
       .expect(200);
     return res.body.data.accessToken as string;
+  }
+
+  function refreshCookieFrom(res: request.Response): string {
+    const cookies = res.headers['set-cookie'] as unknown as string[] | undefined;
+    const cookie = cookies?.find((c) => c.startsWith('refresh_token='));
+    if (!cookie) throw new Error('no refresh_token cookie set');
+    return cookie.split(';')[0];
+  }
+
+  async function loginAs(user: FakeUser): Promise<{ accessToken: string; cookie: string }> {
+    const res = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: user.email, password: PASSWORD })
+      .expect(200);
+    return { accessToken: res.body.data.accessToken as string, cookie: refreshCookieFrom(res) };
   }
 
   beforeEach(async () => {
@@ -188,7 +213,18 @@ describe('Users (e2e)', () => {
     redisSets = new Map<string, Set<string>>();
     redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
-      eval: vi.fn(async () => 0),
+      eval: vi.fn(async (_script: string, _numKeys: number, key: string, arg1: string | number) => {
+        if (_script.includes('GETDEL')) {
+          const userId = redisKeys.get(key) ?? null;
+          if (userId) {
+            redisKeys.delete(key);
+            redisKeys.set(String(arg1), userId);
+          }
+          return userId;
+        }
+        // RateLimitGuard's script is irrelevant to this suite; it never needs to trip.
+        return 0;
+      }),
       set: vi.fn(async (key: string, value: string) => {
         redisKeys.set(key, value);
         return 'OK';
@@ -510,42 +546,111 @@ describe('Users (e2e)', () => {
     });
   });
 
-  describe('POST /users/change-password', () => {
-    it('returns { data: { ok: true } } on success for a non-admin', async () => {
-      // Any authenticated role may change its own password, not just ADMIN.
-      const token = await tokenFor(csUser);
+  describe('PATCH /auth/change-password', () => {
+    it('works for all four roles and returns { data: { ok: true } }', async () => {
+      warehouseUser.passwordHash = await argon2.hash(PASSWORD, ARGON2_OPTIONS);
+      rows.push(warehouseUser);
 
-      const res = await request(app.getHttpServer())
-        .post('/users/change-password')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ oldPassword: PASSWORD, newPassword: 'brandNewPassword123' })
-        // NOTE: 201 is the *actual* behaviour — NestJS defaults POST to 201 and
-        // UsersController sets no @HttpCode, unlike every endpoint in
-        // AuthController. contracts/api-contracts.md documents 200. Treat this as
-        // a known contract/behaviour mismatch: the client must accept either, and
-        // the status should be reconciled before the M4 #54 contract freeze.
-        .expect(201);
+      for (const user of [admin, csUser, technician, warehouseUser]) {
+        const { accessToken } = await loginAs(user);
+        const newPassword = `newSecurePass_${user.role}_123`;
 
-      expect(res.body).toEqual({ data: { ok: true } });
+        const res = await request(app.getHttpServer())
+          .patch('/auth/change-password')
+          .set('Authorization', `Bearer ${accessToken}`)
+          .send({ oldPassword: PASSWORD, newPassword })
+          .expect(200);
+
+        expect(res.body).toEqual({ data: { ok: true } });
+      }
     });
 
-    it('rejects a wrong old password with 400', async () => {
-      const token = await tokenFor(csUser);
+    it('rejects a wrong current password with 400 and leaves sessions untouched', async () => {
+      const { accessToken, cookie } = await loginAs(csUser);
 
       const res = await request(app.getHttpServer())
-        .post('/users/change-password')
-        .set('Authorization', `Bearer ${token}`)
+        .patch('/auth/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
         .send({ oldPassword: 'wrongPassword123', newPassword: 'brandNewPassword123' })
         .expect(400);
 
       expect(res.body.message).toBe('Old password is incorrect');
+
+      // Refresh cookie still succeeds
+      await request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).expect(200);
     });
 
-    it('requires a token', async () => {
+    it('rejects a new password identical to the current one with 400 and leaves sessions untouched', async () => {
+      const { accessToken, cookie } = await loginAs(csUser);
+
+      const res = await request(app.getHttpServer())
+        .patch('/auth/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ oldPassword: PASSWORD, newPassword: PASSWORD })
+        .expect(400);
+
+      expect(res.body.message).toBe('New password must differ from the current password');
+
+      // Refresh cookie still succeeds — nothing was revoked
+      await request(app.getHttpServer()).post('/auth/refresh').set('Cookie', cookie).expect(200);
+    });
+
+    it('invalidates all other sessions on success and applies the new password', async () => {
+      const first = await loginAs(admin);
+      const second = await loginAs(admin);
+      const newPassword = 'brandNewPassword123';
+
+      const res = await request(app.getHttpServer())
+        .patch('/auth/change-password')
+        .set('Authorization', `Bearer ${first.accessToken}`)
+        .send({ oldPassword: PASSWORD, newPassword })
+        .expect(200);
+
+      expect(res.body).toEqual({ data: { ok: true } });
+
+      // Refresh cookies from both sessions are invalidated
       await request(app.getHttpServer())
-        .post('/users/change-password')
+        .post('/auth/refresh')
+        .set('Cookie', first.cookie)
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', second.cookie)
+        .expect(401);
+
+      // Login with new password succeeds
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: admin.email, password: newPassword })
+        .expect(200);
+    });
+
+    it('requires an access token (rejects with 401)', async () => {
+      await request(app.getHttpServer())
+        .patch('/auth/change-password')
         .send({ oldPassword: PASSWORD, newPassword: 'brandNewPassword123' })
         .expect(401);
+    });
+
+    it('validates password length (rejects short new password with 400)', async () => {
+      const { accessToken } = await loginAs(csUser);
+
+      await request(app.getHttpServer())
+        .patch('/auth/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ oldPassword: PASSWORD, newPassword: 'short' })
+        .expect(400);
+    });
+
+    it('confirms the old route is gone (POST /users/change-password returns 404)', async () => {
+      const { accessToken } = await loginAs(csUser);
+
+      await request(app.getHttpServer())
+        .post('/users/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ oldPassword: PASSWORD, newPassword: 'brandNewPassword123' })
+        .expect(404);
     });
   });
 });

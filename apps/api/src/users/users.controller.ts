@@ -25,10 +25,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { JwtUser } from '../auth/strategies/jwt.strategy.js';
-import { AuthOkResponseDto } from '../auth/dto.js';
 import { SessionService } from '../redis/session.service.js';
 import {
-  ChangePasswordRequestDto,
   CreateUserRequestDto,
   RevokeSessionResponseDto,
   UpdateUserRequestDto,
@@ -105,19 +103,6 @@ export class UsersController {
     // Deactivation (isActive === false) and its session revocation are the
     // service's concern; the controller only routes and authorizes.
     return this.usersService.update(id, dto, user.userId);
-  }
-
-  @Post(routes.users.changePassword)
-  @ApiOperation({ summary: 'Change your own password' })
-  @ApiOkResponse({ description: 'Password changed successfully', type: AuthOkResponseDto })
-  @ApiBadRequestResponse({ description: 'Current password incorrect or validation error' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid token' })
-  async changePassword(
-    @Body() dto: ChangePasswordRequestDto,
-    @CurrentUser() user: JwtUser,
-  ): Promise<AuthOkResponseDto> {
-    await this.usersService.changePassword(user.userId, dto);
-    return { ok: true };
   }
 
   @Post(routes.users.revokeSession)

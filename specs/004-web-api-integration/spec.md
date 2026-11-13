@@ -23,7 +23,7 @@
 - Q: Should the existing `forgot-password` and `reset-password` pages be wired to the real endpoints, or left mocked? → A: Wire both to the real endpoints. The backend already implements them, both pages already exist and are already registered as public routes, and the `TODO: Phase 2` placeholder means a reachable page currently claims an email was sent while doing nothing. (CHK001)
 
 ### Revision 2026-10-01 — Backend Reconciliation
-The original spec was written against the 001-era backend. It has been reconciled with the current backend (`apps/api/src`, `@alfahd/types` DTOs, Redis session service, guards). Source-of-truth changes: response envelope is `{ data }` (no `success` flag); `UserDto` is `{ id, email, role, isActive, createdAt }` (no name/department fields); role value is `CS` (not `CUSTOMER_SERVICE`); `GET /users` returns the full array (no pagination); change-password lives at `POST /users/change-password` with `{oldPassword, newPassword}`; refresh returns `{accessToken}` only (no rotation); deactivation takes effect at next login/refresh, not on in-flight access tokens.
+The original spec was written against the 001-era backend. It has been reconciled with the current backend (`apps/api/src`, `@alfahd/types` DTOs, Redis session service, guards). Source-of-truth changes: response envelope is `{ data }` (no `success` flag); `UserDto` is `{ id, email, role, isActive, createdAt }` (no name/department fields); role value is `CS` (not `CUSTOMER_SERVICE`); `GET /users` returns the full array (no pagination); change-password now lives at `PATCH /auth/change-password` (Issue #14) with `{oldPassword, newPassword}`; refresh returns `{accessToken, refreshToken}` and rotates; deactivation takes effect at next login/refresh, not on in-flight access tokens.
 
 ### Revision 2026-10-01 (2) — Requirements-Quality Review Resolutions
 A requirements-quality review (`checklists/api.md`, `checklists/security.md`) found conflicts between the spec, its contracts, and the actual backend. This revision supersedes the earlier body-based-refresh decision and the frontend-only scope.
@@ -43,6 +43,9 @@ A requirements-quality review (`checklists/api.md`, `checklists/security.md`) fo
 | R11 | **Backend e2e coverage is added** for auth, users CRUD, and the RBAC guards, so the "fully functional and tested" assumption rests on evidence. | unevidenced assumption |
 | R12 | **Web calls go through a Next.js `/api/*` rewrite.** The browser talks only to the Vercel origin; Railway is reached server-side. This is what makes FR-008 implementable — the refresh cookie is same-origin and therefore readable by middleware — and it removes the cross-site constraint that forced `SameSite=None`. It also forces the cookie `Path` to `/`, since RFC 6265 prefix matching means neither `/auth` nor `/api/auth` reaches both the refresh route and the middleware-guarded page routes. | FR-008's original "read the httpOnly cookie" wording; R3's "cross-site ⇒ `SameSite=None`" premise and its `Path=/auth` |
 
+### Revision 2026-11-11 — Refresh Token Rotation (Issue #9)
+Refresh-token rotation is implemented on `POST /auth/refresh` (issue #9), superseding the `FR-004 (DEFERRED)` decision. Each successful refresh atomically consumes the presented refresh token (`GETDEL`), issues a new access token and rotated refresh token (delivered via HTTP-only cookie and JSON body), and revokes the old token id in Redis. Any replay of an already-used refresh token returns 401.
+
 ## Current State Assessment
 
 ### Frontend Pages (Built)
@@ -56,7 +59,7 @@ A requirements-quality review (`checklists/api.md`, `checklists/security.md`) fo
 
 ### Frontend Auth Infrastructure (Built)
 - **Auth Store** (Zustand + persist): Stores `accessToken`, `refreshToken`, `user` in `localStorage` — **a known XSS exposure that this feature removes**
-- **Axios Instance**: Refresh-token interceptor with single-flight deduplication. **Two defects, both fixed by this feature:** (a) it reads `data.data.refreshToken` from the refresh response, which the backend does not return, so it overwrites the stored refresh token with `undefined` and forces a logout on the second 401; (b) there is **no request interceptor** at all, so no request carries `Authorization: Bearer` except the 401-retry path — SC-002 is therefore false today.
+- **Axios Instance**: Refresh-token interceptor with single-flight deduplication. **Two defects, both fixed by this feature:** (a) it reads `data.data.refreshToken` from the refresh response, which the backend did not return at the time of writing this feature (Issue #9 now returns the rotated token in the body, which the web client ignores), so it overwrites the stored refresh token with `undefined` and forces a logout on the second 401; (b) there is **no request interceptor** at all, so no request carries `Authorization: Bearer` except the 401-retry path — SC-002 is therefore false today.
 - **Route Guard** (`proxy.ts`): Checks for the JS-writable `fahd-session` cookie, which `auth.store.ts` writes via `document.cookie` with `samesite=strict`. This feature removes that flag cookie entirely; the guard reads the same-origin `httpOnly` refresh cookie instead, enabled by the `/api/*` rewrite (R12).
 - **Base URL**: `axios-instance.ts` uses `process.env.NEXT_PUBLIC_API_URL` directly as `baseURL`, with an absolute URL hard-coded for the refresh call. With the rewrite, both become relative `/api` paths (FR-008).
 - **Role Guard** (`RoleGuard`): Client-side permission checking via `hasPermission()`
@@ -66,8 +69,8 @@ A requirements-quality review (`checklists/api.md`, `checklists/security.md`) fo
 ### Backend Endpoints (Reconciled 2026-10-01 with `apps/api/src`; cookie behaviour added by Revision (2))
 | Controller | Endpoints |
 |------------|-----------|
-| **Auth** (`/auth`) | `POST /login` (rate-limited 5/10min/IP → 429; **sets refresh cookie**), `POST /refresh` (**cookie preferred, body fallback** → `{accessToken}` only), `POST /logout` (JWT required; **clears refresh cookie**), `POST /forgot-password` (always `ok`), `POST /reset-password` (single-use 1h token) |
-| **Users** (`/users`, JWT + ADMIN except change-password) | `POST /` (email/password min 8/role → 201, 409 on duplicate), `GET /` (full array, no pagination), `GET /:id`, `PATCH /:id` (email/role/isActive; `isActive:false` deactivates; self-deactivation → 400), `POST /change-password` (own password, `{oldPassword, newPassword}`), `POST /:id/revoke-session` → `{ok, revoked}` |
+| **Auth** (`/auth`) | `POST /login` (rate-limited 5/10min/IP → 429; **sets refresh cookie**), `POST /refresh` (**cookie preferred, body fallback** → `{accessToken, refreshToken}` with rotation), `POST /logout` (JWT required; **clears refresh cookie**), `PATCH /change-password` (JWT, all roles), `POST /forgot-password` (always `ok`), `POST /reset-password` (single-use 1h token) |
+| **Users** (`/users`, JWT + ADMIN) | `POST /` (email/password min 8/role → 201, 409 on duplicate), `GET /` (full array, no pagination), `GET /:id`, `PATCH /:id` (email/role/isActive; `isActive:false` deactivates; self-deactivation → 400), `POST /:id/revoke-session` → `{ok, revoked}` |
 
 Global wire format: success → `{ data: <payload> }` (no `success` flag) — the `ResponseInterceptor` wraps **every** response, including `{ok: true}` endpoints; errors → `{ statusCode, message, path, timestamp }`. No global route prefix (no versioning). CORS is enabled with an explicit allowlist and `credentials: true` (added by this feature).
 
@@ -96,9 +99,9 @@ As a system user, I need the login page to authenticate against the real backend
 
 1. **Given** the login page is loaded, **When** a user submits valid email and password, **Then** the system calls `POST /auth/login`, receives real access and refresh tokens, stores them securely, and redirects to the dashboard.
 2. **Given** the login page is loaded, **When** a user submits invalid credentials, **Then** the system displays a clear error message ("Invalid credentials") and does not store any tokens. The message MUST be byte-identical whether the email is unknown or the password is wrong, and the frontend MUST NOT branch on the status code to produce a more specific message — an attacker must not be able to enumerate staff accounts through login.
-3. **Given** a user is authenticated, **When** the access token expires, **Then** the axios interceptor automatically calls `POST /auth/refresh` with the refresh token and retries the original request transparently.
+3. **Given** a user is authenticated, **When** the access token expires, **Then** the axios interceptor automatically calls `POST /auth/refresh` with the refresh token and retries the original request transparently. Each refresh returns a new token and invalidates the previous one (replay → 401).
 4. **Given** a user is authenticated, **When** the refresh token is invalid or expired, **Then** the system clears the session, dispatches a session-expired event, and redirects to the login page.
-5. **Given** a user is on the login page, **When** they click logout (or session expires), **Then** `POST /auth/logout` is called to revoke the refresh token on the server.
+5. **Given** a user is authenticated, **When** they click logout, **Then** `POST /auth/logout` is called to revoke all sessions for the account on the server (rotation renders the access token's `jti` stale, so logout revokes account-wide; accepted tradeoff: other devices for the user are signed out) and clear the cookie.
 
 ---
 
@@ -131,7 +134,7 @@ As a security-conscious administrator, I need tokens stored and managed securely
 
 1. **Given** a user logs in, **When** tokens are received, **Then** the access token is held in memory only (Zustand state, no persist middleware) and is NOT written to `localStorage`; the refresh token is set by the backend as an `httpOnly` cookie and is never exposed to JavaScript.
 2. **Given** a user has an active session, **When** the page is reloaded or reopened, **Then** the frontend calls `POST /auth/refresh` on mount and the backend reads the `httpOnly` cookie, so the session is restored without a re-login prompt.
-3. **Given** a user is signed in and a refresh occurs, **When** the backend issues a new access token, **Then** the same refresh token remains valid — this feature does **not** introduce rotation (see FR-004).
+3. **Given** a user is signed in and a refresh occurs, **When** the backend issues a new access token, **Then** the presented refresh token is invalidated, a new one is issued, and replaying the old token returns 401 (FR-004, Issue #9).
 4. **Given** an admin revokes a user's session, **When** the user makes their next request, **Then** the refresh is rejected and their session is cleared within the access token's remaining lifetime (≤15 min), and immediately on any refresh attempt.
 
 ---
@@ -197,7 +200,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - What happens when the refresh cookie is missing or expired but the access token is still in memory? → The frontend continues using the access token until it expires, then the failed refresh clears the session and redirects to login. It must not loop on refresh attempts.
 - What happens when a user logs out and a stale refresh cookie is replayed? → Logout clears the cookie and revokes the Redis session; the replayed token fails the revocation check and returns 401.
 - What happens when an admin deactivates a user who is currently logged in? → The deactivated user's current access token stays valid until it expires (up to 15 min; JWTs are stateless). Their next login and next `POST /auth/refresh` fail with 401.
-- What happens when the proxy guard finds a refresh cookie but the session is actually revoked? → The refresh token is an opaque UUID backed by Redis (`rt:{userId}:{tokenId}`), so middleware can check **presence only** — it cannot validate the session without a network call on every request. A stale cookie therefore passes the guard and fails on the first real API call, which returns 401 and clears the session. The guard is a routing affordance; the API remains the only enforcement point (FR-009).
+- What happens when the proxy guard finds a refresh cookie but the session is actually revoked? → The refresh token is an opaque UUID backed by Redis (`rt:token:{tokenId}`), so middleware can check **presence only** — it cannot validate the session without a network call on every request. A stale cookie therefore passes the guard and fails on the first real API call, which returns 401 and clears the session. The guard is a routing affordance; the API remains the only enforcement point (FR-009).
 - What happens when the cookie exists in the browser but was scoped to a different environment's domain? → Localhost and production cookies are independent, so a session established on one is invisible to the other. Expected, not a bug.
 
 ---
@@ -207,9 +210,9 @@ As a system administrator, I need all protected routes to enforce authentication
 ### Functional Requirements
 
 - **FR-001**: The login page MUST authenticate users via `POST /auth/login` with email and password — no fake/mock authentication.
-- **FR-002**: The access token MUST be held in memory only (Zustand state without persist middleware) and MUST NOT be written to `localStorage`, `sessionStorage`, or any JavaScript-readable cookie. The refresh token MUST be delivered to the browser only as an `httpOnly` cookie set by the backend and MUST NOT be exposed to JavaScript at any point.
+- **FR-002**: The access token MUST be held in memory only (Zustand state without persist middleware) and MUST NOT be written to `localStorage`, `sessionStorage`, or any JavaScript-readable cookie. The refresh token is delivered to the browser via an `httpOnly` cookie and to mobile via the JSON body; the web client MUST NOT read or store the refresh token in JavaScript at any point.
 - **FR-003**: The axios instance MUST attach `Authorization: Bearer <accessToken>` via a request interceptor on every request except `/auth/login`, and MUST automatically attempt a refresh and retry the original request once on a 401 response.
-- **FR-004** (DEFERRED, backend-owned): Refresh token rotation is out of scope. `POST /auth/refresh` returns a new access token only; the same refresh token stays valid until logout or revocation. Rotation remains a follow-up backend task and MUST NOT be assumed by the frontend.
+- **FR-004**: Refresh token rotation is implemented on `POST /auth/refresh` (superseding the earlier DEFERRED status via Issue #9). Each successful refresh atomically consumes the presented refresh token (`GETDEL`), sets a new `httpOnly` refresh cookie, and returns the rotated token in the response body. The previous token is immediately invalidated (replay → 401).
 - **FR-005**: The system MUST clear all session state and redirect to login when the refresh token is invalid, expired, revoked, or absent.
 - **FR-006**: The dashboard MUST derive exactly three real KPIs from `GET /users` — total users, active users, active technicians. KPIs with no backing endpoint (tickets) MUST display a static placeholder and MUST NOT offer a retry control. A failed fetch is a distinct state that MUST offer retry on the real KPI cards.
 - **FR-007**: The users page MUST fetch and display real user data from `GET /users` (full array; client-side table only, no server pagination). Sorting and filtering MUST be client-side.
@@ -240,7 +243,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - **UserDto** (canonical, from `@alfahd/types`): `{ id, email, role, isActive, createdAt }`. No `name`, `department`, or `warehouseId` fields exist — the UI shows the email and derives display info client-side.
 - **Role**: `'ADMIN' | 'WAREHOUSE_STAFF' | 'CS' | 'TECHNICIAN'` (backend value is `CS`; the dashboard displays it as "Customer Service").
 - **AccessToken**: Short-lived JWT containing `sub`, `email`, `role`, `jti` (default 15 min) — stored in memory, sent as `Authorization: Bearer` header.
-- **RefreshToken**: Opaque UUID (not a JWT) backed by the Redis session `rt:{userId}:{tokenId}` (7-day TTL). Delivered to the web client as an `httpOnly` cookie and sent in the request body only by the mobile client; logout/revocation adds it to the denylist `rv:{tokenId}`.
+- **RefreshToken**: Opaque UUID (not a JWT) backed by the Redis session `rt:token:{tokenId}` + `rt:user_tokens:{userId}` (7-day TTL). Delivered to the web client as an `httpOnly` cookie and sent in the request body for mobile; logout/revocation adds it to the denylist `rv:{tokenId}`.
 - **RefreshCookie**: Server-set, `HttpOnly`, `Path=/` (R3 as amended by R12). `SameSite=Lax` for the same-origin web path; `SameSite=None; Secure` remains supported for the mobile native client. Never readable by JavaScript.
 - **Session** (server-side): a record in Redis mapping `userId` to `tokenId` — created on login, revoked on logout or admin action. This is the authority on whether a refresh token is valid.
 - **Terminology — "session" has three distinct referents**, and requirements use them deliberately:
@@ -263,7 +266,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - **SC-005**: The users page displays real data from `GET /users` with client-side sort and filter — no mock data remains, and no server pagination is used.
 - **SC-006**: Unauthorized access attempts are blocked with appropriate error messages — no data leaks to unauthenticated users, and no protected request is issued without a bearer token.
 - **SC-007**: Session expiry or logout propagates to all open tabs within 5 seconds of the originating tab acting, measurable by timestamping the broadcast and the redirect in each tab.
-- **SC-008** (DEFERRED): Removed from this feature's acceptance. Tracked as a backend follow-up.
+- **SC-008** (IMPLEMENTED, Issue #9): Refresh-token rotation is covered by API unit and e2e tests (`apps/api/src/auth/auth.service.spec.ts`, `apps/api/test/auth.e2e-spec.ts`).
 - **SC-009**: The refresh token is never present in `localStorage`, `sessionStorage`, or `document.cookie` after login — verifiable by inspecting each store and the cookie jar.
 - **SC-010**: A page reload with a valid refresh cookie restores the session without a re-login prompt; with the cookie cleared, the app lands on login and makes no retry loop against `/api/auth/refresh`. The cookie must survive the rewrite intact — verified by confirming it is sent on both `/api/auth/refresh` and `/dashboard`.
 - **SC-011**: A `GET` that fails with a transient 5xx or network error retries at most twice before the error state appears, and a `POST` that fails the same way issues exactly one network call — verified by counting requests in a mocked-interceptor test.
@@ -285,7 +288,7 @@ As a system administrator, I need all protected routes to enforce authentication
 - The `RoleGuard` and `permissions.ts` components are reused as-is for the pages in scope.
 - The `DataTable` component is reused for the users list in **client-side** mode; server-side pagination is not used because `GET /users` returns the full array.
 - Form data preservation on session expiry uses React state only, never persisted storage.
-- Reconciled 2026-10-01 with the current backend: response envelope `{ data }`, `UserDto` has no name/department fields, `GET /users` has no pagination, change-password lives at `POST /users/change-password` with `{oldPassword, newPassword}`.
+- Reconciled 2026-10-01 with the current backend: response envelope `{ data }`, `UserDto` has no name/department fields, `GET /users` has no pagination, change-password now lives at PATCH /auth/change-password (Issue #14); the old POST /users/change-password route was removed, with `{oldPassword, newPassword}`.
 - Password hashing is argon2id everywhere (per 003-argon2-enum-migration, verified in tree): `auth.service.ts` and `users.service.ts` both use `argon2` with `ARGON2_OPTIONS`; no bcrypt remains. No hashing caveat applies to this feature.
 - `forgot-password` always returns success regardless of whether the email exists (FR-022 extends the same non-enumerating stance to login). Reset tokens are single-use and expire after 1 hour.
 - Cookie attributes (R3, as amended by R12): the web cookie is `HttpOnly; SameSite=Lax; Path=/`, plus `Secure` in production. `SameSite=None` is no longer needed for the web path because the `/api/*` rewrite makes every call same-origin, but the backend must still be able to emit `SameSite=None` for the mobile native client, so the attribute stays environment-driven rather than hard-coded. Local development over plain HTTP omits `Secure` — `SameSite=None` is rejected without `Secure`, so a single hard-coded policy silently breaks cookie auth.
