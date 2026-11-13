@@ -20,7 +20,7 @@ import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
 import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
-import { users, warehouses, type User } from '../database/schema/index.js';
+import { employeeStatusHistory, users, warehouses, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
 import { EmailService } from '../email/email.service.js';
 import { SessionService } from '../redis/session.service.js';
@@ -233,29 +233,44 @@ export class UsersService {
     return updated;
   }
 
-  async updateEmployeeStatus(id: string, status: UserStatus): Promise<User> {
-    await this.findRowOrThrow(id);
-
+  async updateEmployeeStatus(
+    id: string,
+    status: UserStatus,
+    reason: string,
+    actorId: string,
+  ): Promise<User> {
     // Only INACTIVE deactivates the account flag. ON_LEAVE employees keep a
     // live account and valid sessions (spec: Acceptance Scenario 5); they are
     // simply not ACTIVE, so activity checks keyed on `status` (check-in,
     // assignment eligibility) already exclude them.
     const isActive = status !== 'INACTIVE';
-    const rows = await this.db
-      .update(users)
-      .set({
+    return this.db.transaction(async (tx) => {
+      const [previous] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.id, id))
+        .for('update')
+        .limit(1);
+      if (!previous) {
+        throw new NotFoundException('Employee not found');
+      }
+      const [updated] = await tx
+        .update(users)
+        .set({ status, isActive, updatedAt: new Date() })
+        .where(eq(users.id, id))
+        .returning();
+      if (!updated) {
+        throw new NotFoundException('Employee not found');
+      }
+      await tx.insert(employeeStatusHistory).values({
+        employeeId: id,
+        actorId,
+        previousStatus: previous.status,
         status,
-        isActive,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, id))
-      .returning();
-
-    const updated = rows[0];
-    if (!updated) {
-      throw new NotFoundException('Employee not found');
-    }
-    return updated;
+        reason,
+      });
+      return updated;
+    });
   }
 
   async updateProfilePhotoKey(id: string, profilePhotoKey: string | null): Promise<User> {

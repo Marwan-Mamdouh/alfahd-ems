@@ -56,12 +56,17 @@ export class EmployeesService {
     return toEmployeeDto(user);
   }
 
-  async updateStatus(id: string, status: UserStatus, reason: string): Promise<EmployeeDto> {
+  async updateStatus(
+    id: string,
+    status: UserStatus,
+    reason: string,
+    actorId: string,
+  ): Promise<EmployeeDto> {
     if (!reason || !reason.trim()) {
       throw new BadRequestException('Reason is mandatory for status changes');
     }
 
-    const updatedUser = await this.usersService.updateEmployeeStatus(id, status);
+    const updatedUser = await this.usersService.updateEmployeeStatus(id, status, reason, actorId);
 
     // If status is changed to INACTIVE, revoke all active sessions in Redis
     if (status === 'INACTIVE') {
