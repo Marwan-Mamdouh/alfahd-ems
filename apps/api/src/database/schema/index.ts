@@ -80,6 +80,24 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const employeeStatusHistory = pgTable(
+  'employee_status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => users.id),
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => users.id),
+    previousStatus: userStatusEnum('previous_status').notNull(),
+    status: userStatusEnum('status').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('employee_status_history_employee_idx').on(t.employeeId, t.createdAt)],
+);
+
 export const attendanceRecords = pgTable(
   'attendance_records',
   {

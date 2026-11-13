@@ -63,6 +63,13 @@
       "when": 1794434745103,
       "tag": "0008_spooky_hardball",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794783741309,
+      "tag": "0009_mighty_domino",
+      "breakpoints": true
     }
   ],
   "version": "7"
