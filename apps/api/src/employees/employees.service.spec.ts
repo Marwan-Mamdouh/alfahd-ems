@@ -12,6 +12,7 @@ describe('EmployeesService', () => {
   let usersServiceMock: {
     createEmployee: ReturnType<typeof vi.fn>;
     findEmployees: ReturnType<typeof vi.fn>;
+    findEmployeesForLookup: ReturnType<typeof vi.fn>;
     findEmployeeById: ReturnType<typeof vi.fn>;
     updateEmployee: ReturnType<typeof vi.fn>;
     updateEmployeeStatus: ReturnType<typeof vi.fn>;
@@ -48,6 +49,7 @@ describe('EmployeesService', () => {
     usersServiceMock = {
       createEmployee: vi.fn(),
       findEmployees: vi.fn(),
+      findEmployeesForLookup: vi.fn(),
       findEmployeeById: vi.fn().mockResolvedValue(mockUser),
       updateEmployee: vi.fn(),
       updateEmployeeStatus: vi.fn(),
@@ -199,6 +201,52 @@ describe('EmployeesService', () => {
       // The request must not fail, and the orphaned asset must be reported.
       expect(result.profilePhotoKey).toBe('employees/photos/new-key');
       expect(storageServiceMock.deleteFile).toHaveBeenCalledWith('old-key');
+    });
+  });
+
+  describe('lookup', () => {
+    it('returns minimal EmployeeLookupDto list without any PII fields (SEC-04)', async () => {
+      usersServiceMock.findEmployeesForLookup.mockResolvedValue([mockUser]);
+
+      const results = await service.lookup({ role: Role.TECHNICIAN, limit: 10 });
+
+      expect(results).toHaveLength(1);
+      const item = results[0];
+      expect(item).toEqual({
+        id: 'user-123',
+        name: 'Ahmed Mostafa',
+        role: 'TECHNICIAN',
+        status: 'ACTIVE',
+        isEligible: true,
+        assignedWarehouseId: 'warehouse-123',
+      });
+
+      // Strict PII absence assertion: ensure no sensitive data is leaked
+      const raw = item as unknown as Record<string, unknown>;
+      expect(raw.email).toBeUndefined();
+      expect(raw.phone).toBeUndefined();
+      expect(raw.nationalId).toBeUndefined();
+      expect(raw.hireDate).toBeUndefined();
+      expect(raw.department).toBeUndefined();
+      expect(raw.profilePhotoKey).toBeUndefined();
+      expect(raw.salary).toBeUndefined();
+      expect(raw.passwordHash).toBeUndefined();
+
+      expect(usersServiceMock.findEmployeesForLookup).toHaveBeenCalledWith({
+        role: Role.TECHNICIAN,
+        limit: 10,
+      });
+    });
+
+    it('sets isEligible=false for inactive or non-technician employees', async () => {
+      usersServiceMock.findEmployeesForLookup.mockResolvedValue([
+        { ...mockUser, status: 'ON_LEAVE' },
+        { ...mockUser, role: 'CS', status: 'ACTIVE' },
+      ]);
+
+      const results = await service.lookup({});
+      expect(results[0].isEligible).toBe(false);
+      expect(results[1].isEligible).toBe(false);
     });
   });
 });

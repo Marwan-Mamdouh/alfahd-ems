@@ -7,6 +7,7 @@ import { WarehousesRepository } from './repositories/warehouses.repository.js';
 import { InventoryRepository } from './repositories/inventory.repository.js';
 import { RoutersRepository } from './repositories/routers.repository.js';
 import { IpRepository } from './repositories/ip.repository.js';
+import { UsersRepository } from './repositories/users.repository.js';
 
 @Injectable()
 export class RepositoryService {
@@ -17,6 +18,7 @@ export class RepositoryService {
     public readonly inventory: InventoryRepository,
     public readonly routers: RoutersRepository,
     public readonly ip: IpRepository,
+    public readonly users: UsersRepository,
   ) {}
 
   async transaction<T>(callback: (tx: NodePgDatabase<typeof schema>) => Promise<T>): Promise<T> {

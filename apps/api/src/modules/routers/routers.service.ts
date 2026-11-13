@@ -9,13 +9,13 @@ import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema/index.js';
-import type {
-  RouterStatus,
-  RouterPhysicalCondition,
-  RouterDto,
-  RouterAssignmentDto,
-  RouterStatusHistoryDto,
-  RouterReportQueryDto,
+import {
+  ALLOWED_ROUTER_TRANSITIONS,
+  type RouterPhysicalCondition,
+  type RouterDto,
+  type RouterAssignmentDto,
+  type RouterStatusHistoryDto,
+  type RouterReportQueryDto,
 } from '@alfahd/types';
 import { RepositoryService } from '../repository/repository.service.js';
 import type {
@@ -26,16 +26,7 @@ import type {
   RouterQueryDto,
 } from './dto/index.js';
 
-export const ALLOWED_ROUTER_TRANSITIONS: Record<RouterStatus, readonly RouterStatus[]> = {
-  AVAILABLE: ['ASSIGNED_TO_TECHNICIAN'],
-  ASSIGNED_TO_TECHNICIAN: ['INSTALLED_AT_CUSTOMER', 'RETURNED', 'DAMAGED', 'LOST'],
-  INSTALLED_AT_CUSTOMER: ['RETURNED'],
-  RETURNED: ['AVAILABLE', 'UNDER_REPAIR', 'DAMAGED'],
-  DAMAGED: ['UNDER_REPAIR', 'DECOMMISSIONED'],
-  UNDER_REPAIR: ['AVAILABLE', 'DECOMMISSIONED'],
-  LOST: [],
-  DECOMMISSIONED: [],
-};
+export { ALLOWED_ROUTER_TRANSITIONS };
 
 @Injectable()
 export class RoutersService {
@@ -264,6 +255,9 @@ export class RoutersService {
 
       // Lock warehouse row to serialize against warehouse deactivation
       await this.repo.warehouses.findByIdForUpdate(warehouseId, tx);
+
+      // Verify target technician exists, has role TECHNICIAN, and is in ACTIVE status
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'assign router');
 
       // 3. Release active warehouse custody
       await this.repo.routers.releaseActiveAssignment(id, new Date(), tx);

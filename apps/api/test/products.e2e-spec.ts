@@ -79,6 +79,7 @@ describe('Products (e2e)', () => {
           description: data.description ?? null,
           lowStockThreshold: data.lowStockThreshold ?? 10,
           isSerialized: false,
+          isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -97,14 +98,28 @@ describe('Products (e2e)', () => {
       },
       canDeleteProduct: async (id: string) => {
         if (id === PRODUCT_2_ID) {
-          return { canDelete: false, reason: 'Product has active inventory stock' };
+          return {
+            canDelete: false,
+            reason: 'Cannot deactivate product holding active inventory (10 units in stock)',
+          };
         }
         return { canDelete: true };
+      },
+      softDeactivate: async (id: string) => {
+        const index = productStore.findIndex((p) => p.id === id);
+        if (index !== -1) {
+          productStore[index] = {
+            ...productStore[index],
+            isActive: false,
+            updatedAt: new Date(),
+          };
+        }
       },
       deleteById: async (id: string) => {
         productStore = productStore.filter((p) => p.id !== id);
       },
     },
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({}),
     warehouses: {},
     inventory: {},
   };
@@ -120,6 +135,7 @@ describe('Products (e2e)', () => {
         description: 'Gigabit dual-band wireless router',
         lowStockThreshold: 10,
         isSerialized: false,
+        isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -132,6 +148,7 @@ describe('Products (e2e)', () => {
         description: 'Shielded high-speed ethernet cable roll',
         lowStockThreshold: 5,
         isSerialized: false,
+        isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -251,9 +268,12 @@ describe('Products (e2e)', () => {
       await request(app.getHttpServer()).delete(`/products/${PRODUCT_1_ID}`).set(auth).expect(403);
     });
 
-    it('allows ADMIN to delete a product', async () => {
+    it('allows ADMIN to delete (soft-deactivate) a product', async () => {
       const auth = getAuthHeader(jwtService, Role.ADMIN);
       await request(app.getHttpServer()).delete(`/products/${PRODUCT_1_ID}`).set(auth).expect(204);
+      const prod = productStore.find((p) => p.id === PRODUCT_1_ID);
+      expect(prod).toBeDefined();
+      expect(prod?.isActive).toBe(false);
     });
   });
 

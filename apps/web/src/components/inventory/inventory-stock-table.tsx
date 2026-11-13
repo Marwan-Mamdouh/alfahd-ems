@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { AlertTriangle, CheckCircle2, Package, Warehouse } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Package, Warehouse, Hash } from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
@@ -61,9 +61,27 @@ export function InventoryStockTable({
             </div>
 
             <div className="min-w-0">
-              <p className="font-semibold text-foreground">{row.itemName}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-foreground">{row.itemName}</p>
+                {row.isSerialized && (
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                    سيريال
+                  </span>
+                )}
+              </div>
 
-              <p className="mt-1 text-xs text-muted-foreground">{row.model || "بدون موديل"}</p>
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{row.model || "بدون موديل"}</span>
+                {row.sku && (
+                  <>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-0.5 font-mono">
+                      <Hash className="h-3 w-3" />
+                      {row.sku}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         ),

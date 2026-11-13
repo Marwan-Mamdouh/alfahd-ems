@@ -94,6 +94,7 @@ export class InventoryService {
       const product = await this.ensureProductExists(dto.productId, tx);
       this.assertNonSerializedProduct(product);
       await this.ensureWarehouseExists(dto.warehouseId, tx);
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'issue or return stock');
 
       const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
       const currentQty = current?.quantity ?? 0;
@@ -127,6 +128,7 @@ export class InventoryService {
       const product = await this.ensureProductExists(dto.productId, tx);
       this.assertNonSerializedProduct(product);
       await this.ensureWarehouseExists(dto.warehouseId, tx);
+      await this.repo.users.ensureActiveTechnician(dto.technicianId, tx, 'issue or return stock');
 
       const current = await this.repo.inventory.getStock(dto.warehouseId, dto.productId, tx);
       const currentQty = current?.quantity ?? 0;

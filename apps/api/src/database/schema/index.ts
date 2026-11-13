@@ -156,6 +156,7 @@ export const products = pgTable('products', {
   description: text('description'),
   lowStockThreshold: integer('low_stock_threshold').default(10).notNull(),
   isSerialized: boolean('is_serialized').default(false).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

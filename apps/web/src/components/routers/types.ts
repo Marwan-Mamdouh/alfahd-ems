@@ -1,36 +1,67 @@
 /**
  * Router Management — Frontend Display Models
  *
- * Temporary UI types for Phase 2.
- * These are not confirmed backend DTOs.
+ * Real domain types backed by @alfahd/types.
  */
 
-export type RouterStatus = "IN_STOCK" | "ASSIGNED" | "INSTALLED" | "RETURNED" | "DAMAGED";
+import type {
+  RouterStatus,
+  RouterPhysicalCondition,
+  RouterHolderType,
+} from "@alfahd/types";
+
+export type { RouterStatus, RouterPhysicalCondition, RouterHolderType };
 
 export interface RouterRow {
   id: string;
   serialNumber: string;
-  brand: string;
-  model: string;
+  productId: string;
+  productName: string;
+  productSku?: string;
+  productModel?: string;
   status: RouterStatus;
+  physicalCondition: RouterPhysicalCondition;
   warehouseId: string | null;
   warehouseName: string | null;
-  assignedToId: string | null;
-  assignedToName: string | null;
+  externalLocation: string | null;
+  currentHolderType: RouterHolderType | null;
+  currentHolderId: string | null;
+  currentHolderName?: string | null;
+  notes: string | null;
   createdAt: string;
 }
 
-export interface RouterFormValues {
+export interface RouterRegistrationFormValues {
   serialNumber: string;
-  brand: string;
-  model: string;
+  productId: string;
   warehouseId: string;
+  physicalCondition: RouterPhysicalCondition;
+  isNewReceipt: boolean;
+  notes: string;
 }
+
+// Retain alias for backward compatibility with existing imports
+export type RouterFormValues = RouterRegistrationFormValues;
 
 export interface RouterAssignmentFormValues {
   routerId: string;
   technicianId: string;
   notes: string;
+}
+
+export interface RouterTransitionFormValues {
+  status: RouterStatus;
+  reason: string;
+  targetWarehouseId?: string;
+  notes?: string;
+}
+
+export interface RouterConditionFormValues {
+  physicalCondition: RouterPhysicalCondition;
+  locationType: "warehouse" | "external";
+  warehouseId?: string;
+  externalLocation?: string;
+  reason: string;
 }
 
 export interface RouterHistoryRow {

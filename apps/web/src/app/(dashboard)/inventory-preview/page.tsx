@@ -7,21 +7,41 @@ import {
   ArrowLeftRight,
   Boxes,
   ClipboardList,
-  FlaskConical,
   Package,
   PackagePlus,
   Plus,
   Search,
   Warehouse,
+  ShieldAlert,
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
+import { useAuthStore } from "@/core/auth/auth.store";
+import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useDeleteProduct,
+} from "@/core/query/use-products";
+import { useWarehouses } from "@/core/query/use-warehouses";
+import {
+  useInventoryStock,
+  useInventoryMovements,
+  useRecordInbound,
+  useRecordOutbound,
+  useRecordReturn,
+  useTransferStock,
+  useAdjustStock,
+  extractErrorMessage,
+} from "@/core/query/use-inventory";
 
 import { InventoryItemsTable } from "@/components/inventory/inventory-items-table";
 import { InventoryItemForm } from "@/components/inventory/inventory-item-form";
 import { InventoryStockTable } from "@/components/inventory/inventory-stock-table";
 import { InventoryMovementForm } from "@/components/inventory/inventory-movement-form";
 import { InventoryMovementsTable } from "@/components/inventory/inventory-movements-table";
+import { ProductDeactivateDialog } from "@/components/inventory/product-deactivate-dialog";
 
 import type {
   InventoryItemRow,
@@ -31,180 +51,6 @@ import type {
   InventoryMovementFormValues,
   InventoryMovementType,
 } from "@/components/inventory/types";
-
-// ============================================================
-// Inventory Preview
-// DEMO ONLY: Local state, no API calls, no database persistence.
-// ============================================================
-
-const DEMO_ITEMS: InventoryItemRow[] = [
-  {
-    id: "item-1",
-    name: "راوتر TP-Link",
-    model: "Archer C6",
-    category: "راوترات",
-    description: "راوتر لاسلكي للاستخدام المنزلي.",
-  },
-  {
-    id: "item-2",
-    name: "راوتر Huawei",
-    model: "HG8245H",
-    category: "راوترات",
-    description: "راوتر فايبر.",
-  },
-  {
-    id: "item-3",
-    name: "كابل إنترنت",
-    model: "CAT6",
-    category: "كابلات",
-    description: "كابل شبكات للاستخدام الداخلي.",
-  },
-  {
-    id: "item-4",
-    name: "كابل فايبر",
-    model: "Single Mode",
-    category: "كابلات",
-    description: "كابل فايبر ضوئي.",
-  },
-  {
-    id: "item-5",
-    name: "موصل RJ45",
-    model: "CAT6 RJ45",
-    category: "إكسسوارات",
-    description: "موصل لكابلات الإنترنت.",
-  },
-];
-
-const DEMO_WAREHOUSES = [
-  { id: "warehouse-1", name: "المخزن الرئيسي" },
-  { id: "warehouse-2", name: "مخزن الجيزة" },
-  { id: "warehouse-3", name: "مخزن الإسكندرية" },
-];
-
-const DEMO_TECHNICIANS = [
-  { id: "technician-1", name: "محمود أحمد" },
-  { id: "technician-2", name: "علي حسن" },
-  { id: "technician-3", name: "يوسف محمد" },
-];
-
-const DEMO_STOCKS: InventoryStockRow[] = [
-  {
-    id: "stock-1",
-    itemId: "item-1",
-    itemName: "راوتر TP-Link",
-    model: "Archer C6",
-    category: "راوترات",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    quantity: 45,
-    lowStockThreshold: 10,
-  },
-  {
-    id: "stock-2",
-    itemId: "item-2",
-    itemName: "راوتر Huawei",
-    model: "HG8245H",
-    category: "راوترات",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    quantity: 0,
-    lowStockThreshold: 5,
-  },
-  {
-    id: "stock-3",
-    itemId: "item-3",
-    itemName: "كابل إنترنت",
-    model: "CAT6",
-    category: "كابلات",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    quantity: 8,
-    lowStockThreshold: 15,
-  },
-  {
-    id: "stock-4",
-    itemId: "item-1",
-    itemName: "راوتر TP-Link",
-    model: "Archer C6",
-    category: "راوترات",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    quantity: 20,
-    lowStockThreshold: 10,
-  },
-  {
-    id: "stock-5",
-    itemId: "item-4",
-    itemName: "كابل فايبر",
-    model: "Single Mode",
-    category: "كابلات",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    quantity: 6,
-    lowStockThreshold: 10,
-  },
-  {
-    id: "stock-6",
-    itemId: "item-4",
-    itemName: "كابل فايبر",
-    model: "Single Mode",
-    category: "كابلات",
-    warehouseId: "warehouse-3",
-    warehouseName: "مخزن الإسكندرية",
-    quantity: 30,
-    lowStockThreshold: 10,
-  },
-  {
-    id: "stock-7",
-    itemId: "item-5",
-    itemName: "موصل RJ45",
-    model: "CAT6 RJ45",
-    category: "إكسسوارات",
-    warehouseId: "warehouse-3",
-    warehouseName: "مخزن الإسكندرية",
-    quantity: 100,
-    lowStockThreshold: 20,
-  },
-];
-
-const DEMO_MOVEMENTS: InventoryMovementRow[] = [
-  {
-    id: "movement-1",
-    itemId: "item-1",
-    itemName: "راوتر TP-Link",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    type: "INBOUND",
-    quantity: 20,
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-15T09:00:00+03:00",
-    notes: "استلام شحنة من المورد",
-  },
-  {
-    id: "movement-2",
-    itemId: "item-3",
-    itemName: "كابل إنترنت",
-    warehouseId: "warehouse-1",
-    warehouseName: "المخزن الرئيسي",
-    type: "OUTBOUND",
-    quantity: 10,
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-16T11:30:00+03:00",
-    notes: "صرف للفني محمود أحمد",
-  },
-  {
-    id: "movement-3",
-    itemId: "item-4",
-    itemName: "كابل فايبر",
-    warehouseId: "warehouse-2",
-    warehouseName: "مخزن الجيزة",
-    type: "RETURN",
-    quantity: 2,
-    performedBy: "مستخدم تجريبي",
-    createdAt: "2026-10-17T13:00:00+03:00",
-    notes: "مرتجع من الفني علي حسن",
-  },
-];
 
 type InventoryTab = "items" | "stocks" | "movements";
 type PageMode = "overview" | "create-item" | "edit-item" | "movement";
@@ -241,21 +87,119 @@ function getStockStatus(stock: InventoryStockRow) {
 }
 
 function InventoryPreviewContent() {
-  const [items, setItems] = useState<InventoryItemRow[]>(DEMO_ITEMS);
+  const user = useAuthStore((s) => s.user);
+  const userRole = user?.role ?? null;
 
-  const [stocks, setStocks] = useState<InventoryStockRow[]>(DEMO_STOCKS);
+  // Live queries
+  const {
+    products: liveProducts,
+    isLoading: isProductsLoading,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useProducts();
+  const createProductMutation = useCreateProduct();
+  const updateProductMutation = useUpdateProduct();
+  const deleteProductMutation = useDeleteProduct();
 
-  const [movements, setMovements] = useState<InventoryMovementRow[]>(DEMO_MOVEMENTS);
+  const [deactivatingItem, setDeactivatingItem] = useState<InventoryItemRow | null>(null);
+
+  const { warehouses: liveWarehouses } = useWarehouses();
+  const activeWarehouses = useMemo(() => {
+    return liveWarehouses
+      .filter((w) => w.isActive)
+      .map((w) => ({ id: w.id, name: w.name }));
+  }, [liveWarehouses]);
+
+  const { technicians: lookupTechnicians } = useTechniciansLookup();
+  const activeTechnicians = lookupTechnicians;
+
+  const {
+    stockItems: liveStocks,
+    isLoading: isStocksLoading,
+    error: stocksError,
+    refetch: refetchStocks,
+  } = useInventoryStock();
+
+  const {
+    movements: liveMovements,
+    isLoading: isMovementsLoading,
+    error: movementsError,
+    isForbidden: isMovementsForbidden,
+    refetch: refetchMovements,
+  } = useInventoryMovements(undefined, userRole);
+
+  // Live mutations
+  const inboundMutation = useRecordInbound();
+  const outboundMutation = useRecordOutbound();
+  const returnMutation = useRecordReturn();
+  const transferMutation = useTransferStock();
+  const adjustMutation = useAdjustStock();
+
+  const isMutating =
+    inboundMutation.isPending ||
+    outboundMutation.isPending ||
+    returnMutation.isPending ||
+    transferMutation.isPending ||
+    adjustMutation.isPending;
+
+  // Normalized items catalog
+  const items = useMemo(() => {
+    return liveProducts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      model: p.model,
+      category: p.category,
+      description: p.description,
+      lowStockThreshold: p.lowStockThreshold,
+      isSerialized: p.isSerialized,
+      isActive: p.isActive,
+    }));
+  }, [liveProducts]);
+
+  // Normalized stock balances
+  const stocks = useMemo<InventoryStockRow[]>(() => {
+    return liveStocks.map((s) => ({
+      id: s.id,
+      itemId: s.productId,
+      itemName: s.product?.name ?? "صنف غير معروف",
+      model: s.product?.model ?? "—",
+      category: s.product?.category ?? "—",
+      sku: s.product?.sku,
+      warehouseId: s.warehouseId,
+      warehouseName: s.warehouse?.name ?? "مخزن غير معروف",
+      quantity: s.quantity,
+      lowStockThreshold: s.product?.lowStockThreshold ?? 10,
+      isSerialized: s.product?.isSerialized,
+    }));
+  }, [liveStocks]);
+
+  // Normalized movements log
+  const movements = useMemo<InventoryMovementRow[]>(() => {
+    return liveMovements.map((m) => {
+      const prod = items.find((p) => p.id === m.productId);
+      const wh = liveWarehouses.find((w) => w.id === m.warehouseId);
+      return {
+        id: m.id,
+        itemId: m.productId,
+        itemName: prod?.name ?? "صنف غير معروف",
+        warehouseId: m.warehouseId,
+        warehouseName: wh?.name ?? "مخزن",
+        type: m.movementType as InventoryMovementType,
+        quantity: m.quantity,
+        performedBy: m.responsibleUserId ? `مستخدم (${m.responsibleUserId.slice(0, 8)})` : "النظام",
+        createdAt: m.createdAt,
+        notes: m.notes ?? null,
+      };
+    });
+  }, [liveMovements, items, liveWarehouses]);
 
   const [activeTab, setActiveTab] = useState<InventoryTab>("items");
-
   const [pageMode, setPageMode] = useState<PageMode>("overview");
-
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
-
   const [movementTypeFilter, setMovementTypeFilter] = useState("all");
 
   const [notification, setNotification] = useState<string | null>(null);
@@ -267,10 +211,13 @@ function InventoryPreviewContent() {
 
   const itemOptions = useMemo(
     () =>
-      items.map((item) => ({
-        id: item.id,
-        name: `${item.name} — ${item.model}`,
-      })),
+      items
+        .filter((item) => item.isActive !== false)
+        .map((item) => ({
+          id: item.id,
+          name: `${item.name} — ${item.model}`,
+          isSerialized: item.isSerialized,
+        })),
     [items]
   );
 
@@ -365,192 +312,136 @@ function InventoryPreviewContent() {
 
   async function handleItemSubmit(values: InventoryItemFormValues) {
     const name = values.name.trim();
+    const sku = values.sku.trim().toUpperCase();
     const model = values.model.trim();
     const category = values.category.trim();
     const description = values.description.trim();
+    const lowStockThreshold = Number(values.lowStockThreshold);
 
-    if (!name || !model || !category) {
-      throw new Error("اسم الصنف والموديل والتصنيف مطلوبون.");
+    if (!name || !sku || !model || !category) {
+      throw new Error("اسم الصنف ورمز الصنف (SKU) والموديل والتصنيف مطلوبون.");
     }
 
-    const duplicate = items.some(
-      (item) =>
-        item.name.toLowerCase() === name.toLowerCase() &&
-        item.model.toLowerCase() === model.toLowerCase() &&
-        item.id !== selectedItemId
-    );
+    try {
+      if (pageMode === "edit-item") {
+        if (!selectedItem) {
+          throw new Error("لم يتم العثور على الصنف.");
+        }
 
-    if (duplicate) {
-      throw new Error("يوجد صنف بنفس الاسم والموديل.");
-    }
+        await updateProductMutation.mutateAsync({
+          id: selectedItem.id,
+          dto: {
+            name,
+            sku,
+            model,
+            category,
+            description: description || null,
+            lowStockThreshold,
+          },
+        });
 
-    if (pageMode === "edit-item") {
-      if (!selectedItem) {
-        throw new Error("لم يتم العثور على الصنف.");
+        setNotification("تم تعديل بيانات الصنف في الكتالوج بنجاح.");
+      } else if (pageMode === "create-item") {
+        await createProductMutation.mutateAsync({
+          name,
+          sku,
+          model,
+          category,
+          description: description || null,
+          lowStockThreshold,
+        });
+
+        setNotification("تمت إضافة الصنف إلى كتالوج المنتجات بنجاح.");
+      } else {
+        throw new Error("عملية غير صالحة.");
       }
 
-      const updatedItem: InventoryItemRow = {
-        ...selectedItem,
-        name,
-        model,
-        category,
-        description: description || null,
-      };
-
-      setItems((previous) =>
-        previous.map((item) => (item.id === selectedItem.id ? updatedItem : item))
-      );
-
-      // Keep existing stock and movement display names synced.
-      setStocks((previous) =>
-        previous.map((stock) =>
-          stock.itemId === selectedItem.id
-            ? {
-                ...stock,
-                itemName: name,
-                model,
-                category,
-              }
-            : stock
-        )
-      );
-
-      setMovements((previous) =>
-        previous.map((movement) =>
-          movement.itemId === selectedItem.id
-            ? {
-                ...movement,
-                itemName: name,
-              }
-            : movement
-        )
-      );
-
-      setNotification("تم تعديل بيانات الصنف في المعاينة فقط.");
-    } else if (pageMode === "create-item") {
-      const newItem: InventoryItemRow = {
-        id: crypto.randomUUID(),
-        name,
-        model,
-        category,
-        description: description || null,
-      };
-
-      setItems((previous) => [newItem, ...previous]);
-
-      setNotification("تمت إضافة الصنف إلى الكتالوج التجريبي.");
-    } else {
-      throw new Error("عملية غير صالحة.");
+      setActiveTab("items");
+      backToOverview();
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية حفظ الصنف."));
     }
+  }
 
-    setActiveTab("items");
-    backToOverview();
+  async function handleDeactivateConfirm(item: InventoryItemRow) {
+    try {
+      await deleteProductMutation.mutateAsync(item.id);
+      setNotification(`تم تعطيل وأرشفة الصنف "${item.name}" بنجاح.`);
+      setDeactivatingItem(null);
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تعطيل الصنف."));
+    }
   }
 
   async function handleMovementSubmit(values: InventoryMovementFormValues) {
     const item = items.find((entry) => entry.id === values.itemId);
-
-    const warehouse = DEMO_WAREHOUSES.find((entry) => entry.id === values.warehouseId);
-
-    const quantity = Number(values.quantity);
+    const warehouse = activeWarehouses.find((entry) => entry.id === values.warehouseId);
 
     if (!item || !warehouse) {
       throw new Error("يرجى اختيار صنف ومخزن صحيحين.");
     }
 
-    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-      throw new Error("الكمية يجب أن تكون عددًا صحيحًا أكبر من صفر.");
-    }
-
-    const validTypes: InventoryMovementType[] = ["INBOUND", "OUTBOUND", "RETURN"];
-
-    if (!validTypes.includes(values.type)) {
-      throw new Error("نوع الحركة غير صحيح.");
-    }
-
-    const isInbound = values.type === "INBOUND";
-
-    const technician = DEMO_TECHNICIANS.find((entry) => entry.id === values.technicianId);
-
-    if (isInbound) {
-      if (!values.supplierName.trim()) {
-        throw new Error("اسم المورد مطلوب للوارد.");
-      }
-    } else if (!technician) {
-      throw new Error("يرجى اختيار الفني.");
-    }
-
-    const existingStock = stocks.find(
-      (stock) => stock.itemId === item.id && stock.warehouseId === warehouse.id
-    );
-
-    if (values.type === "OUTBOUND") {
-      if (!existingStock || existingStock.quantity < quantity) {
-        const available = existingStock?.quantity ?? 0;
-
-        throw new Error(`الكمية غير كافية. المتاح حاليًا ${available} فقط.`);
-      }
-    }
-
-    // Preview rule:
-    // INBOUND and RETURN add stock; OUTBOUND subtracts stock.
-    // Backend must validate permissions, assignments and balances.
-    const change = values.type === "OUTBOUND" ? -quantity : quantity;
-
-    if (existingStock) {
-      setStocks((previous) =>
-        previous.map((stock) =>
-          stock.id === existingStock.id
-            ? {
-                ...stock,
-                quantity: stock.quantity + change,
-              }
-            : stock
-        )
+    if (item.isSerialized) {
+      throw new Error(
+        "هذا الصنف متبع بالسيريال (راوتر / جهاز معرّف). لا يمكن إجراء حركة كمية مجمعة عليه من هنا، يرجى التوجه لشاشة إدارة الراوترات."
       );
-    } else {
-      // New stock entries are possible for incoming/returned items.
-      const newStock: InventoryStockRow = {
-        id: crypto.randomUUID(),
-        itemId: item.id,
-        itemName: item.name,
-        model: item.model,
-        category: item.category,
-        warehouseId: warehouse.id,
-        warehouseName: warehouse.name,
-        quantity: change,
-        lowStockThreshold: 10,
-      };
-
-      setStocks((previous) => [newStock, ...previous]);
     }
 
-    const movementNotes = [
-      isInbound ? `المورد: ${values.supplierName.trim()}` : `الفني: ${technician?.name ?? ""}`,
-      values.notes.trim(),
-    ]
-      .filter(Boolean)
-      .join(" — ");
+    try {
+      if (values.type === "INBOUND_SUPPLIER" || values.type === "INBOUND") {
+        await inboundMutation.mutateAsync({
+          warehouseId: values.warehouseId,
+          productId: values.itemId,
+          quantity: Number(values.quantity),
+          supplierName: values.supplierName,
+          notes: values.notes || undefined,
+        });
+        setNotification("تم تسجيل حركة الوارد من المورد بنجاح وتحديث الرصيد.");
+      } else if (values.type === "OUTBOUND_TECHNICIAN" || values.type === "OUTBOUND") {
+        await outboundMutation.mutateAsync({
+          warehouseId: values.warehouseId,
+          productId: values.itemId,
+          quantity: Number(values.quantity),
+          technicianId: values.technicianId,
+          notes: values.notes || undefined,
+        });
+        setNotification("تم صرف الكمية للفني بنجاح وتحديث الرصيد.");
+      } else if (values.type === "RETURN_TECHNICIAN" || values.type === "RETURN") {
+        await returnMutation.mutateAsync({
+          warehouseId: values.warehouseId,
+          productId: values.itemId,
+          quantity: Number(values.quantity),
+          technicianId: values.technicianId,
+          notes: values.notes || undefined,
+        });
+        setNotification("تم تسجيل المرتجع من الفني بنجاح وتحديث الرصيد.");
+      } else if (values.type === "TRANSFER_WAREHOUSE") {
+        if (!values.toWarehouseId) {
+          throw new Error("يرجى اختيار المخزن الوجهة للتحويل.");
+        }
+        await transferMutation.mutateAsync({
+          fromWarehouseId: values.warehouseId,
+          toWarehouseId: values.toWarehouseId,
+          productId: values.itemId,
+          quantity: Number(values.quantity),
+          notes: values.notes || undefined,
+        });
+        setNotification("تم تحويل المخزون بين المخزنين بنجاح وتحديث الأرصدة.");
+      } else if (values.type === "ADJUSTMENT") {
+        await adjustMutation.mutateAsync({
+          warehouseId: values.warehouseId,
+          productId: values.itemId,
+          newQuantity: Number(values.newQuantity),
+          notes: values.notes,
+        });
+        setNotification("تم تسجيل التسوية الجردية بنجاح وتحديث الرصيد الفعلي.");
+      }
 
-    const newMovement: InventoryMovementRow = {
-      id: crypto.randomUUID(),
-      itemId: item.id,
-      itemName: item.name,
-      warehouseId: warehouse.id,
-      warehouseName: warehouse.name,
-      type: values.type,
-      quantity,
-      performedBy: "مستخدم تجريبي",
-      createdAt: new Date().toISOString(),
-      notes: movementNotes || null,
-    };
-
-    setMovements((previous) => [newMovement, ...previous]);
-
-    setNotification("تم تسجيل الحركة وتحديث الكمية محليًا بنجاح.");
-
-    setActiveTab("movements");
-    backToOverview();
+      setActiveTab("stocks");
+      backToOverview();
+    } catch (err) {
+      throw new Error(extractErrorMessage(err, "فشلت عملية تسجيل حركة المخزون."));
+    }
   }
 
   const statCards = [
@@ -582,16 +473,13 @@ function InventoryPreviewContent() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Demo Banner */}
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        <FlaskConical className="mt-0.5 h-5 w-5 shrink-0" />
-
+      {/* Live Integration Notice */}
+      <div className="flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-900 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-200">
+        <Boxes className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400" />
         <div>
-          <p className="font-semibold">وضع المعاينة — بيانات تجريبية</p>
-
+          <p className="font-semibold">نظام إدارة المخزون المباشر (B3)</p>
           <p className="mt-1 text-sm">
-            جميع البيانات والعمليات داخل الصفحة تجريبية. التعديلات مؤقتة داخل المتصفح وتختفي عند
-            إعادة تحميل الصفحة. لا توجد أي طلبات API أو عمليات حفظ حقيقية.
+            متصل مباشرة بالخادم (Backend API) لإدارة الأرصدة، الحركات الخمس (وارد، صادر، مرتجع، تحويل، وتسوية جردية)، وضمان عزل الأجهزة المتتبعة بالسيريال.
           </p>
         </div>
       </div>
@@ -606,13 +494,12 @@ function InventoryPreviewContent() {
 
             <div>
               <h1 className="text-2xl font-bold">إدارة المخزون</h1>
-
-              <p className="mt-1 text-sm text-white/80">Inventory Management — Phase 2</p>
+              <p className="mt-1 text-sm text-white/80">Real Inventory & Stock Operations</p>
             </div>
           </div>
 
           <span className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold">
-            Preview Mode
+            Real Backend Connected
           </span>
         </div>
       </div>
@@ -635,7 +522,6 @@ function InventoryPreviewContent() {
 
               <div>
                 <p className="text-sm text-muted-foreground">{stat.title}</p>
-
                 <p className="mt-1 text-2xl font-bold">{stat.value.toLocaleString("ar-EG")}</p>
               </div>
             </div>
@@ -697,7 +583,7 @@ function InventoryPreviewContent() {
                   ? "عرض الأصناف وإضافة وتعديل بياناتها."
                   : activeTab === "stocks"
                     ? "متابعة الكميات في المخازن ومستويات التنبيه."
-                    : "متابعة الوارد والصادر والمرتجعات."}
+                    : "متابعة الوارد والصادر والمرتجعات والتحويلات."}
               </p>
             </div>
 
@@ -747,8 +633,7 @@ function InventoryPreviewContent() {
                 className={`${inputClass} w-full sm:w-52`}
               >
                 <option value="all">جميع المخازن</option>
-
-                {DEMO_WAREHOUSES.map((warehouse) => (
+                {activeWarehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.name}
                   </option>
@@ -756,32 +641,65 @@ function InventoryPreviewContent() {
               </select>
             )}
 
-            {activeTab === "movements" && (
+            {activeTab === "movements" && !isMovementsForbidden && (
               <select
                 value={movementTypeFilter}
                 onChange={(event) => setMovementTypeFilter(event.target.value)}
                 aria-label="تصفية حسب نوع الحركة"
-                className={`${inputClass} w-full sm:w-44`}
+                className={`${inputClass} w-full sm:w-52`}
               >
                 <option value="all">جميع الحركات</option>
-
-                <option value="INBOUND">وارد</option>
-
-                <option value="OUTBOUND">صادر</option>
-
-                <option value="RETURN">مرتجع</option>
+                <option value="INBOUND_SUPPLIER">وارد مورد</option>
+                <option value="OUTBOUND_TECHNICIAN">صرف لفني</option>
+                <option value="RETURN_TECHNICIAN">مرتجع فني</option>
+                <option value="TRANSFER_WAREHOUSE">تحويل مخزني</option>
+                <option value="ADJUSTMENT">تسوية جردية</option>
               </select>
             )}
           </div>
 
           {/* Data Tables */}
           {activeTab === "items" && (
-            <InventoryItemsTable items={filteredItems} onItemClick={openEditItem} />
+            <InventoryItemsTable
+              items={filteredItems}
+              isLoading={isProductsLoading}
+              error={productsError ? new Error(productsError) : null}
+              onRetry={refetchProducts}
+              onItemClick={openEditItem}
+              onDeactivate={(item) => setDeactivatingItem(item)}
+              canDeactivate={userRole === "ADMIN"}
+            />
           )}
 
-          {activeTab === "stocks" && <InventoryStockTable stocks={filteredStocks} />}
+          {activeTab === "stocks" && (
+            <InventoryStockTable
+              stocks={filteredStocks}
+              isLoading={isStocksLoading}
+              error={stocksError ? new Error(stocksError) : null}
+              onRetry={refetchStocks}
+            />
+          )}
 
-          {activeTab === "movements" && <InventoryMovementsTable movements={filteredMovements} />}
+          {activeTab === "movements" && (
+            <>
+              {isMovementsForbidden ? (
+                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-muted bg-muted/20 p-8 text-center">
+                  <ShieldAlert className="h-10 w-10 text-muted-foreground" />
+                  <p className="font-semibold text-foreground">صلاحية محدودة</p>
+                  <p className="max-w-md text-xs text-muted-foreground">
+                    عرض سجل حركات المخزون والتدقيق مقصور على مدراء النظام وأمناء المستودعات فقط.
+                  </p>
+                </div>
+              ) : (
+                <InventoryMovementsTable
+                  movements={filteredMovements}
+                  isLoading={isMovementsLoading}
+                  error={movementsError ? new Error(movementsError) : null}
+                  onRetry={refetchMovements}
+                />
+              )}
+            </>
+          )}
         </section>
       )}
 
@@ -824,27 +742,39 @@ function InventoryPreviewContent() {
             </div>
 
             <div>
-              <h2 className="text-xl font-bold">عملية مخزون جديدة</h2>
-
+              <h2 className="text-xl font-bold">تسجيل حركة مخزون جديدة</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                سيتم تحديث الكمية المعروضة محليًا بعد التسجيل.
+                تسجيل حركة رسمية على أرصدة المخازن مع التحقق الفوري من الصلاحيات وتوفر الكميات.
               </p>
             </div>
           </div>
 
           <InventoryMovementForm
             items={itemOptions}
-            warehouses={DEMO_WAREHOUSES}
-            technicians={DEMO_TECHNICIANS}
+            warehouses={activeWarehouses}
+            technicians={activeTechnicians}
+            userRole={userRole}
+            isSubmitting={isMutating}
             onSubmit={handleMovementSubmit}
             onCancel={backToOverview}
           />
         </section>
       )}
 
+      {/* Deactivate Product Confirmation Modal */}
+      {deactivatingItem && (
+        <ProductDeactivateDialog
+          item={deactivatingItem}
+          isOpen={Boolean(deactivatingItem)}
+          onClose={() => setDeactivatingItem(null)}
+          onConfirm={handleDeactivateConfirm}
+          isSubmitting={deleteProductMutation.isPending}
+        />
+      )}
+
       {/* Footer */}
       <p className="text-center text-xs text-muted-foreground">
-        Inventory Management Preview — بيانات تجريبية مستقلة عن الـ Backend وعن Warehouse Preview.
+        نظام الفهد لإدارة المخزون والتوريدات — متصل بالخادم المركزي
       </p>
     </div>
   );

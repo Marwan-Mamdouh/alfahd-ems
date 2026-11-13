@@ -33,10 +33,11 @@ import {
   UserResponseDto,
 } from './dto.js';
 import { UsersService } from './users.service.js';
+import { routes } from '../common/constants/routes.constants.js';
 
 @ApiTags('Users')
 @ApiBearerAuth()
-@Controller('users')
+@Controller(routes.users.root)
 @UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(
@@ -65,7 +66,7 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
-  @Get(':id')
+  @Get(routes.users.id)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Get a specific user by ID' })
   @ApiParam({
@@ -81,7 +82,7 @@ export class UsersController {
     return this.usersService.findOne(id);
   }
 
-  @Patch(':id')
+  @Patch(routes.users.id)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Update or deactivate a user' })
   @ApiParam({
@@ -104,7 +105,7 @@ export class UsersController {
     return this.usersService.update(id, dto, user.userId);
   }
 
-  @Post(':id/revoke-session')
+  @Post(routes.users.revokeSession)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Revoke all sessions for a user' })
   @ApiParam({

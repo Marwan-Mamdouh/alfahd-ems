@@ -53,11 +53,31 @@ interface RetryableConfig extends AxiosRequestConfig {
  * unauthenticated and the server rejected them.
  */
 api.interceptors.request.use((config) => {
+  // If request data is FormData (e.g. CSV import), strip Content-Type so the browser/Axios
+  // can compute the proper multipart boundary automatically rather than JSON-serializing it.
+  const isFormData =
+    (typeof FormData !== "undefined" && config.data instanceof FormData) ||
+    (Boolean(config.data) &&
+      typeof (config.data as Record<string, unknown>).append === "function");
+
+  if (isFormData && config.headers) {
+    if ("delete" in config.headers && typeof config.headers.delete === "function") {
+      config.headers.delete("Content-Type");
+      config.headers.delete("content-type");
+    } else {
+      delete (config.headers as Record<string, unknown>)["Content-Type"];
+      delete (config.headers as Record<string, unknown>)["content-type"];
+    }
+  }
+
   const { accessToken } = useAuthStore.getState();
   if (!accessToken) return config;
 
   const url = config.url ?? "";
   if (UNAUTHENTICATED_PATHS.has(url)) return config;
+
+  // Never send bearer tokens to external origins; only relative /api or same-origin paths
+  if (url.startsWith("http://") || url.startsWith("https://")) return config;
 
   config.headers.Authorization = `Bearer ${accessToken}`;
 
@@ -146,6 +166,10 @@ api.interceptors.response.use(
     const method = (original.method ?? "get").toLowerCase();
     if (method !== "get") return Promise.reject(error);
 
+    // Non-idempotent GET endpoints that enqueue background jobs (such as /attendance/report)
+    // must never be blindly retried on transient failures to avoid enqueuing duplicate jobs.
+    if (url.startsWith(ENDPOINTS.attendance.report)) return Promise.reject(error);
+
     // A 401 that already spent its single refresh-and-replay must not be retried
     // again here: that replay used the same (dead) credentials, so further
     // attempts cannot succeed, and it would inflate one logical GET into 5 calls.
@@ -210,4 +234,15 @@ export async function logout(): Promise<void> {
 
 export function unwrap<T>(response: { data: ApiResponse<T> }): T {
   return response.data.data;
+}
+
+/**
+ * Download a binary blob (e.g. XLSX report, raw export) from an authorized endpoint.
+ */
+export async function downloadBlob(url: string, config?: AxiosRequestConfig): Promise<Blob> {
+  const response = await api.get<Blob>(url, {
+    ...config,
+    responseType: "blob",
+  });
+  return response.data;
 }

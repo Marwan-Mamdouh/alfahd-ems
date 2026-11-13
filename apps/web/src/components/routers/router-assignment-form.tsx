@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
-import { Loader2, Router as RouterIcon, Save, UserRoundPlus, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  CheckCircle2,
+  Loader2,
+  Router as RouterIcon,
+  Save,
+  X,
+} from "lucide-react";
 
 import type { RouterAssignmentFormValues, RouterRow } from "./types";
 
@@ -38,18 +46,21 @@ export function RouterAssignmentForm({
     notes: "",
   });
 
-  const [errors, setErrors] = useState<Partial<Record<keyof RouterAssignmentFormValues, string>>>(
-    {}
-  );
-
+  const [errors, setErrors] = useState<Partial<Record<keyof RouterAssignmentFormValues, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
-
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const loading = isSubmitting || localSubmitting;
 
-  const availableRouters = useMemo(
-    () => routers.filter((router) => router.status === "IN_STOCK"),
+  // Domain rule: A router is assignable to a technician ONLY if AVAILABLE, SERVICEABLE, and in a warehouse.
+  const assignableRouters = useMemo(
+    () =>
+      (routers ?? []).filter(
+        (r) =>
+          r.status === "AVAILABLE" &&
+          r.physicalCondition === "SERVICEABLE" &&
+          Boolean(r.warehouseId)
+      ),
     [routers]
   );
 
@@ -58,9 +69,10 @@ export function RouterAssignmentForm({
     [routers, values.routerId]
   );
 
-  const canAssignSelectedRouter = selectedRouter?.status === "IN_STOCK";
-
-  function updateField(field: keyof RouterAssignmentFormValues, value: string) {
+  function updateField<K extends keyof RouterAssignmentFormValues>(
+    field: K,
+    value: RouterAssignmentFormValues[K]
+  ) {
     setValues((previous) => ({
       ...previous,
       [field]: value,
@@ -77,25 +89,22 @@ export function RouterAssignmentForm({
   function validate(): boolean {
     const nextErrors: Partial<Record<keyof RouterAssignmentFormValues, string>> = {};
 
-    if (!selectedRouter) {
-      nextErrors.routerId = "يرجى اختيار راوتر صحيح.";
-    } else if (!canAssignSelectedRouter) {
-      nextErrors.routerId = "لا يمكن تخصيص الراوتر إلا إذا كان موجودًا بالمخزن.";
-    }
-
-    if (
-      !values.technicianId ||
-      !technicians.some((technician) => technician.id === values.technicianId)
+    if (!values.routerId) {
+      nextErrors.routerId = "يرجى اختيار جهاز الراوتر المراد صرفه وتخصيصه.";
+    } else if (
+      selectedRouter &&
+      (selectedRouter.status !== "AVAILABLE" ||
+        selectedRouter.physicalCondition !== "SERVICEABLE" ||
+        !selectedRouter.warehouseId)
     ) {
-      nextErrors.technicianId = "يرجى اختيار فني صحيح.";
+      nextErrors.routerId = "الراوتر المختار غير متاح للصرف أو غير صالح للاستخدام بالمخزن.";
     }
 
-    if (values.notes.length > 1000) {
-      nextErrors.notes = "الملاحظات لا يجب أن تتجاوز 1000 حرف.";
+    if (!values.technicianId || !technicians.some((tech) => tech.id === values.technicianId)) {
+      nextErrors.technicianId = "يرجى اختيار الفني المستلم للعهدة.";
     }
 
     setErrors(nextErrors);
-
     return Object.keys(nextErrors).length === 0;
   }
 
@@ -104,19 +113,18 @@ export function RouterAssignmentForm({
 
     if (loading || !validate()) return;
 
-    const cleanedValues: RouterAssignmentFormValues = {
-      routerId: values.routerId,
-      technicianId: values.technicianId,
-      notes: values.notes.trim(),
-    };
-
     try {
       setLocalSubmitting(true);
       setSubmitError(null);
-
-      await onSubmit(cleanedValues);
+      await onSubmit({
+        routerId: values.routerId,
+        technicianId: values.technicianId,
+        notes: values.notes.trim(),
+      });
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "حدث خطأ أثناء تخصيص الراوتر.");
+      setSubmitError(
+        error instanceof Error ? error.message : "حدث خطأ غير متوقع أثناء تخصيص الراوتر."
+      );
     } finally {
       setLocalSubmitting(false);
     }
@@ -124,149 +132,137 @@ export function RouterAssignmentForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6" dir="rtl">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-          <UserRoundPlus className="h-6 w-6" />
-        </div>
-
-        <div>
-          <h2 className="text-xl font-bold">تخصيص راوتر لفني</h2>
-
-          <p className="mt-1 text-sm text-muted-foreground">
-            اختر الراوتر والفني المسؤول عنه. الراوترات المتاحة للتخصيص هي الموجودة بالمخزن فقط.
-          </p>
-        </div>
+      <div>
+        <h2 className="text-xl font-bold text-foreground">صرف وتخصيص راوتر لفني ميداني</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          تسليم عهدة جهاز راوتر سليم ومتاح بالمخزن إلى فني معتمد (خصم رصيد المخزن وتسجيل حركة صادر).
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        {/* Router */}
-        <div>
-          <label htmlFor="assignment-router" className={LABEL_CLASS}>
-            الراوتر *
-          </label>
+      {/* Selected Router Preview Card */}
+      {selectedRouter && (
+        <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-4 dark:border-teal-900 dark:bg-teal-950/20">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+                <RouterIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-mono font-bold text-foreground" dir="ltr">
+                  {selectedRouter.serialNumber}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedRouter.productName} {selectedRouter.productModel ? `(${selectedRouter.productModel})` : ""}
+                </p>
+              </div>
+            </div>
 
+            <div className="flex items-center gap-3 text-xs">
+              <span className="inline-flex items-center gap-1 text-teal-700 dark:text-teal-300">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                جاهز للصرف
+              </span>
+              <span className="text-muted-foreground">•</span>
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Building2 className="h-3.5 w-3.5" />
+                {selectedRouter.warehouseName ?? "المخزن"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        {/* Router Selection */}
+        <div className="md:col-span-2">
+          <label htmlFor="assign-router-id" className={LABEL_CLASS}>
+            اختر جهاز الراوتر *
+          </label>
           <select
-            id="assignment-router"
+            id="assign-router-id"
             required
             value={values.routerId}
-            disabled={loading}
-            onChange={(event) => updateField("routerId", event.target.value)}
-            aria-invalid={Boolean(errors.routerId)}
+            onChange={(e) => updateField("routerId", e.target.value)}
             className={INPUT_CLASS}
           >
-            <option value="">اختر الراوتر</option>
-
-            {availableRouters.map((router) => (
+            <option value="">
+              {assignableRouters.length === 0
+                ? "لا توجد أجهزة راوتر صالحة ومتاحة بالمخزن حاليًا"
+                : "اختر راوتر متاح للصرف"}
+            </option>
+            {assignableRouters.map((router) => (
               <option key={router.id} value={router.id}>
-                {router.serialNumber} — {router.brand} {router.model}
+                {router.serialNumber} — {router.productName} ({router.warehouseName})
               </option>
             ))}
-
-            {selectedRouter && !canAssignSelectedRouter && (
-              <option value={selectedRouter.id} disabled>
-                {selectedRouter.serialNumber} — غير متاح للتخصيص
-              </option>
-            )}
           </select>
-
           {errors.routerId && <p className="mt-1 text-xs text-red-600">{errors.routerId}</p>}
         </div>
 
-        {/* Technician */}
-        <div>
-          <label htmlFor="assignment-technician" className={LABEL_CLASS}>
-            الفني *
+        {/* Technician Selection */}
+        <div className="md:col-span-2">
+          <label htmlFor="assign-technician-id" className={LABEL_CLASS}>
+            الفني المستلم (المسؤول عن العهدة) *
           </label>
-
           <select
-            id="assignment-technician"
+            id="assign-technician-id"
             required
             value={values.technicianId}
-            disabled={loading}
-            onChange={(event) => updateField("technicianId", event.target.value)}
-            aria-invalid={Boolean(errors.technicianId)}
+            onChange={(e) => updateField("technicianId", e.target.value)}
             className={INPUT_CLASS}
+            disabled={technicians.length === 0}
           >
-            <option value="">اختر الفني</option>
-
+            <option value="" disabled={technicians.length === 0}>
+              {technicians.length === 0 ? "لا يوجد فنيين نشطين مسجلين" : "اختر الفني الميداني"}
+            </option>
             {technicians.map((technician) => (
               <option key={technician.id} value={technician.id}>
                 {technician.name}
               </option>
             ))}
           </select>
-
+          {technicians.length === 0 && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              لا يمكن صرف الراوتر لعدم وجود فنيين نشطين مسجلين في النظام حالياً.
+            </p>
+          )}
           {errors.technicianId && (
             <p className="mt-1 text-xs text-red-600">{errors.technicianId}</p>
           )}
         </div>
 
-        {/* Selected Router Summary */}
-        {selectedRouter && (
-          <div className="md:col-span-2">
-            <div className="flex items-start gap-3 rounded-xl border bg-muted/30 p-4">
-              <RouterIcon className="mt-0.5 h-5 w-5 shrink-0 text-teal-600" />
-
-              <div className="space-y-1 text-sm">
-                <p className="font-semibold">بيانات الراوتر المحدد</p>
-
-                <p>
-                  الرقم التسلسلي:{" "}
-                  <span className="font-mono" dir="ltr">
-                    {selectedRouter.serialNumber}
-                  </span>
-                </p>
-
-                <p>
-                  الشركة والموديل: {selectedRouter.brand} — {selectedRouter.model}
-                </p>
-
-                <p>المخزن: {selectedRouter.warehouseName ?? "غير محدد"}</p>
-
-                {!canAssignSelectedRouter && (
-                  <p className="font-medium text-red-600">هذا الراوتر غير متاح للتخصيص حاليًا.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Notes */}
         <div className="md:col-span-2">
-          <label htmlFor="assignment-notes" className={LABEL_CLASS}>
-            ملاحظات
+          <label htmlFor="assign-notes" className={LABEL_CLASS}>
+            ملاحظات الصرف وأمر العمل
           </label>
-
           <textarea
-            id="assignment-notes"
-            rows={4}
+            id="assign-notes"
+            rows={3}
             maxLength={1000}
             value={values.notes}
-            disabled={loading}
-            onChange={(event) => updateField("notes", event.target.value)}
-            placeholder="اكتب ملاحظات عن عملية التخصيص..."
-            className="w-full resize-y rounded-lg border border-input bg-background px-3 py-3 text-sm outline-none focus:border-teal-500"
+            onChange={(e) => updateField("notes", e.target.value)}
+            placeholder="أدخل أي ملاحظات عن أمر التركيب أو سبب الصرف للفني..."
+            className="w-full resize-y rounded-lg border border-input bg-background p-3 text-sm outline-none focus:border-teal-500"
           />
-
-          {errors.notes && <p className="mt-1 text-xs text-red-600">{errors.notes}</p>}
         </div>
       </div>
 
-      {availableRouters.length === 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-          لا توجد أجهزة راوتر متاحة للتخصيص حاليًا.
-        </div>
-      )}
-
+      {/* Error Alert */}
       {submitError && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
         >
-          {submitError}
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+            تعذر صرف الراوتر
+          </div>
+          <p className="mt-1 text-xs leading-relaxed">{submitError}</p>
         </div>
       )}
 
+      {/* Action Buttons */}
       <div className="flex flex-wrap justify-end gap-3 border-t pt-5">
         {onCancel && (
           <button
@@ -282,12 +278,11 @@ export function RouterAssignmentForm({
 
         <button
           type="submit"
-          disabled={loading || availableRouters.length === 0 || !canAssignSelectedRouter}
+          disabled={loading || assignableRouters.length === 0}
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-
-          {loading ? "جاري التخصيص..." : "تأكيد التخصيص"}
+          {loading ? "جاري التخصيص..." : "تأكيد الصرف والتسليم"}
         </button>
       </div>
     </form>

@@ -1,16 +1,19 @@
 /**
  * Inventory Management — Frontend display models.
- *
- * Temporary types for Phase 2 UI development.
- * These are NOT the confirmed backend API DTOs.
  */
+
+import type { StockMovementType } from "@alfahd/types";
 
 export interface InventoryItemRow {
   id: string;
   name: string;
+  sku?: string;
   model: string;
   category: string;
   description: string | null;
+  lowStockThreshold?: number;
+  isSerialized?: boolean;
+  isActive?: boolean;
 }
 
 export interface InventoryStockRow {
@@ -19,13 +22,16 @@ export interface InventoryStockRow {
   itemName: string;
   model: string;
   category: string;
+  sku?: string;
   warehouseId: string;
   warehouseName: string;
   quantity: number;
   lowStockThreshold: number;
+  isSerialized?: boolean;
 }
 
-export type InventoryMovementType = "INBOUND" | "OUTBOUND" | "RETURN";
+export type LegacyMovementAlias = "INBOUND" | "OUTBOUND" | "RETURN";
+export type InventoryMovementType = StockMovementType | LegacyMovementAlias;
 
 export interface InventoryMovementRow {
   id: string;
@@ -38,13 +44,18 @@ export interface InventoryMovementRow {
   performedBy: string;
   createdAt: string;
   notes: string | null;
+  supplierName?: string | null;
+  technicianId?: string | null;
+  technicianName?: string | null;
 }
 
 export interface InventoryItemFormValues {
   name: string;
+  sku: string;
   model: string;
   category: string;
   description: string;
+  lowStockThreshold: string;
 }
 
 export interface InventoryMovementFormValues {
@@ -54,5 +65,7 @@ export interface InventoryMovementFormValues {
   quantity: string;
   technicianId: string;
   supplierName: string;
+  toWarehouseId?: string;
+  newQuantity?: string;
   notes: string;
 }

@@ -16,7 +16,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
-import { Role, type EmployeeDto } from '@alfahd/types';
+import { Role, type EmployeeDto, type EmployeeLookupDto } from '@alfahd/types';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -26,6 +27,8 @@ import { CreateEmployeeRequestDto } from './dto/create-employee.dto.js';
 import { UpdateEmployeeRequestDto } from './dto/update-employee.dto.js';
 import { UpdateEmployeeStatusRequestDto } from './dto/update-employee-status.dto.js';
 import { EmployeeQueryRequestDto } from './dto/employee-query.dto.js';
+import { EmployeeLookupQueryRequestDto } from './dto/employee-lookup-query.dto.js';
+import { routes } from '../common/constants/routes.constants.js';
 
 /**
  * 5 MB upload cap enforced by Multer itself: with memory storage the limit must
@@ -34,7 +37,9 @@ import { EmployeeQueryRequestDto } from './dto/employee-query.dto.js';
  */
 const MAX_PHOTO_FILE_SIZE = 5 * 1024 * 1024;
 
-@Controller('employees')
+@ApiTags('employees')
+@ApiBearerAuth()
+@Controller(routes.employees.root)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
@@ -54,7 +59,15 @@ export class EmployeesController {
     return this.employeesService.findAll(query);
   }
 
-  @Get(':id')
+  @Get(routes.employees.lookup)
+  @Roles(Role.ADMIN, Role.WAREHOUSE_STAFF)
+  @ApiOperation({ summary: 'Minimal employee/technician lookup for selectors without PII' })
+  @ApiOkResponse({ description: 'List of minimal employee lookup records' })
+  lookup(@Query() query: EmployeeLookupQueryRequestDto): Promise<EmployeeLookupDto[]> {
+    return this.employeesService.lookup(query);
+  }
+
+  @Get(routes.employees.id)
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request & { user: JwtUser },
@@ -62,7 +75,7 @@ export class EmployeesController {
     return this.employeesService.findOne(id, req.user);
   }
 
-  @Patch(':id')
+  @Patch(routes.employees.id)
   @Roles(Role.ADMIN)
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -71,7 +84,7 @@ export class EmployeesController {
     return this.employeesService.update(id, dto);
   }
 
-  @Patch(':id/status')
+  @Patch(routes.employees.status)
   @Roles(Role.ADMIN)
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
@@ -80,7 +93,7 @@ export class EmployeesController {
     return this.employeesService.updateStatus(id, dto.status, dto.reason);
   }
 
-  @Post(':id/photo')
+  @Post(routes.employees.photo)
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ADMIN)
   @UseInterceptors(

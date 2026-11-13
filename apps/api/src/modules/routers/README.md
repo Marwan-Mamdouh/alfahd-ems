@@ -22,6 +22,10 @@ Derived from **SOW Section 2.1.6, Milestone M2b Specification**, and [`docs/cont
   * When assigned to a technician, warehouse stock is decremented (-1 `OUTBOUND_TECHNICIAN`).
   * When a warehouse unit suffers physical damage, warehouse stock is decremented (-1 `ADJUSTMENT`) while retaining the router asset record.
   * **Caller-Owned Transactions & Atomic Relative Deltas (Issue #51):** All mutations support an optional caller-owned `externalTx`. Conflicting operations serialize via row-level locks (`findByIdForUpdate`), and inventory changes lock inventory rows and strictly reject insufficient stock with `BadRequestException` rather than negative clamping or unprotected read-modify-write.
+* **Centralized Technician Revalidation on Assignment (Issue #75 - B1):**
+  * Assigning a router to a technician (`assign`) invokes the shared `UsersRepository.ensureActiveTechnician(dto.technicianId, tx, 'assign router')` validator under a pessimistic row lock (`FOR UPDATE`).
+  * Revalidates technician existence (`NotFoundException`), asserts `Role.TECHNICIAN` (`BadRequestException`), and strictly requires active status (`ConflictException` if `ON_LEAVE` or `INACTIVE`).
+  * Prevents logic and message drift by sharing the identical validation engine with `InventoryService.issueOutbound` and `receiveReturn`.
 * **Audited Existing-Stock Onboarding Capacity (Issue #52):**
   * When onboarding existing warehouse stock (`isNewReceipt: false`), registration consumes pre-existing physical inventory without generating an inbound movement.
   * Enforces capacity: verifies that recorded stock is greater than zero and exceeds currently registered usable units in the warehouse (`availableCapacity = currentStock - registeredUsableInWarehouse > 0`). If capacity is exhausted, throws `409 Conflict`. Serials violating unique constraints (PostgreSQL code 23505) are safely caught and remapped to `409 Conflict`.

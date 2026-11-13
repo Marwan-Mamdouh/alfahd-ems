@@ -16,12 +16,53 @@ interface RouterHistoryTableProps {
 }
 
 const STATUS_CONFIG: Record<
-  RouterStatus,
+  string,
   {
     label: string;
     className: string;
   }
 > = {
+  AVAILABLE: {
+    label: "متاح بالمخزن",
+    className:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300",
+  },
+  ASSIGNED_TO_TECHNICIAN: {
+    label: "بعهدة الفني",
+    className:
+      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
+  },
+  INSTALLED_AT_CUSTOMER: {
+    label: "مركب لدى عميل",
+    className:
+      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300",
+  },
+  RETURNED: {
+    label: "مرتجع للمخزن",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+  },
+  DAMAGED: {
+    label: "تالف",
+    className:
+      "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300",
+  },
+  UNDER_REPAIR: {
+    label: "قيد الصيانة",
+    className:
+      "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300",
+  },
+  LOST: {
+    label: "مفقود",
+    className:
+      "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300",
+  },
+  DECOMMISSIONED: {
+    label: "مكهن / خارج الخدمة",
+    className:
+      "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  },
+  // Legacy aliases
   IN_STOCK: {
     label: "بالمخزن",
     className:
@@ -37,16 +78,6 @@ const STATUS_CONFIG: Record<
     className:
       "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300",
   },
-  RETURNED: {
-    label: "مرتجع",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
-  },
-  DAMAGED: {
-    label: "تالف",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300",
-  },
 };
 
 function StatusBadge({ status }: { status: RouterStatus | null }) {
@@ -54,7 +85,10 @@ function StatusBadge({ status }: { status: RouterStatus | null }) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
 
-  const config = STATUS_CONFIG[status];
+  const config = STATUS_CONFIG[status] ?? {
+    label: status,
+    className: "border-gray-200 bg-gray-50 text-gray-700",
+  };
 
   return (
     <span
