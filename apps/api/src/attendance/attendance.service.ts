@@ -11,8 +11,12 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
-import type { AttendanceRecordDto, AttendanceStatus } from '@alfahd/types';
+import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import type {
+  AttendanceListResponseDto,
+  AttendanceRecordDto,
+  AttendanceStatus,
+} from '@alfahd/types';
 import { Role } from '@alfahd/types';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import {
@@ -26,6 +30,7 @@ import { calculateHoursWorked } from '../common/utils/attendance.utils.js';
 import { ClockService, getLocalWorkDate, isAfterCutoff } from '../common/services/clock.service.js';
 import type { OverrideAttendanceRequestDto } from './dto/override-attendance.dto.js';
 import type { AttendanceQueryRequestDto } from './dto/attendance-query.dto.js';
+import type { AttendanceListRequestDto } from './dto/attendance-list.dto.js';
 
 @Injectable()
 export class AttendanceService {
@@ -35,6 +40,79 @@ export class AttendanceService {
     private readonly clockService: ClockService,
     @InjectQueue('reports') private readonly reportsQueue: Queue,
   ) {}
+
+  async list(query: AttendanceListRequestDto): Promise<AttendanceListResponseDto> {
+    if (query.from && query.to && query.from > query.to) {
+      throw new BadRequestException('"from" date must not be later than "to" date');
+    }
+
+    return this.db.transaction(
+      async (tx) => {
+        if (query.employee_id) {
+          const employee = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, query.employee_id))
+            .limit(1);
+          if (!employee.length) throw new NotFoundException('Employee not found');
+        }
+        const base = and(
+          query.from ? gte(attendanceRecords.workDate, query.from) : undefined,
+          query.to ? lte(attendanceRecords.workDate, query.to) : undefined,
+          query.employee_id ? eq(attendanceRecords.userId, query.employee_id) : undefined,
+          query.department ? eq(users.department, query.department) : undefined,
+        );
+        const [counts] = await tx
+          .select({
+            total: sql<number>`count(*)::int`,
+            onTime: sql<number>`count(*) filter (where ${attendanceRecords.status} = 'ON_TIME')::int`,
+            late: sql<number>`count(*) filter (where ${attendanceRecords.status} = 'LATE')::int`,
+          })
+          .from(attendanceRecords)
+          .innerJoin(users, eq(attendanceRecords.userId, users.id))
+          .where(base);
+        const rows = await tx
+          .select({
+            record: attendanceRecords,
+            employeeName: users.name,
+            department: users.department,
+          })
+          .from(attendanceRecords)
+          .innerJoin(users, eq(attendanceRecords.userId, users.id))
+          .where(and(base, query.status ? eq(attendanceRecords.status, query.status) : undefined))
+          .orderBy(desc(attendanceRecords.workDate), desc(attendanceRecords.id))
+          .limit(query.pageSize)
+          .offset((query.page - 1) * query.pageSize);
+        return {
+          items: rows.map(({ record, employeeName, department }) => ({
+            id: record.id,
+            userId: record.userId,
+            employeeName,
+            department,
+            workDate: record.workDate,
+            checkInAt: record.checkInAt.toISOString(),
+            checkOutAt: record.checkOutAt?.toISOString() ?? null,
+            checkInDistanceM: record.checkInDistanceM,
+            hoursWorked: calculateHoursWorked(record.checkInAt, record.checkOutAt),
+            status: record.status,
+            overrideReason: record.overrideReason,
+            overriddenBy: record.overriddenBy,
+            overriddenAt: record.overriddenAt?.toISOString() ?? null,
+          })),
+          page: query.page,
+          pageSize: query.pageSize,
+          filteredTotal:
+            query.status === 'ON_TIME'
+              ? counts.onTime
+              : query.status === 'LATE'
+                ? counts.late
+                : counts.total,
+          totals: counts,
+        };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
 
   async checkIn(userId: string, lat: number, lng: number): Promise<AttendanceRecordDto> {
     const userRows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);

@@ -454,6 +454,39 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     await app.close();
   });
 
+  describe('Attendance list access and validation', () => {
+    it('requires authentication and ADMIN role', async () => {
+      await request(app.getHttpServer()).get('/attendance').expect(401);
+      await request(app.getHttpServer())
+        .get('/attendance')
+        .set('Authorization', `Bearer ${techToken}`)
+        .expect(403);
+    });
+
+    it.each([
+      '?from=2026-02-30',
+      '?to=2026-01-01T00:00:00Z',
+      '?employee_id=invalid',
+      '?page=0',
+      '?pageSize=101',
+      '?status=ABSENT',
+      '?department=INVALID',
+      '?from=2026-11-02&to=2026-11-01',
+    ])('rejects invalid query %s', async (query) => {
+      await request(app.getHttpServer())
+        .get(`/attendance${query}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+    });
+
+    it('returns 404 for a valid nonexistent employee ID', async () => {
+      await request(app.getHttpServer())
+        .get('/attendance?employee_id=99999999-9999-4999-8999-999999999999')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(404);
+    });
+  });
+
   describe('1. Employee Management Flow', () => {
     it('creates an employee with warehouse assignment under ADMIN role (201)', async () => {
       const res = await request(app.getHttpServer())
