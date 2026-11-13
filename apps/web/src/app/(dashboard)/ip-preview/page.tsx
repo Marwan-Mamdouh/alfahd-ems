@@ -40,40 +40,6 @@ import type {
   IpArchivedFilter,
 } from "@/components/ip-addresses/types";
 
-// Demonstration seeds when database table is fresh / empty
-const DEMO_IPS: IpAddressRow[] = [
-  {
-    id: "ip-demo-1",
-    address: "10.100.1.1",
-    status: "FREE",
-    isArchived: false,
-    customerId: null,
-    notes: "نطاق التوزيع الرئيسي - متاح للتخصيص",
-    createdAt: "2026-01-01T08:00:00Z",
-    updatedAt: "2026-01-01T08:00:00Z",
-  },
-  {
-    id: "ip-demo-2",
-    address: "10.100.1.2",
-    status: "RESERVED",
-    isArchived: false,
-    customerId: "cust-01",
-    notes: "محجوز لراوتر عميل بنك مصر - فرع المهندسين",
-    createdAt: "2026-01-02T09:30:00Z",
-    updatedAt: "2026-01-02T09:30:00Z",
-  },
-  {
-    id: "ip-demo-3",
-    address: "10.100.1.254",
-    status: "FREE",
-    isArchived: true,
-    customerId: null,
-    notes: "عنوان بوابة سابقة تم إيقاف الخدمة عليها وأرشفته",
-    createdAt: "2025-12-01T10:00:00Z",
-    updatedAt: "2026-01-01T12:00:00Z",
-  },
-];
-
 function IpPreviewContent() {
   const user = useAuthStore((s) => s.user);
   const userRole = user?.role ?? null;
@@ -128,41 +94,33 @@ function IpPreviewContent() {
     refetch,
   } = useIpAddresses(queryParams);
 
-  // Combined Rows
+  // Normalized Rows (truthful to live backend state)
   const rows = useMemo<IpAddressRow[]>(() => {
-    if (liveIpAddresses.length > 0) {
-      return liveIpAddresses.map((ip) => ({
-        id: ip.id,
-        address: ip.address,
-        status: ip.status,
-        isArchived: ip.isArchived,
-        customerId: ip.customerId,
-        notes: ip.notes,
-        createdAt: ip.createdAt,
-        updatedAt: ip.updatedAt,
-      }));
-    }
-    // If backend returned empty and no search was performed, show fallback demo seeds
-    if (!search && statusFilter === "all" && archivedFilter === "active") {
-      return DEMO_IPS.filter((d) => !d.isArchived);
-    }
-    return [];
-  }, [liveIpAddresses, search, statusFilter, archivedFilter]);
+    return liveIpAddresses.map((ip) => ({
+      id: ip.id,
+      address: ip.address,
+      status: ip.status,
+      isArchived: ip.isArchived,
+      customerId: ip.customerId,
+      notes: ip.notes,
+      createdAt: ip.createdAt,
+      updatedAt: ip.updatedAt,
+    }));
+  }, [liveIpAddresses]);
 
-  const totalCount = liveTotal > 0 ? liveTotal : rows.length;
+  const totalCount = liveTotal;
 
-  // Quick statistics (computed from current available data)
+  // Quick statistics (computed from live database totals and items)
   const stats = useMemo(() => {
-    const allItems = liveIpAddresses.length > 0 ? liveIpAddresses : DEMO_IPS;
-    const total = allItems.length;
-    const freeActive = allItems.filter(
+    const total = liveTotal;
+    const freeActive = liveIpAddresses.filter(
       (ip) => ip.status === "FREE" && !ip.isArchived
     ).length;
-    const reserved = allItems.filter((ip) => ip.status === "RESERVED").length;
-    const archived = allItems.filter((ip) => ip.isArchived).length;
+    const reserved = liveIpAddresses.filter((ip) => ip.status === "RESERVED").length;
+    const archived = liveIpAddresses.filter((ip) => ip.isArchived).length;
 
     return { total, freeActive, reserved, archived };
-  }, [liveIpAddresses]);
+  }, [liveIpAddresses, liveTotal]);
 
   // Mutations
   const createMutation = useCreateIpAddress();

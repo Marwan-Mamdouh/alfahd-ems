@@ -7,6 +7,8 @@ import {
   ArrowRightLeft,
   Boxes,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   MapPin,
   PackageCheck,
   Plus,
@@ -20,7 +22,7 @@ import {
 
 import { RoleGuard } from "@/core/auth/guards";
 import { useAuthStore } from "@/core/auth/auth.store";
-import { Role } from "@alfahd/types";
+import { Role, type RouterQueryDto } from "@alfahd/types";
 import { useTechniciansLookup } from "@/core/query/use-employee-lookup";
 import { useProducts } from "@/core/query/use-products";
 import { useWarehouses } from "@/core/query/use-warehouses";
@@ -89,13 +91,47 @@ function RouterPreviewContent() {
   const userRole = user?.role ?? null;
   const isAuthorizedToManage = userRole === Role.ADMIN || userRole === Role.WAREHOUSE_STAFF;
 
+  // Filter & Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [warehouseFilter, setWarehouseFilter] = useState("all");
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setCurrentPage(1);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleWarehouseChange = (value: string) => {
+    setWarehouseFilter(value);
+    setCurrentPage(1);
+  };
+
+  const routerQueryParams = useMemo<RouterQueryDto>(
+    () => ({
+      search: search.trim() || undefined,
+      status: statusFilter !== "all" ? (statusFilter as RouterStatus) : undefined,
+      warehouseId: warehouseFilter !== "all" ? warehouseFilter : undefined,
+      page: currentPage,
+      limit: 20,
+    }),
+    [search, statusFilter, warehouseFilter, currentPage]
+  );
+
   // Live queries
   const {
     routers: liveRouters,
+    total: totalRoutersCount,
+    totalPages,
     isLoading: isRoutersLoading,
     error: routersError,
     refetch: refetchRouters,
-  } = useRouters();
+  } = useRouters(routerQueryParams);
 
   const { products: liveProducts } = useProducts();
   const serializedProducts = useMemo(
@@ -122,7 +158,7 @@ function RouterPreviewContent() {
   const [isTransitionOpen, setIsTransitionOpen] = useState(false);
   const [isConditionOpen, setIsConditionOpen] = useState(false);
 
-  // Normalized router list
+  // Normalized router list (server-filtered and paginated)
   const routers = useMemo<RouterRow[]>(() => {
     return liveRouters.map((r) => {
       const prod = serializedProducts.find((p) => p.id === r.productId);
@@ -150,10 +186,6 @@ function RouterPreviewContent() {
   const [pageMode, setPageMode] = useState<PageMode>("list");
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
-
   const [notification, setNotification] = useState<string | null>(null);
 
   const selectedRouter = useMemo(
@@ -161,27 +193,9 @@ function RouterPreviewContent() {
     [routers, selectedRouterId]
   );
 
-  const filteredRouters = useMemo(() => {
-    const term = search.trim().toLowerCase();
-
-    return routers.filter((router) => {
-      const matchesSearch = [
-        router.serialNumber,
-        router.productName,
-        router.productModel ?? "",
-        router.warehouseName ?? "",
-      ].some((value) => value.toLowerCase().includes(term));
-
-      const matchesStatus = statusFilter === "all" || router.status === statusFilter;
-      const matchesWarehouse = warehouseFilter === "all" || router.warehouseId === warehouseFilter;
-
-      return matchesSearch && matchesStatus && matchesWarehouse;
-    });
-  }, [routers, search, statusFilter, warehouseFilter]);
-
   const statistics = useMemo(
     () => ({
-      total: routers.length,
+      total: totalRoutersCount,
       available: routers.filter(
         (router) => router.status === "AVAILABLE" && router.physicalCondition === "SERVICEABLE"
       ).length,
@@ -194,7 +208,7 @@ function RouterPreviewContent() {
           router.physicalCondition !== "SERVICEABLE"
       ).length,
     }),
-    [routers]
+    [totalRoutersCount, routers]
   );
 
   function backToList() {
@@ -436,7 +450,7 @@ function RouterPreviewContent() {
               <input
                 type="search"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => handleSearchChange(event.target.value)}
                 placeholder="ابحث بالسيريال أو الموديل..."
                 aria-label="البحث عن راوتر"
                 className={`${inputClass} pr-10`}
@@ -445,7 +459,7 @@ function RouterPreviewContent() {
 
             <select
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
+              onChange={(event) => handleStatusChange(event.target.value)}
               aria-label="تصفية حسب حالة الراوتر"
               className={inputClass}
             >
@@ -459,7 +473,7 @@ function RouterPreviewContent() {
 
             <select
               value={warehouseFilter}
-              onChange={(event) => setWarehouseFilter(event.target.value)}
+              onChange={(event) => handleWarehouseChange(event.target.value)}
               aria-label="تصفية حسب المخزن"
               className={inputClass}
             >
@@ -472,15 +486,48 @@ function RouterPreviewContent() {
             </select>
           </div>
 
-          <p className="text-sm text-muted-foreground">عدد الأجهزة المعروضة: {filteredRouters.length}</p>
+          <p className="text-sm text-muted-foreground">
+            عدد الأجهزة المعروضة: {routers.length} من إجمالي {totalRoutersCount}
+          </p>
 
           <RouterTable
-            routers={filteredRouters}
+            routers={routers}
             isLoading={isRoutersLoading}
             error={routersError ? new Error(routersError) : null}
             onRetry={refetchRouters}
             onRouterClick={openDetails}
           />
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
+              <span className="text-xs text-muted-foreground">
+                صفحة {currentPage} من {Math.max(totalPages, 1)} (إجمالي {totalRoutersCount} جهاز)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                  disabled={currentPage <= 1 || isRoutersLoading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  aria-label="الصفحة السابقة"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  السابق
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                  disabled={currentPage >= totalPages || isRoutersLoading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  aria-label="الصفحة التالية"
+                >
+                  التالي
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
