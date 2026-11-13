@@ -1,6 +1,31 @@
 # Phase 2 integration handoff — review draft
 
-**Issue:** #67 (A2), part of #65. **Source baseline:** `7606270041d5e299f62ccd50bb8cabfaf2af0a4d` (master). **Status:** source-based draft, not a reviewed freeze or acceptance report. Revalidate against the merged head before implementation. The accountable owner is @Marwan-Mamdouh; review/handoff partner is @Hamadaae; UI contract review is required from @bahaashahin. No approval is implied by this document.
+**Issue:** #67 (A2), part of #65. **Source baseline:** `97bcd31cdacd9902cc59ea075822ca6cab8114e3` (master, fetched 2026-11-12). **Status:** source-based draft, not a reviewed freeze or acceptance report. The original snapshot was `7606270`; the continuation below records the scope and limitations of revalidation. Revalidate against the merged head before implementation. The accountable owner is @Marwan-Mamdouh; review/handoff partner is @Hamadaae; UI contract review is required from @bahaashahin. No approval is implied by this document.
+
+## Draft continuation — 2026-11-12
+
+The user requested continuation of the existing draft, not a fresh specification. #66 is closed. The #67 discussion contains the original review request but no reviewer approval as of this check. Continue in the isolated `docs/phase2-contract-handoff` worktree; no review decision, staging waiver or permission to publish is inferred.
+
+Source-diff review from `7606270` to the baseline above found:
+
+- Scoped controllers/DTOs and shared HR/supply DTOs have no contract changes in that range. The response interceptor's changes are type annotations, not envelope changes. Attendance still has no list/history reads; employees still have no photo retrieval route; product DELETE still calls removal rather than deactivation.
+- Router creation now maps its initial warehouse assignment into the returned DTO. For serviceable onboarding, the creation response carries warehouse custody consistently with subsequent reads; duplicate-serial races map to 409. Keep the existing customer-installation exclusion.
+- Warehouse deactivation now also guards active custody, not just inventory, staff and physically located routers. Do not offer deactivation based only on visible warehouse stock.
+- Auth/session behavior changed: refresh rotation updates the HTTP-only cookie; logout revokes the user's sessions. Containers must use the current shared auth adapter, not copy earlier assumptions that refresh never rotates. This does not authorize a new auth implementation in #67.
+
+This is static source/diff evidence, not a rerun of the historical tests below. The matrix and wire catalog remain review drafts. The [decision review agenda](phase-2-review-agenda.md) distinguishes existing behavior, proposed choices and the named approval gates. Complete OpenAPI coverage, module-level history/detail UI interfaces and reviewer agreement remain outstanding before freezing A2.
+
+In this continuation the user confirmed: attendance uses the configured attendance timezone and inclusive work dates with contextual totals over stored records (no generated ABSENT records; see status-filter clarification below); new people selections are ACTIVE-only; public photo delivery with frontend URL construction supersedes the earlier private-byte proposal; product deactivation blocks on positive stock or active router usage. See the agenda for remaining exact-contract gates. These decisions do not create endpoints or substitute for named developer review. Staging remains required; no waiver was requested or granted.
+
+The [proposed future contracts](phase-2-proposed-contracts.md) provide concrete routes and examples for owner review. They are not implemented or frozen, and must not be treated as current OpenAPI.
+
+[The standalone OpenAPI review snapshot](phase-2-openapi.json) covers all 52 implemented actions in the matrix, generated reproducibly by `generate-phase-2-openapi.mjs`. [Supplementary fragments](phase-2-openapi-fragments.md) provide further history, multipart and download detail. Both are source-based drafts, not approved freezes or live-response conformance results; use the wire catalog for validation, error and domain caveats.
+
+Further user-confirmed rules: manager choices are ACTIVE ADMIN/WAREHOUSE_STAFF; cross-warehouse assignments to ACTIVE technicians are allowed and their assigned warehouse is displayed; authorized historical views retain names for inactive people. Product deactivation is blocked by positive stock or any router not DECOMMISSIONED (including LOST); ADMIN may reactivate and inactive SKUs remain reserved. No LOST resolution or new lifecycle transition is implied. Detailed contracts and safeguards still require owner review.
+
+Lookup access is purpose-specific: ADMIN and WAREHOUSE_STAFF may request technician choices; only ADMIN may request warehouse-manager choices. Eligible manager roles are distinct from roles authorized to query the selector.
+
+Attendance clarification: employee-specific history belongs on the employee page and is not restricted by department; the overall ADMIN list retains a current-department filter. Summary totals preserve context by ignoring the status filter while respecting date, employee and department filters; the table applies the status filter. The contract must separately provide the filtered count for pagination.
 
 ## Boundaries and working agreement
 
@@ -130,9 +155,9 @@ Concrete proposed interfaces and synthetic fixtures are provided in `apps/web/sr
 
 | Gate | Responsible owner / handoff | Required before |
 | --- | --- | --- |
-| Attendance reads: ADMIN list/history, date/employee/department/status filters and server filter-wide totals approved in user discussion 2026-11-08; no current read endpoint exists | @Marwan-Mamdouh with @bahaashahin; #69 | agree exact routes, fields, pagination bounds, timezone and totals before #69/#71; don't use speculative constants |
+| Attendance reads: ADMIN list/history with date/employee/department/status filters and contextual totals; no current read endpoint exists | @Marwan-Mamdouh with @bahaashahin; #69 | agree exact routes and fields; user confirmed timezone, page bounds and totals excluding status, but no speculative constants may be used |
 | People lookups: ADMIN/W minimal bounded ID/name/status/warehouse selections, no email/national ID, approved in user discussion 2026-11-08 | @Hamadaae with @Marwan-Mamdouh; #75 | agree routes, search limits and inactive/ON_LEAVE eligibility; server mutations revalidate targets |
-| Photo display: authorized ADMIN/self retrieval and no UI-built provider URL approved in user discussion 2026-11-08 | @Marwan-Mamdouh with @bahaashahin; #73 | agree signed URL vs authenticated bytes, expiry, caching and unavailable-photo behavior; current employee reads contain only a storage key |
+| Photo display: user now permits public delivery and frontend-built provider URLs, superseding the earlier ADMIN/self decision | @Marwan-Mamdouh with @bahaashahin; #73 | verify public asset configuration, identifier/replacement behavior, transformations, caching and fallback |
 | Product deactivation, preserved references, exclusion from new selectors and historical visibility approved in user discussion 2026-11-08 | @Hamadaae with @Marwan-Mamdouh; #81 | agree API, safeguards for active stock/usage and historical selector behavior; source currently hard deletes; keep removal unavailable |
 | Formal acceptance environment | @Marwan-Mamdouh; #89 | staging required by `PLAN.md`; identify staging or obtain explicit written waiver. User chose to retain the staging gate; **no waiver is approved**. Do not silently add deployment work |
 | Reviewed per-action contract, examples/OpenAPI, concrete fixture types and cross-owner agreement | @Marwan-Mamdouh, @Hamadaae, @bahaashahin; #67 | marking A2 frozen or starting work that depends on it |
@@ -143,7 +168,7 @@ Current `apps/web/src/core/api/endpoints.ts` contains unverified or nonexistent 
 
 Before closing #67, owners must review the matrix, wire catalog, fixtures and outstanding technical gates, explicitly agree the cross-owner interfaces, and record reviewer decisions, merged PR/commit, environment and actual focused test commands/results. The user-approved directions above do not constitute approval by the other developers or approval of exact technical details. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
 
-Verification on Windows, Node `24.22.2`, pnpm `12.6.0`, 2026-11-08, baseline `7606270` plus uncommitted handoff files:
+Historical verification on Windows, Node `24.22.2`, pnpm `12.6.0`, 2026-11-08, baseline `7606270` plus uncommitted handoff files (not a test pass for the 2026-11-12 baseline):
 
 - `pnpm --filter @alfahd/types build` — passed before checks.
 - `pnpm typecheck` and `pnpm lint` — passed; types lint is a repository no-op. After the final lookup fixture, `pnpm --filter fahd-dashboard typecheck` and `pnpm --filter fahd-dashboard lint` also passed.
