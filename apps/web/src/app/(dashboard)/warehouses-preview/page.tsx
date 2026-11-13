@@ -37,6 +37,7 @@ import {
   useWarehouseMovements,
   extractErrorMessage,
 } from "@/core/query/use-warehouses";
+import { useEmployeeLookup } from "@/core/query/use-employee-lookup";
 
 import type {
   WarehouseRow,
@@ -70,6 +71,8 @@ function WarehousePreviewContent() {
   const deleteMutation = useDeleteWarehouse();
 
   // Selected warehouse sub-queries
+  const { employees: managers, isLoading: isLoadingManagers } = useEmployeeLookup();
+
   const {
     employees: staffList,
     isLoading: isLoadingStaff,
@@ -415,6 +418,8 @@ function WarehousePreviewContent() {
           <WarehouseForm
             key={viewMode === "edit" ? (selectedWarehouseId ?? "edit") : "create"}
             warehouse={viewMode === "edit" ? selectedWarehouse : null}
+            managers={managers}
+            isLoadingManagers={isLoadingManagers}
             onSubmit={handleWarehouseSubmit}
             onCancel={backToList}
             isSubmitting={createMutation.isPending || updateMutation.isPending}
