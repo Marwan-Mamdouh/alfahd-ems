@@ -1,8 +1,9 @@
 /** Review proposals for #67, not implemented endpoint contracts. No network code. */
 import type {
   AssignRouterDto, AttendanceRecordDto, AttendanceStatus, CreateEmployeeDto, CreateIpDto,
-  CreateRouterDto, Department, EmployeeDto, EmployeeQueryDto, IpAddressDto, IpQueryDto,
-  JobStatusResponseDto, OverrideAttendanceDto, Role, RouterDto, RouterQueryDto,
+  CreateRouterDto, Department, EmployeeDto, EmployeeQueryDto, IpAddressDto, IpHistoryDto, IpQueryDto,
+  JobStatusResponseDto, OverrideAttendanceDto, Role, RouterAssignmentDto, RouterConditionHistoryDto,
+  RouterDto, RouterQueryDto, RouterStatusHistoryDto,
   TransitionRouterDto, UpdateEmployeeDto, UpdateEmployeeStatusDto, UpdateRouterConditionDto,
   UserStatus,
 } from '@alfahd/types';
@@ -39,7 +40,16 @@ export type FormProps<Form> = {
 };
 export type Lookup = { id: string; name: string; status: UserStatus; warehouseId: string | null };
 
-export type EmployeeRow = EmployeeDto & { warehouseName: string | null; photoUrl: string | null };
+/** The presentation layer builds public image URLs from the proposed identifier. */
+export type EmployeeRow = Omit<EmployeeDto, 'profilePhotoKey'> & {
+  warehouseName: string | null;
+  photoId: string | null;
+};
+export type EmployeePhotoProps = {
+  photoId: string | null;
+  canRetry: boolean;
+  onRetry: () => void;
+};
 export type EmployeeFilter = EmployeeQueryDto;
 export type EmployeeForm = CreateEmployeeDto | UpdateEmployeeDto;
 export type EmployeeCapabilities = { create: boolean; edit: boolean; changeStatus: boolean; uploadPhoto: boolean };
@@ -49,17 +59,42 @@ export type EmployeeProps = ListProps<EmployeeRow, EmployeeFilter, EmployeeCapab
   onStatus: (id: string, value: UpdateEmployeeStatusDto) => Promise<void>;
   onPhoto: (id: string, file: File) => Promise<void>;
 };
+export type EmployeeDetailProps = {
+  employee: Remote<EmployeeRow>;
+  photo: EmployeePhotoProps;
+  attendance: EmployeeAttendanceHistoryProps;
+};
 
 /** Read endpoint/summary shape is a UI proposal, not an existing API. */
 export type AttendanceRow = AttendanceRecordDto & { employeeName: string; userId: string };
 export type AttendanceFilter = { from?: string; to?: string; employeeId?: string; department?: Department; status?: AttendanceStatus };
 export type AttendanceTotals = { total: number; onTime: number; late: number };
+/** total is the status-filtered count; totals exclude status but respect other filters. */
+export type AttendancePage = { page: Page<AttendanceRow>; totals: AttendanceTotals };
+export type AttendanceLoadState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string; retry: () => void }
+  | { kind: 'ready'; value: AttendancePage };
 export type AttendanceCapabilities = { view: boolean; override: boolean; export: boolean };
-export type AttendanceProps = ListProps<AttendanceRow, AttendanceFilter, AttendanceCapabilities> & {
-  totals: Remote<AttendanceTotals>;
+export type AttendanceProps = {
+  data: AttendanceLoadState;
+  filter: AttendanceFilter;
+  capabilities: AttendanceCapabilities;
+  onFilterChange: (filter: AttendanceFilter) => void;
+  onPageChange: (page: number) => void;
   job: Job;
   onOverride: (id: string, value: OverrideAttendanceDto) => Promise<void>;
   onExport: () => Promise<void>;
+};
+/** Employee identity is fixed by the enclosing detail view, never by department. */
+export type EmployeeAttendanceHistoryFilter = Pick<AttendanceFilter, 'from' | 'to' | 'status'>;
+export type EmployeeAttendanceHistoryProps = {
+  data: AttendanceLoadState;
+  filter: EmployeeAttendanceHistoryFilter;
+  capabilities: Pick<AttendanceCapabilities, 'view' | 'override'>;
+  onFilterChange: (filter: EmployeeAttendanceHistoryFilter) => void;
+  onPageChange: (page: number) => void;
+  onOverride: (id: string, value: OverrideAttendanceDto) => Promise<void>;
 };
 
 export type WarehouseRow = { id: string; name: string; address: string; latitude: number; longitude: number; geofenceRadiusMeters: number; managerId: string | null; isActive: boolean };
@@ -92,6 +127,18 @@ export type InventoryForm =
   | { kind: 'adjust'; warehouseId: string; productId: string; newQuantity: number; notes: string };
 export type InventoryCapabilities = { read: boolean; move: boolean; adjust: boolean; history: boolean };
 export type InventoryProps = ListProps<InventoryRow, InventoryFilter, InventoryCapabilities> & { onMovement: (value: InventoryForm) => Promise<void> };
+/** Wire dates are strings; labels are supplied by the container, not guaranteed by the API. */
+export type StockMovementRow = {
+  id: string; warehouseId: string; productId: string; movementType: MovementType; quantity: number;
+  supplierName: string | null; technicianId: string | null; responsibleUserId: string;
+  notes: string | null; createdAt: string;
+};
+export type MovementFilter = { warehouseId?: string; productId?: string; movementType?: MovementType; technicianId?: string };
+export type MovementHistoryProps = ListProps<StockMovementRow, MovementFilter, { history: boolean }> & {
+  selected: Remote<StockMovementRow> | null;
+  onSelect: (id: string) => void;
+  onCloseDetail: () => void;
+};
 
 export type RouterRow = RouterDto & { productName: string; warehouseName: string | null };
 export type RouterFilter = RouterQueryDto;
@@ -105,6 +152,14 @@ export type RouterProps = ListProps<RouterRow, RouterFilter, RouterCapabilities>
   onCondition: (id: string, value: UpdateRouterConditionDto) => Promise<void>;
   onExport: (warehouseId?: string) => Promise<void>;
 };
+/** Each audit endpoint loads independently and returns an unpaginated array. */
+export type RouterAuditProps = {
+  routerId: string;
+  canView: boolean;
+  assignments: Remote<readonly RouterAssignmentDto[]>;
+  conditions: Remote<readonly RouterConditionHistoryDto[]>;
+  statuses: Remote<readonly RouterStatusHistoryDto[]>;
+};
 
 export type IpRow = IpAddressDto;
 export type IpFilter = IpQueryDto;
@@ -117,4 +172,5 @@ export type IpProps = ListProps<IpRow, IpFilter, IpCapabilities> & {
   onAction: (id: string, action: 'reserve' | 'release' | 'archive' | 'unarchive', reason?: string) => Promise<void>;
   onImport: (file: File) => Promise<void>;
 };
+export type IpHistoryProps = { ipId: string; canView: boolean; data: Remote<readonly IpHistoryDto[]> };
 export type CurrentRole = Role;
