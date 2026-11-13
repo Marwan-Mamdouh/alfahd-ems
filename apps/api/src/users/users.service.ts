@@ -19,7 +19,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
-import { and,asc, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { users, warehouses, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
