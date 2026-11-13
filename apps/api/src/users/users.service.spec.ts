@@ -110,7 +110,7 @@ describe('UsersService', () => {
       ['ON_LEAVE', true],
       ['INACTIVE', false],
     ] as const)('sets isActive=%s when status is %s', async (status, expectedIsActive) => {
-      const updated = await service.updateEmployeeStatus('user-1', status);
+      const updated = await service.updateEmployeeStatus('user-1', status, 'Reason', 'admin-1');
 
       expect(setSpy).toHaveBeenCalledWith(
         expect.objectContaining({ status, isActive: expectedIsActive }),
@@ -120,7 +120,7 @@ describe('UsersService', () => {
     });
 
     it('keeps ON_LEAVE accounts able to authenticate (sessions/login stay valid)', async () => {
-      const updated = await service.updateEmployeeStatus('user-1', 'ON_LEAVE');
+      const updated = await service.updateEmployeeStatus('user-1', 'ON_LEAVE', 'Reason', 'admin-1');
       // AuthService.findActiveUserByEmail only rejects isActive=false users, so
       // an ON_LEAVE employee keeps their sessions per spec scenario 5, while
       // `status !== 'ACTIVE'` still excludes them from check-in/assignment.

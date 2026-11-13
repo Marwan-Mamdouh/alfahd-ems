@@ -93,10 +93,26 @@ describe('EmployeesService', () => {
   });
 
   describe('updateStatus', () => {
-    it('rejects status update if reason is empty', async () => {
-      await expect(service.updateStatus('user-123', 'INACTIVE', '   ')).rejects.toThrow(
-        BadRequestException,
+    it('passes the reason and acting administrator to the status change', async () => {
+      usersServiceMock.updateEmployeeStatus.mockResolvedValue({
+        ...mockUser,
+        status: 'ON_LEAVE',
+      });
+
+      await service.updateStatus('user-123', 'ON_LEAVE', 'Annual leave', 'admin-123');
+
+      expect(usersServiceMock.updateEmployeeStatus).toHaveBeenCalledWith(
+        'user-123',
+        'ON_LEAVE',
+        'Annual leave',
+        'admin-123',
       );
+    });
+
+    it('rejects status update if reason is empty', async () => {
+      await expect(
+        service.updateStatus('user-123', 'INACTIVE', '   ', 'admin-123'),
+      ).rejects.toThrow(BadRequestException);
       expect(usersServiceMock.updateEmployeeStatus).not.toHaveBeenCalled();
     });
 
@@ -104,10 +120,15 @@ describe('EmployeesService', () => {
       const inactiveUser = { ...mockUser, status: 'INACTIVE', isActive: false };
       usersServiceMock.updateEmployeeStatus.mockResolvedValue(inactiveUser);
 
-      const result = await service.updateStatus('user-123', 'INACTIVE', 'Resigned');
+      const result = await service.updateStatus('user-123', 'INACTIVE', 'Resigned', 'admin-123');
 
       expect(result.status).toBe('INACTIVE');
-      expect(usersServiceMock.updateEmployeeStatus).toHaveBeenCalledWith('user-123', 'INACTIVE');
+      expect(usersServiceMock.updateEmployeeStatus).toHaveBeenCalledWith(
+        'user-123',
+        'INACTIVE',
+        'Resigned',
+        'admin-123',
+      );
       expect(sessionServiceMock.revokeAllSessions).toHaveBeenCalledWith('user-123');
     });
 
@@ -115,7 +136,12 @@ describe('EmployeesService', () => {
       const onLeaveUser = { ...mockUser, status: 'ON_LEAVE' };
       usersServiceMock.updateEmployeeStatus.mockResolvedValue(onLeaveUser);
 
-      const result = await service.updateStatus('user-123', 'ON_LEAVE', 'Annual leave');
+      const result = await service.updateStatus(
+        'user-123',
+        'ON_LEAVE',
+        'Annual leave',
+        'admin-123',
+      );
 
       expect(result.status).toBe('ON_LEAVE');
       expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();

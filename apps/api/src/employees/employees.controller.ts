@@ -76,8 +76,9 @@ export class EmployeesController {
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEmployeeStatusRequestDto,
+    @Req() req: Request & { user: JwtUser },
   ): Promise<EmployeeDto> {
-    return this.employeesService.updateStatus(id, dto.status, dto.reason);
+    return this.employeesService.updateStatus(id, dto.status, dto.reason, req.user.userId);
   }
 
   @Post(':id/photo')
