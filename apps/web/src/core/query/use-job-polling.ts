@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJobStatus } from "@/core/api/jobs";
 import { queryKeys } from "@/core/query/query-keys";
@@ -21,8 +21,10 @@ export interface UseJobPollingResult {
   isPolling: boolean;
   isCompleted: boolean;
   isFailed: boolean;
+  isTimedOut: boolean;
   error: string | null;
   refetch: () => void;
+  retryPolling: () => void;
   isLoading: boolean;
 }
 
@@ -34,9 +36,13 @@ export function useJobPolling({
   onSuccess,
   onError,
 }: UseJobPollingOptions): UseJobPollingResult {
+  const [timedOutJobId, setTimedOutJobId] = useState<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const completedHandledRef = useRef<string | null>(null);
   const failedHandledRef = useRef<string | null>(null);
+
+  // Derived timeout state tied strictly to current jobId
+  const isTimedOut = Boolean(jobId && timedOutJobId === jobId);
 
   // Reset tracking timestamps when jobId changes
   useEffect(() => {
@@ -52,7 +58,7 @@ export function useJobPolling({
     queryFn: () => fetchJobStatus(jobId!),
     enabled: isEnabled,
     refetchInterval: (q) => {
-      if (!isEnabled) return false;
+      if (!isEnabled || isTimedOut) return false;
 
       const data = q.state.data;
       if (data?.status === "COMPLETED" || data?.status === "FAILED") {
@@ -75,7 +81,7 @@ export function useJobPolling({
   const status = job?.status ?? null;
   const isCompleted = status === "COMPLETED";
   const isFailed = status === "FAILED";
-  const isPolling = isEnabled && (status === "QUEUED" || status === "RUNNING");
+  const isPolling = isEnabled && !isTimedOut && (status === "QUEUED" || status === "RUNNING");
 
   // Handle completion callback once per jobId
   useEffect(() => {
@@ -95,19 +101,29 @@ export function useJobPolling({
 
   // Handle polling timeout error
   useEffect(() => {
-    if (!isEnabled || isCompleted || isFailed) return;
+    if (!isEnabled || isCompleted || isFailed || isTimedOut) return;
 
     const timer = setTimeout(() => {
-      if (isPolling) {
-        onError?.("Job processing timed out. Please check back later.");
+      if (jobId) {
+        setTimedOutJobId(jobId);
       }
+      onError?.("استغرقت معالجة الطلب وقتاً أطول من المتوقع (120 ثانية). يمكنك إعادة التحقق من الحالة.");
     }, timeoutMs);
 
     return () => clearTimeout(timer);
-  }, [isEnabled, isCompleted, isFailed, isPolling, timeoutMs, onError]);
+  }, [isEnabled, isCompleted, isFailed, isTimedOut, timeoutMs, jobId, onError]);
+
+  const retryPolling = useCallback(() => {
+    startTimeRef.current = Date.now();
+    setTimedOutJobId(null);
+    query.refetch();
+  }, [query]);
 
   let resolvedError: string | null = null;
-  if (isFailed) {
+  if (isTimedOut) {
+    resolvedError =
+      "استغرقت معالجة الطلب وقتاً أطول من المتوقع (120 ثانية). يمكنك إعادة التحقق من الحالة دون إعادة رفع الملف.";
+  } else if (isFailed) {
     resolvedError = job?.error || "Job execution failed";
   } else if (query.error) {
     resolvedError =
@@ -120,10 +136,12 @@ export function useJobPolling({
     isPolling,
     isCompleted,
     isFailed,
+    isTimedOut,
     error: resolvedError,
     refetch: () => {
       query.refetch();
     },
+    retryPolling,
     isLoading: query.isLoading,
   };
 }

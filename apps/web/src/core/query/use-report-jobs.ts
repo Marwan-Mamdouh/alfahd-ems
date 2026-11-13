@@ -31,16 +31,17 @@ export function useAttendanceReport(options?: {
   const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
   const isAdmin = userRole === Role.ADMIN;
 
-  const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
-    jobId,
-    enabled: Boolean(jobId),
-    onSuccess: (completedJob) => {
-      options?.onSuccess?.(completedJob);
-    },
-    onError: (err) => {
-      options?.onError?.(err);
-    },
-  });
+  const { job, status, isPolling, isCompleted, isFailed, isTimedOut, error, retryPolling } =
+    useJobPolling({
+      jobId,
+      enabled: Boolean(jobId),
+      onSuccess: (completedJob) => {
+        options?.onSuccess?.(completedJob);
+      },
+      onError: (err) => {
+        options?.onError?.(err);
+      },
+    });
 
   const generateReport = useCallback(
     async (query?: AttendanceQueryDto) => {
@@ -91,9 +92,11 @@ export function useAttendanceReport(options?: {
     isGenerating: isSubmitting || isPolling,
     isCompleted,
     isFailed,
+    isTimedOut,
     error: submitError || error,
     generateReport,
     download,
+    retryPolling,
     reset,
   };
 }
@@ -113,16 +116,17 @@ export function useRouterExport(options?: {
   const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
   const isAdmin = userRole === Role.ADMIN;
 
-  const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
-    jobId,
-    enabled: Boolean(jobId),
-    onSuccess: (completedJob) => {
-      options?.onSuccess?.(completedJob);
-    },
-    onError: (err) => {
-      options?.onError?.(err);
-    },
-  });
+  const { job, status, isPolling, isCompleted, isFailed, isTimedOut, error, retryPolling } =
+    useJobPolling({
+      jobId,
+      enabled: Boolean(jobId),
+      onSuccess: (completedJob) => {
+        options?.onSuccess?.(completedJob);
+      },
+      onError: (err) => {
+        options?.onError?.(err);
+      },
+    });
 
   const exportRouters = useCallback(
     async (dto?: RouterReportQueryDto) => {
@@ -173,9 +177,11 @@ export function useRouterExport(options?: {
     isExporting: isSubmitting || isPolling,
     isCompleted,
     isFailed,
+    isTimedOut,
     error: submitError || error,
     exportRouters,
     download,
+    retryPolling,
     reset,
   };
 }
@@ -195,16 +201,17 @@ export function useIpImport(options?: {
   const userRole = authUser?.role ?? useAuthStore.getState().user?.role;
   const isAdmin = userRole === Role.ADMIN;
 
-  const { job, status, isPolling, isCompleted, isFailed, error } = useJobPolling({
-    jobId,
-    enabled: Boolean(jobId),
-    onSuccess: (completedJob) => {
-      options?.onSuccess?.(completedJob);
-    },
-    onError: (err) => {
-      options?.onError?.(err);
-    },
-  });
+  const { job, status, isPolling, isCompleted, isFailed, isTimedOut, error, retryPolling } =
+    useJobPolling({
+      jobId,
+      enabled: Boolean(jobId),
+      onSuccess: (completedJob) => {
+        options?.onSuccess?.(completedJob);
+      },
+      onError: (err) => {
+        options?.onError?.(err);
+      },
+    });
 
   const importFile = useCallback(
     async (file: File) => {
@@ -247,6 +254,7 @@ export function useIpImport(options?: {
     isImporting: isSubmitting || isPolling,
     isCompleted,
     isFailed,
+    isTimedOut,
     error: submitError || error,
     summary: {
       inserted: job?.inserted ?? 0,
@@ -254,6 +262,7 @@ export function useIpImport(options?: {
       errors: job?.errors ?? [],
     },
     importFile,
+    retryPolling,
     reset,
   };
 }

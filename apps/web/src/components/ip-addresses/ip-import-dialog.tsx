@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   RotateCcw,
+  Clock,
   X,
 } from "lucide-react";
 import { CsvDropzone } from "@/components/shared/csv/csv-dropzone";
@@ -31,9 +32,11 @@ export function IpImportDialog({
     isImporting,
     isCompleted,
     isFailed,
+    isTimedOut,
     error,
     summary,
     importFile,
+    retryPolling,
     reset,
   } = useIpImport({
     onSuccess: () => {
@@ -44,7 +47,7 @@ export function IpImportDialog({
   if (!isOpen) return null;
 
   const handleClose = () => {
-    if (!isImporting) {
+    if (!isImporting || isTimedOut) {
       setFile(null);
       reset();
       onClose();
@@ -93,7 +96,7 @@ export function IpImportDialog({
 
           <button
             type="button"
-            disabled={isImporting}
+            disabled={isImporting && !isTimedOut}
             onClick={handleClose}
             aria-label="إغلاق"
             className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
@@ -140,7 +143,33 @@ export function IpImportDialog({
                 </div>
               )}
 
-              {error && !isImporting && (
+              {isTimedOut && (
+                <div
+                  className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3.5 space-y-2 text-xs text-amber-900 dark:text-amber-200"
+                  data-testid="ip-import-timeout"
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <Clock className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>استغرقت معالجة ملف CSV وقتاً أطول من المتوقع (120 ثانية).</span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    قد تكون العملية ما زالت قيد المعالجة في الخادم. يمكنك الاستمرار في التحقق من الحالة دون الحاجة لإعادة رفع الملف مرة أخرى.
+                  </p>
+                  <div className="pt-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={retryPolling}
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors font-medium text-xs"
+                      data-testid="ip-import-retry-btn"
+                    >
+                      <RotateCcw className="size-3.5" />
+                      إعادة التحقق من الحالة
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {error && !isImporting && !isTimedOut && (
                 <div className="flex items-center gap-2 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
                   <AlertTriangle className="size-4 shrink-0" />
                   <span>{error}</span>
@@ -177,7 +206,7 @@ export function IpImportDialog({
         {/* Footer */}
         <div className="mt-4 pt-3 border-t border-border flex items-center justify-between shrink-0">
           <div>
-            {(isCompleted || isFailed) && (
+            {(isCompleted || isFailed || isTimedOut) && (
               <button
                 type="button"
                 onClick={handleReset}
@@ -194,7 +223,7 @@ export function IpImportDialog({
             <button
               type="button"
               onClick={handleClose}
-              disabled={isImporting}
+              disabled={isImporting && !isTimedOut}
               className="h-9 px-4 rounded-lg border border-border bg-background text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
             >
               {isCompleted ? "تم" : "إلغاء"}
@@ -204,7 +233,7 @@ export function IpImportDialog({
               <button
                 type="button"
                 onClick={handleStartImport}
-                disabled={!file || isImporting}
+                disabled={!file || isImporting || isTimedOut}
                 className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-teal-600 text-xs font-medium text-white hover:bg-teal-700 transition-colors disabled:opacity-50"
                 data-testid="ip-import-submit-btn"
               >
