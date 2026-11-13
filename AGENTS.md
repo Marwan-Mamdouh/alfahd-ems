@@ -60,3 +60,5 @@ Issues are tracked in GitHub Issues for Marwan-Mamdouh/alfahd-ems. See `docs/age
 ### Domain docs
 
 Single-context: root `GLOSSARY.md` and `docs/adr/`, plus existing decisions in `docs/decisions/`. See `docs/agents/domain.md`.
+
+Before proposing or changing Phase 2 contracts or behavior, read `docs/contracts/phase-2-handoff.md`, `docs/contracts/phase-2-review-agenda.md` and `docs/contracts/phase-2-proposed-contracts.md`; consult `docs/contracts/phase-2-wire-contracts.md` and `docs/contracts/phase-2-openapi.json` for the source snapshot. Distinguish user-confirmed directions from unapproved proposals and verify against current code and owning developers before implementation.
