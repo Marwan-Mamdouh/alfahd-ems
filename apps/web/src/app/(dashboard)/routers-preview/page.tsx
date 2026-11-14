@@ -316,27 +316,32 @@ function RouterPreviewContent() {
 
   const statCards = [
     {
-      label: "إجمالي الراوترات",
+      label: "إجمالي الأجهزة المطابقة",
+      sublabel: "في قاعدة البيانات",
       value: statistics.total,
       icon: RouterIcon,
     },
     {
       label: "متاح بالمخزن",
+      sublabel: `في الصفحة المعروضة (${routers.length})`,
       value: statistics.available,
       icon: PackageCheck,
     },
     {
       label: "بعهدة الفنيين",
+      sublabel: `في الصفحة المعروضة (${routers.length})`,
       value: statistics.assigned,
       icon: UserRoundPlus,
     },
     {
       label: "تم تركيبها للعملاء",
+      sublabel: `في الصفحة المعروضة (${routers.length})`,
       value: statistics.installed,
       icon: Wifi,
     },
     {
       label: "تالف أو قيد الإصلاح",
+      sublabel: `في الصفحة المعروضة (${routers.length})`,
       value: statistics.attention,
       icon: AlertTriangle,
     },
@@ -392,6 +397,7 @@ function RouterPreviewContent() {
               <div>
                 <p className="text-xs text-muted-foreground">{stat.label}</p>
                 <p className="mt-1 text-2xl font-bold">{stat.value.toLocaleString("ar-EG")}</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground/80">{stat.sublabel}</p>
               </div>
             </div>
           );
@@ -416,7 +422,7 @@ function RouterPreviewContent() {
             <div>
               <h2 className="text-lg font-semibold">قائمة أجهزة الراوتر</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                البحث والتصفية ومتابعة الحالات والعهد الفيزيائية.
+                البحث بالسيريال أو الموقع أو الملاحظات ومتابعة الحالات والعهد الفيزيائية.
               </p>
             </div>
 
@@ -451,8 +457,8 @@ function RouterPreviewContent() {
                 type="search"
                 value={search}
                 onChange={(event) => handleSearchChange(event.target.value)}
-                placeholder="ابحث بالسيريال أو الموديل..."
-                aria-label="البحث عن راوتر"
+                placeholder="ابحث بالسيريال أو الموقع أو الملاحظات..."
+                aria-label="البحث عن راوتر بالسيريال أو الموقع أو الملاحظات"
                 className={`${inputClass} pr-10`}
               />
             </div>

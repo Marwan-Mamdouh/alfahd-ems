@@ -340,11 +340,11 @@ function IpPreviewContent() {
         {/* Total */}
         <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
           <div className="flex items-center justify-between text-muted-foreground text-xs">
-            <span>إجمالي العناوين</span>
+            <span>إجمالي العناوين المطابقة</span>
             <Layers className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.total}</p>
-          <p className="text-[11px] text-muted-foreground mt-1">المسجلة في النظام</p>
+          <p className="text-[11px] text-muted-foreground mt-1">في قاعدة البيانات</p>
         </div>
 
         {/* Free Pool */}
@@ -354,7 +354,7 @@ function IpPreviewContent() {
             <CheckCircle2 className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.freeActive}</p>
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">حرة ونشطة (FREE)</p>
+          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">في الصفحة المعروضة ({rows.length})</p>
         </div>
 
         {/* Reserved */}
@@ -364,7 +364,7 @@ function IpPreviewContent() {
             <Lock className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.reserved}</p>
-          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">محجوزة (RESERVED)</p>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">في الصفحة المعروضة ({rows.length})</p>
         </div>
 
         {/* Archived */}
@@ -374,7 +374,7 @@ function IpPreviewContent() {
             <Archive className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.archived}</p>
-          <p className="text-[11px] text-muted-foreground mt-1">خارج الخدمة (ARCHIVED)</p>
+          <p className="text-[11px] text-muted-foreground mt-1">في الصفحة المعروضة ({rows.length})</p>
         </div>
       </div>
 
