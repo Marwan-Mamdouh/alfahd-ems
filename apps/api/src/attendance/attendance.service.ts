@@ -214,7 +214,12 @@ export class AttendanceService {
       // Two concurrent check-ins can both pass the pre-insert existence check;
       // the loser hits the (user_id, work_date) unique constraint (23505).
       // Surface that as 409 ALREADY_CHECKED_IN instead of an unhandled 500.
-      const pgError = error as { code?: string; constraint?: string };
+      const wrapped = error as {
+        code?: string;
+        constraint?: string;
+        cause?: { code?: string; constraint?: string };
+      };
+      const pgError = wrapped.cause ?? wrapped;
       if (
         pgError?.code === '23505' ||
         pgError?.constraint === 'attendance_records_user_id_work_date_unique'
@@ -347,19 +352,47 @@ export class AttendanceService {
     }
 
     const now = this.clockService.now();
-    const updatedRows = await this.db
-      .update(attendanceRecords)
-      .set({
-        ...(dto.checkInAt ? { checkInAt: new Date(dto.checkInAt) } : {}),
-        ...(dto.checkOutAt ? { checkOutAt: new Date(dto.checkOutAt) } : {}),
-        ...(dto.status ? { status: dto.status } : {}),
-        overrideReason: dto.overrideReason,
-        overriddenBy: adminId,
-        overriddenAt: now,
-        updatedAt: now,
-      })
-      .where(eq(attendanceRecords.id, id))
-      .returning();
+    let updatedRows: AttendanceRecord[];
+    try {
+      updatedRows = await this.db
+        .update(attendanceRecords)
+        .set({
+          ...(dto.checkInAt
+            ? {
+                checkInAt: effectiveCheckIn,
+                workDate: getLocalWorkDate(
+                  effectiveCheckIn,
+                  this.configService.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo',
+                ),
+              }
+            : {}),
+          ...(dto.checkOutAt ? { checkOutAt: effectiveCheckOut } : {}),
+          ...(dto.status ? { status: dto.status } : {}),
+          overrideReason: dto.overrideReason,
+          overriddenBy: adminId,
+          overriddenAt: now,
+          updatedAt: now,
+        })
+        .where(eq(attendanceRecords.id, id))
+        .returning();
+    } catch (error) {
+      const wrapped = error as {
+        code?: string;
+        constraint?: string;
+        cause?: { code?: string; constraint?: string };
+      };
+      const pgError = wrapped.cause ?? wrapped;
+      if (
+        pgError?.code === '23505' ||
+        pgError?.constraint === 'attendance_records_user_id_work_date_unique'
+      ) {
+        throw new HttpException(
+          { code: 'ALREADY_CHECKED_IN', message: 'Attendance record already exists for that day' },
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
 
     const updated = updatedRows[0];
     return {

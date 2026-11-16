@@ -300,7 +300,7 @@ Enqueues background Excel generation job.
 ```json
 {
   "data": {
-    "jobId": "report-attendance-981247"
+    "jobId": "550e8400-e29b-41d4-a716-446655440000"
   }
 }
 ```
@@ -315,7 +315,7 @@ Queries asynchronous job status.
 ```json
 {
   "data": {
-    "id": "report-attendance-981247",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
     "status": "COMPLETED",
     "downloadUrl": "https://res.cloudinary.com/.../reports/attendance_20261011.xlsx",
     "error": null

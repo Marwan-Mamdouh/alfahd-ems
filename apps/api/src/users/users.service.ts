@@ -19,7 +19,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
-import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNotNull, ne, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { employeeStatusHistory, users, warehouses, type User } from '../database/schema/index.js';
 import { ARGON2_OPTIONS, toUserDto } from '../database/schema/mappers.js';
@@ -37,6 +37,15 @@ export class UsersService {
     private readonly sessionService: SessionService,
   ) {}
 
+  private assertTechnicianWarehouse(role: Role, warehouseId: string | null | undefined): void {
+    if (role === Role.TECHNICIAN && !warehouseId) {
+      throw new BadRequestException({
+        code: 'TECHNICIAN_REQUIRES_WAREHOUSE',
+        message: 'Technicians must have an assigned warehouse',
+      });
+    }
+  }
+
   public async findRowOrThrow(id: string): Promise<User> {
     const rows = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
     const user = rows[0];
@@ -47,6 +56,9 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto): Promise<UserDto> {
+    // The legacy user endpoint cannot assign a warehouse; technicians must be
+    // created through the employee endpoint instead.
+    this.assertTechnicianWarehouse(dto.role, null);
     const existing = await this.db
       .select({ id: users.id })
       .from(users)
@@ -93,14 +105,9 @@ export class UsersService {
       throw new ConflictException('Email already in use');
     }
 
-    if (dto.role === Role.TECHNICIAN && !dto.assignedWarehouseId) {
-      throw new BadRequestException({
-        code: 'TECHNICIAN_REQUIRES_WAREHOUSE',
-        message: 'assignedWarehouseId is required when role is TECHNICIAN',
-      });
-    }
+    this.assertTechnicianWarehouse(dto.role, dto.assignedWarehouseId);
 
-    const tempPassword = `Temp-${randomBytes(6).toString('hex')}!Aa1`;
+    const tempPassword = `Temp-${randomBytes(12).toString('hex')}!Aa1`;
     const passwordHash = await hash(tempPassword, ARGON2_OPTIONS);
 
     const values = {
@@ -223,12 +230,10 @@ export class UsersService {
   async updateEmployee(id: string, dto: UpdateEmployeeDto): Promise<User> {
     const user = await this.findRowOrThrow(id);
 
-    if (user.role === Role.TECHNICIAN && dto.assignedWarehouseId === null) {
-      throw new BadRequestException({
-        code: 'TECHNICIAN_REQUIRES_WAREHOUSE',
-        message: 'Technicians must have an assigned warehouse',
-      });
-    }
+    this.assertTechnicianWarehouse(
+      user.role,
+      dto.assignedWarehouseId === undefined ? user.assignedWarehouseId : dto.assignedWarehouseId,
+    );
 
     const updates = {
       ...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -249,8 +254,19 @@ export class UsersService {
         return rows[0];
       });
     } else {
-      const rows = await this.db.update(users).set(updates).where(eq(users.id, id)).returning();
+      const rows = await this.db
+        .update(users)
+        .set(updates)
+        .where(
+          dto.assignedWarehouseId === null
+            ? and(eq(users.id, id), ne(users.role, Role.TECHNICIAN))
+            : eq(users.id, id),
+        )
+        .returning();
       updated = rows[0];
+      if (!updated && dto.assignedWarehouseId === null) {
+        this.assertTechnicianWarehouse(Role.TECHNICIAN, null);
+      }
     }
 
     if (!updated) {
@@ -299,23 +315,23 @@ export class UsersService {
     });
   }
 
-  async updateProfilePhotoKey(id: string, profilePhotoKey: string | null): Promise<User> {
-    await this.findRowOrThrow(id);
-
-    const rows = await this.db
-      .update(users)
-      .set({
-        profilePhotoKey,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, id))
-      .returning();
-
-    const updated = rows[0];
-    if (!updated) {
-      throw new NotFoundException('Employee not found');
-    }
-    return updated;
+  async updateProfilePhotoKey(id: string, profilePhotoKey: string | null): Promise<string | null> {
+    return this.db.transaction(async (tx) => {
+      const [previous] = await tx
+        .select({ profilePhotoKey: users.profilePhotoKey })
+        .from(users)
+        .where(eq(users.id, id))
+        .for('update')
+        .limit(1);
+      if (!previous) {
+        throw new NotFoundException('Employee not found');
+      }
+      await tx
+        .update(users)
+        .set({ profilePhotoKey, updatedAt: new Date() })
+        .where(eq(users.id, id));
+      return previous.profilePhotoKey;
+    });
   }
 
   async findAll(): Promise<UserDto[]> {
@@ -329,6 +345,9 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto, requestingUserId?: string): Promise<UserDto> {
     const user = await this.findRowOrThrow(id);
+    if (dto.role !== undefined) {
+      this.assertTechnicianWarehouse(dto.role, user.assignedWarehouseId);
+    }
     // The self-deactivation guard belongs here (not in the controller) so any
     // caller of update({isActive: false}) enforces it. Missing
     // requestingUserId means an internal call, which skips the guard.
@@ -353,10 +372,17 @@ export class UsersService {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         updatedAt: new Date(),
       })
-      .where(eq(users.id, id))
+      .where(
+        dto.role === Role.TECHNICIAN
+          ? and(eq(users.id, id), isNotNull(users.assignedWarehouseId))
+          : eq(users.id, id),
+      )
       .returning();
     const updated = rows[0];
     if (!updated) {
+      if (dto.role === Role.TECHNICIAN) {
+        this.assertTechnicianWarehouse(Role.TECHNICIAN, null);
+      }
       throw new NotFoundException('User not found');
     }
     // Deactivating an account must also terminate its live refresh sessions —

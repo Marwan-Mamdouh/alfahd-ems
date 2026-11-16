@@ -69,6 +69,9 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
 
   const sessionService = {
     createSession: vi.fn().mockResolvedValue(undefined),
+    getSessionOwner: vi.fn().mockResolvedValue(ACTIVE_USER.id),
+    getTokenGeneration: vi.fn().mockResolvedValue('0'),
+    getSessionGeneration: vi.fn().mockResolvedValue('0'),
     createPasswordResetToken: vi.fn().mockResolvedValue(undefined),
     consumePasswordResetToken: vi.fn(),
     revokeAllSessions: vi.fn().mockResolvedValue(0),
@@ -76,6 +79,7 @@ function makeService(overrides: { rows?: User[]; send?: () => Promise<void> } = 
     clearRotated: vi.fn().mockResolvedValue(undefined),
     revokeSession: vi.fn().mockResolvedValue(undefined),
     isRotated: vi.fn().mockResolvedValue(false),
+    isRevoked: vi.fn().mockResolvedValue(false),
     getRevokedTokenUserId: vi.fn().mockResolvedValue(null),
   } as unknown as SessionService;
 
@@ -132,6 +136,25 @@ describe('forgotPassword — must not reveal whether an account exists', () => {
 });
 
 describe('login — wrong password and unknown email are indistinguishable', () => {
+  it.each(['password reset', 'deactivation'])(
+    'rejects and revokes a login racing %s',
+    async (change) => {
+      const rows = [{ ...ACTIVE_USER }];
+      const { service, sessionService } = makeService({ rows });
+      vi.mocked(sessionService.createSession).mockImplementationOnce(async () => {
+        rows[0] = {
+          ...rows[0],
+          ...(change === 'password reset' ? { passwordHash: 'new-hash' } : { isActive: false }),
+        };
+      });
+
+      await expect(service.login(ACTIVE_USER.email, PASSWORD)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, expect.any(String));
+    },
+  );
+
   it('returns access token, refresh token, and user dto for valid credentials', async () => {
     const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
 
@@ -146,7 +169,11 @@ describe('login — wrong password and unknown email are indistinguishable', () 
       isActive: true,
       createdAt: ACTIVE_USER.createdAt.toISOString(),
     });
-    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+    expect(sessionService.createSession).toHaveBeenCalledWith(
+      ACTIVE_USER.id,
+      result.refreshToken,
+      '0',
+    );
   });
 
   it('throws the same UnauthorizedException for a wrong password', async () => {
@@ -294,6 +321,23 @@ describe('refresh — attributes revoked-token replay to the targeted account (H
 });
 
 describe('refresh — token rotation (Issue #9)', () => {
+  it('rejects rotation when account revocation occurs after the token is consumed', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
+    vi.mocked(sessionService.getSessionGeneration).mockResolvedValue('1');
+    await expect(service.refresh('old-token-id')).rejects.toThrow(UnauthorizedException);
+    expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, expect.any(String));
+  });
+
+  it('rejects a consumed token revoked before its replacement is issued', async () => {
+    const { service, sessionService } = makeService({ rows: [ACTIVE_USER] });
+    vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
+    vi.mocked(sessionService.isRevoked).mockResolvedValue(true);
+
+    await expect(service.refresh('old-token-id')).rejects.toThrow(UnauthorizedException);
+    expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, expect.any(String));
+  });
+
   it('rotates refresh token on use: consumes old, creates new session, revokes old, and signs with new jti', async () => {
     const { service, sessionService, jwtService } = makeService({ rows: [ACTIVE_USER] });
     vi.mocked(sessionService.consumeSessionForRotation).mockResolvedValue(ACTIVE_USER.id);
@@ -308,7 +352,11 @@ describe('refresh — token rotation (Issue #9)', () => {
     );
 
     expect(sessionService.consumeSessionForRotation).toHaveBeenCalledWith('old-token-id');
-    expect(sessionService.createSession).toHaveBeenCalledWith(ACTIVE_USER.id, result.refreshToken);
+    expect(sessionService.createSession).toHaveBeenCalledWith(
+      ACTIVE_USER.id,
+      result.refreshToken,
+      '0',
+    );
     expect(sessionService.revokeSession).toHaveBeenCalledWith(ACTIVE_USER.id, 'old-token-id');
     expect(jwtService.sign).toHaveBeenCalledWith(
       expect.objectContaining({
