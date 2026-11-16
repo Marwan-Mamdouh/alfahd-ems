@@ -7,11 +7,11 @@ import {
 
 export class OverrideAttendanceRequestDto implements OverrideAttendanceDto {
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   checkInAt?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   checkOutAt?: string;
 
   @IsOptional()

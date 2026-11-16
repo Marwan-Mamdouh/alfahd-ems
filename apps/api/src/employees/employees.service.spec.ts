@@ -111,6 +111,14 @@ describe('EmployeesService', () => {
       );
     });
 
+    it('prevents an admin from deactivating their own account', async () => {
+      await expect(
+        service.updateStatus('user-123', 'INACTIVE', 'Reason', 'user-123'),
+      ).rejects.toThrow('Admin cannot deactivate their own account');
+      expect(usersServiceMock.updateEmployeeStatus).not.toHaveBeenCalled();
+      expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
+    });
+
     it('rejects status update if reason is empty', async () => {
       await expect(
         service.updateStatus('user-123', 'INACTIVE', '   ', 'admin-123'),
@@ -153,6 +161,15 @@ describe('EmployeesService', () => {
   describe('uploadPhoto', () => {
     const validJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 
+    it('preserves the database error when rollback deletion also fails', async () => {
+      const databaseError = new Error('database unavailable');
+      usersServiceMock.updateProfilePhotoKey.mockRejectedValue(databaseError);
+      storageServiceMock.deleteFile.mockRejectedValue(new Error('storage unavailable'));
+      await expect(
+        service.uploadPhoto('user-123', { buffer: validJpeg } as Express.Multer.File),
+      ).rejects.toBe(databaseError);
+    });
+
     it('rejects missing or empty file', async () => {
       await expect(service.uploadPhoto('user-123', undefined)).rejects.toThrow(BadRequestException);
     });
@@ -180,10 +197,7 @@ describe('EmployeesService', () => {
         buffer: validJpeg,
       } as Express.Multer.File;
 
-      usersServiceMock.updateProfilePhotoKey.mockResolvedValue({
-        ...mockUser,
-        profilePhotoKey: 'employees/photos/new-key',
-      });
+      usersServiceMock.updateProfilePhotoKey.mockResolvedValue('old-key');
 
       const result = await service.uploadPhoto('user-123', file);
 
@@ -216,10 +230,7 @@ describe('EmployeesService', () => {
         buffer: validJpeg,
       } as Express.Multer.File;
 
-      usersServiceMock.updateProfilePhotoKey.mockResolvedValue({
-        ...mockUser,
-        profilePhotoKey: 'employees/photos/new-key',
-      });
+      usersServiceMock.updateProfilePhotoKey.mockResolvedValue('old-key');
       storageServiceMock.deleteFile.mockRejectedValueOnce(new Error('Cloudinary 401 Unauthorized'));
 
       const result = await service.uploadPhoto('user-123', file);

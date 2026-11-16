@@ -67,6 +67,24 @@ export class AuthService {
     return user;
   }
 
+  private async assertSessionStillAuthorized(
+    user: User,
+    tokenId: string,
+    generation: string,
+  ): Promise<void> {
+    const rows = await this.db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    const current = rows[0];
+    if (
+      !current ||
+      !current.isActive ||
+      current.passwordHash !== user.passwordHash ||
+      (await this.sessionService.getSessionGeneration(user.id)) !== generation
+    ) {
+      await this.sessionService.revokeSession(user.id, tokenId);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+  }
+
   async login(email: string, password: string): Promise<LoginResponseDto> {
     const rows = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
     const user = rows[0];
@@ -79,6 +97,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    const generation = await this.sessionService.getSessionGeneration(user.id);
     const isPasswordValid = await verify(user.passwordHash, password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
@@ -90,7 +109,8 @@ export class AuthService {
     }
 
     const tokenId = randomUUID();
-    await this.sessionService.createSession(user.id, tokenId);
+    await this.sessionService.createSession(user.id, tokenId, generation);
+    await this.assertSessionStillAuthorized(user, tokenId, generation);
     return {
       accessToken: this.signAccessToken(user, tokenId),
       refreshToken: tokenId,
@@ -99,6 +119,8 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string, ip?: string): Promise<RefreshTokenResponseDto> {
+    const owner = await this.sessionService.getSessionOwner(refreshToken);
+    const generation = owner ? await this.sessionService.getTokenGeneration(refreshToken) : null;
     const userId = await this.sessionService.consumeSessionForRotation(refreshToken);
     if (!userId) {
       if (await this.sessionService.isRotated(refreshToken)) {
@@ -126,6 +148,10 @@ export class AuthService {
       // is not cleared so concurrent/winning sessions survive.
       throw new UnauthorizedException('Invalid refresh token');
     }
+    if (userId !== owner || generation === null) {
+      await this.sessionService.revokeSession(userId, refreshToken);
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
     const rows = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
     const user = rows[0];
@@ -138,7 +164,14 @@ export class AuthService {
     }
 
     const newTokenId = randomUUID();
-    await this.sessionService.createSession(user.id, newTokenId);
+    await this.sessionService.createSession(user.id, newTokenId, generation);
+    // The consumed token stays indexed until rotation completes. If an
+    // account-wide revoke ran in the meantime, it marks that token revoked.
+    if (await this.sessionService.isRevoked(refreshToken)) {
+      await this.sessionService.revokeSession(user.id, newTokenId);
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    await this.assertSessionStillAuthorized(user, newTokenId, generation);
     await this.sessionService.revokeSession(user.id, refreshToken);
 
     return {

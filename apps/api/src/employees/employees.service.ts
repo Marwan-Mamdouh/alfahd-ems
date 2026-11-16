@@ -71,6 +71,9 @@ export class EmployeesService {
     if (!reason || !reason.trim()) {
       throw new BadRequestException('Reason is mandatory for status changes');
     }
+    if (status === 'INACTIVE' && id === actorId) {
+      throw new BadRequestException('Admin cannot deactivate their own account');
+    }
 
     const updatedUser = await this.usersService.updateEmployeeStatus(id, status, reason, actorId);
 
@@ -101,8 +104,7 @@ export class EmployeesService {
       throw new BadRequestException('Invalid file type: only JPEG and PNG are allowed');
     }
 
-    const user = await this.usersService.findEmployeeById(id);
-    const oldPhotoKey = user.profilePhotoKey;
+    await this.usersService.findEmployeeById(id);
 
     const uploadResult = await this.storageService.uploadFile(
       file.buffer,
@@ -110,11 +112,18 @@ export class EmployeesService {
       mimeType,
     );
 
+    let oldPhotoKey: string | null;
     try {
-      await this.usersService.updateProfilePhotoKey(id, uploadResult.publicId);
+      oldPhotoKey = await this.usersService.updateProfilePhotoKey(id, uploadResult.publicId);
     } catch (dbError) {
       // Rollback compensation: delete uploaded asset from Cloudinary
-      await this.storageService.deleteFile(uploadResult.publicId);
+      try {
+        await this.storageService.deleteFile(uploadResult.publicId);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to delete rolled-back profile photo ${uploadResult.publicId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       throw dbError;
     }
 

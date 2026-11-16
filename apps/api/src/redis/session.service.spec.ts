@@ -50,10 +50,27 @@ function createFakeRedis() {
         }
         return userId;
       }
+      if (script.includes("redis.call('ZRANGE'")) {
+        const index = args[0] as string;
+        const userId = args[1] as string;
+        const generationKey = `rt:user_generation:${userId}`;
+        store.set(generationKey, String(Number(store.get(generationKey) ?? 0) + 1));
+        const tokenIds = [...(zsets.get(index)?.keys() ?? [])];
+        for (const tokenId of tokenIds) {
+          store.delete(sessionKey(tokenId));
+          store.delete(`rt:token_generation:${tokenId}`);
+          store.set(revokedKey(tokenId), userId);
+        }
+        zsets.delete(index);
+        return tokenIds.length;
+      }
       return null;
     }),
     // The O(1) design must never fall back to a keyspace SCAN.
     scan: vi.fn(async () => ['0', []] as [string, string[]]),
+    multi() {
+      return redis.pipeline();
+    },
     pipeline() {
       const ops: Array<() => Promise<unknown>> = [];
       const pipe = {
@@ -97,7 +114,7 @@ function createFakeRedis() {
         exec: async () => {
           const results: unknown[] = [];
           for (const op of ops) {
-            results.push(await op());
+            results.push([null, await op()]);
           }
           return results;
         },
@@ -223,6 +240,26 @@ describe('SessionService', () => {
     await expect(service.isRevoked('token-3')).resolves.toBe(false);
     // O(K) in the user's own sessions — never a keyspace iteration.
     expect(fake.redis.scan).not.toHaveBeenCalled();
+  });
+
+  it('does not lose a session created concurrently with revocation', async () => {
+    await service.createSession('user-1', 'old-token');
+    const originalEval = fake.redis.eval.getMockImplementation()!;
+    fake.redis.eval.mockImplementationOnce(async (...args) => {
+      await service.createSession('user-1', 'new-token');
+      return originalEval(...args);
+    });
+    fake.redis.zrange.mockImplementationOnce(async () => {
+      await service.createSession('user-1', 'new-token');
+      return ['old-token'];
+    });
+
+    await service.revokeAllSessions('user-1');
+    if (fake.store.has(sessionKey('new-token'))) {
+      expect(fake.zsets.get(userTokensKey('user-1'))?.has('new-token')).toBe(true);
+      await service.revokeAllSessions('user-1');
+    }
+    expect(fake.store.has(sessionKey('new-token'))).toBe(false);
   });
 
   it('returns 0 when revoking sessions for a user with none', async () => {

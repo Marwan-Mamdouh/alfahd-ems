@@ -137,6 +137,18 @@ describe('Auth (e2e) — refresh cookie transport', () => {
           window: number,
           max: number,
         ) => {
+          if (_script.includes('local tokenIds')) {
+            const generationKey = `rt:user_generation:${String(now)}`;
+            redisKeys.set(generationKey, String(Number(redisKeys.get(generationKey) ?? 0) + 1));
+            const tokens = [...(redisZsets.get(key)?.keys() ?? [])];
+            for (const token of tokens) {
+              redisKeys.delete(`rt:token:${token}`);
+              redisKeys.delete(`rt:token_generation:${token}`);
+              redisKeys.set(`rv:${token}`, String(now));
+            }
+            redisZsets.delete(key);
+            return tokens.length;
+          }
           if (_script.includes('GETDEL')) {
             const sessionK = key;
             const rotatedK = String(now);
@@ -251,6 +263,8 @@ describe('Auth (e2e) — refresh cookie transport', () => {
       quit: vi.fn(async () => 'OK'),
       ping: vi.fn(async () => 'PONG'),
     };
+
+    Object.assign(redisStub, { multi: redisStub.pipeline });
 
     // Drizzle double: the services only ever call
     // db.select().from(users).where(...).limit(1) / without .limit().
