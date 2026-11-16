@@ -1,7 +1,8 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import ExcelJS from 'exceljs';
-import { Inject, Logger, OnApplicationShutdown } from '@nestjs/common';
+import { Inject, Logger, OnApplicationShutdown, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { aliasedTable, and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import {
@@ -25,6 +26,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     @Inject(REPORT_STORAGE) private readonly storageService: StorageService,
+    @Optional() private readonly configService?: ConfigService,
   ) {
     super();
   }
@@ -103,14 +105,17 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
     for (const item of rows) {
       const hours = calculateHoursWorked(item.record.checkInAt, item.record.checkOutAt);
       const hoursWorked = hours === null ? '-' : hours.toFixed(2);
+      const timezone = this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo';
 
       worksheet.addRow({
         name: sanitizeSpreadsheetCell(item.user.name),
         email: sanitizeSpreadsheetCell(item.user.email),
         department: item.user.department ? sanitizeSpreadsheetCell(item.user.department) : '-',
         workDate: item.record.workDate,
-        checkInAt: formatLocalTimestamp(item.record.checkInAt),
-        checkOutAt: item.record.checkOutAt ? formatLocalTimestamp(item.record.checkOutAt) : '-',
+        checkInAt: formatLocalTimestamp(item.record.checkInAt, timezone),
+        checkOutAt: item.record.checkOutAt
+          ? formatLocalTimestamp(item.record.checkOutAt, timezone)
+          : '-',
         hoursWorked,
         status: item.record.status,
         distance: item.record.checkInDistanceM,
@@ -375,7 +380,10 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       }
 
       const assignedAtFormatted = item.custody?.assignedAt
-        ? formatLocalTimestamp(item.custody.assignedAt)
+        ? formatLocalTimestamp(
+            item.custody.assignedAt,
+            this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo',
+          )
         : '-';
 
       detailsSheet.addRow({

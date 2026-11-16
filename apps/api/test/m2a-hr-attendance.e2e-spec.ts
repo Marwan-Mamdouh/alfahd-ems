@@ -178,7 +178,19 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
     };
 
     const redisStub = {
-      eval: vi.fn(async () => 0),
+      eval: vi.fn(async (script: string, _numKeys: number, key: string, userId: string) => {
+        if (!script.includes('local tokenIds')) return 0;
+        const generationKey = `rt:user_generation:${userId}`;
+        redisKeys.set(generationKey, String(Number(redisKeys.get(generationKey) ?? 0) + 1));
+        const tokens = [...(redisZsets.get(key)?.keys() ?? [])];
+        for (const token of tokens) {
+          redisKeys.delete(`rt:token:${token}`);
+          redisKeys.delete(`rt:token_generation:${token}`);
+          redisKeys.set(`rv:${token}`, userId);
+        }
+        redisZsets.delete(key);
+        return tokens.length;
+      }),
       set: vi.fn(async (key: string, value: string) => {
         redisKeys.set(key, value);
         return 'OK';
@@ -261,6 +273,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       ping: vi.fn(async () => 'PONG'),
     };
 
+    Object.assign(redisStub, { multi: redisStub.pipeline });
     const fixedNow = new Date('2026-10-11T05:30:00.000Z'); // 08:30 Cairo DST time (UTC+3)
     const clockStub = {
       now: vi.fn(() => fixedNow),
@@ -646,6 +659,19 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       expect(res.body.statusCode).toBe(400);
     });
 
+    it('rejects a calendar-invalid hire date', async () => {
+      await request(app.getHttpServer())
+        .post('/employees')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'Invalid date',
+          email: 'date@example.test',
+          role: 'CS',
+          hireDate: '2026-02-30',
+        })
+        .expect(400);
+    });
+
     it('rejects a phone number longer than varchar(30) with 400 (SEC-07)', async () => {
       const res = await request(app.getHttpServer())
         .post('/employees')
@@ -788,6 +814,14 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         .expect(400);
 
       expect(res.body.error.code).toBe('CHECK_OUT_BEFORE_CHECK_IN');
+    });
+
+    it.each(['checkInAt', 'checkOutAt'])('rejects a calendar-invalid %s', async (field) => {
+      await request(app.getHttpServer())
+        .patch(`/attendance/${ATT_ID}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ [field]: '2026-02-30T12:00:00Z', overrideReason: 'Correction' })
+        .expect(400);
     });
 
     it('overrides attendance record with reason under ADMIN role (200)', async () => {

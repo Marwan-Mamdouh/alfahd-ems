@@ -214,6 +214,18 @@ describe('Users (e2e)', () => {
     redisZsets = new Map<string, Map<string, number>>();
     const redisStub = {
       eval: vi.fn(async (_script: string, _numKeys: number, key: string, arg1: string | number) => {
+        if (_script.includes('local tokenIds')) {
+          const generationKey = `rt:user_generation:${String(arg1)}`;
+          redisKeys.set(generationKey, String(Number(redisKeys.get(generationKey) ?? 0) + 1));
+          const tokens = [...(redisZsets.get(key)?.keys() ?? [])];
+          for (const token of tokens) {
+            redisKeys.delete(`rt:token:${token}`);
+            redisKeys.delete(`rt:token_generation:${token}`);
+            redisKeys.set(`rv:${token}`, String(arg1));
+          }
+          redisZsets.delete(key);
+          return tokens.length;
+        }
         if (_script.includes('GETDEL')) {
           const userId = redisKeys.get(key) ?? null;
           if (userId) {
@@ -299,6 +311,7 @@ describe('Users (e2e)', () => {
       ping: vi.fn(async () => 'PONG'),
     };
 
+    Object.assign(redisStub, { multi: redisStub.pipeline });
     const moduleFixture: TestingModule = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider('REDIS_CLIENT')
       .useValue(redisStub)

@@ -39,6 +39,14 @@ export function rotatedKey(tokenId: string): string {
   return `rt:rotated:${tokenId}`;
 }
 
+export function sessionGenerationKey(userId: string): string {
+  return `rt:user_generation:${userId}`;
+}
+
+export function tokenGenerationKey(tokenId: string): string {
+  return `rt:token_generation:${tokenId}`;
+}
+
 const CONSUME_AND_MARK_ROTATED = `
 local userId = redis.call('GETDEL', KEYS[1])
 if userId then
@@ -47,22 +55,51 @@ end
 return userId
 `;
 
+const REVOKE_ALL_SESSIONS = `
+redis.call('INCR', 'rt:user_generation:' .. ARGV[1])
+local tokenIds = redis.call('ZRANGE', KEYS[1], 0, -1)
+for _, tokenId in ipairs(tokenIds) do
+  redis.call('DEL', 'rt:token:' .. tokenId)
+  redis.call('DEL', 'rt:token_generation:' .. tokenId)
+  redis.call('SET', 'rv:' .. tokenId, ARGV[1], 'EX', ARGV[2])
+end
+redis.call('DEL', KEYS[1])
+return #tokenIds
+`;
+
 @Injectable()
 export class SessionService {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
-  async createSession(userId: string, tokenId: string): Promise<void> {
+  async getSessionGeneration(userId: string): Promise<string> {
+    return (await this.redis.get(sessionGenerationKey(userId))) ?? '0';
+  }
+
+  async getSessionOwner(tokenId: string): Promise<string | null> {
+    return this.redis.get(sessionKey(tokenId));
+  }
+
+  async getTokenGeneration(tokenId: string): Promise<string | null> {
+    return this.redis.get(tokenGenerationKey(tokenId));
+  }
+
+  async createSession(userId: string, tokenId: string, generation?: string): Promise<void> {
+    const issuedGeneration = generation ?? (await this.getSessionGeneration(userId));
     const userTokens = userTokensKey(userId);
     const nowMs = Date.now();
     const expiresAtMs = nowMs + REFRESH_SESSION_TTL_SECONDS * 1000;
-    const pipeline = this.redis.pipeline();
+    const pipeline = this.redis.multi();
     // Prune expired token ids for this user before adding the new one, so the
     // index stays bounded even though `expire` slides the key's TTL on every login.
     pipeline.zremrangebyscore(userTokens, 0, nowMs);
     pipeline.zadd(userTokens, expiresAtMs, tokenId);
     pipeline.expire(userTokens, REFRESH_SESSION_TTL_SECONDS);
     pipeline.set(sessionKey(tokenId), userId, 'EX', REFRESH_SESSION_TTL_SECONDS);
-    await pipeline.exec();
+    pipeline.set(tokenGenerationKey(tokenId), issuedGeneration, 'EX', REFRESH_SESSION_TTL_SECONDS);
+    const results = await pipeline.exec();
+    if (!results || results.some(([error]) => error)) {
+      throw new Error('Failed to create refresh session');
+    }
   }
 
   /**
@@ -100,6 +137,7 @@ export class SessionService {
   async revokeSession(userId: string, tokenId: string): Promise<void> {
     const pipeline = this.redis.pipeline();
     pipeline.del(sessionKey(tokenId));
+    pipeline.del(tokenGenerationKey(tokenId));
     pipeline.zrem(userTokensKey(userId), tokenId);
     // Store the owning userId (not a bare flag) so a later replay attempt can
     // be attributed to the targeted account in security logs.
@@ -109,19 +147,13 @@ export class SessionService {
 
   /** Revoke every session indexed for a user (O(K)). Returns the revoked count. */
   async revokeAllSessions(userId: string): Promise<number> {
-    const userTokens = userTokensKey(userId);
-    const tokenIds = await this.redis.zrange(userTokens, '0', '-1');
-    if (tokenIds.length === 0) {
-      return 0;
-    }
-    const pipeline = this.redis.pipeline();
-    for (const tokenId of tokenIds) {
-      pipeline.del(sessionKey(tokenId));
-      pipeline.set(revokedKey(tokenId), userId, 'EX', REVOKED_TOKEN_TTL_SECONDS);
-    }
-    pipeline.del(userTokens);
-    await pipeline.exec();
-    return tokenIds.length;
+    return this.redis.eval(
+      REVOKE_ALL_SESSIONS,
+      1,
+      userTokensKey(userId),
+      userId,
+      REVOKED_TOKEN_TTL_SECONDS,
+    ) as Promise<number>;
   }
 
   /** True when the tokenId was explicitly revoked (denylist), as opposed to merely expired. */

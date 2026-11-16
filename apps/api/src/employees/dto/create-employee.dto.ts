@@ -43,7 +43,7 @@ export class CreateEmployeeRequestDto implements CreateEmployeeDto {
   // users.hire_date is a `date` column: `@IsString()` would let "not-a-date"
   // through to a Postgres date-parse error (500).
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   hireDate?: string;
 
   @IsOptional()
