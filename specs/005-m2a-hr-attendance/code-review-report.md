@@ -80,7 +80,7 @@
 ### SIMP-02 — O(1) token lookup instead of keyspace SCAN ✅
 - `session.service.ts` rewritten to the prompt's key layout:
   - `rt:token:{tokenId}` → `userId` (value), 7-day TTL → `findSessionByTokenId` = single `GET`.
-  - `rt:user_tokens:{userId}` → Set of token ids (TTL refreshed on each login) → `revokeAllSessions` = `SMEMBERS` + pipelined `DEL`/`SET rv:*`, **O(K)** in that user's sessions, no `SCAN`.
+  - `rt:user_tokens:{userId}` → Sorted Set of token ids scored by expiry, with expired members pruned on login; `revokeAllSessions` uses the index in **O(K)**, with no `SCAN`.
   - `revokeSession` = pipelined `DEL` token key + `SREM` from the set + denylist `SET`.
 - **Tests:** `session.service.spec.ts` rewritten — same behavioral coverage (TTLs, revoke counts, denylist, password-reset atomicity) plus explicit regression guards `expect(redis.scan).not.toHaveBeenCalled()`.
 - **Deployment note:** sessions created under the old `rt:{userId}:{tokenId}` layout are unreadable by the new lookup → **all users must re-login once** after deploy (refresh tokens are the only casualty; access JWTs run out naturally).

@@ -44,7 +44,17 @@ export const envSchema = z
       .regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format')
       .default('09:00'),
     ATTENDANCE_RADIUS_M: z.coerce.number().positive().default(150),
-    APP_TIMEZONE: z.string().default('Africa/Cairo'),
+    APP_TIMEZONE: z
+      .string()
+      .refine((value) => {
+        try {
+          new Intl.DateTimeFormat('en', { timeZone: value });
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'Must be a valid IANA timezone')
+      .default('Africa/Cairo'),
   })
   .refine((data) => data.REDIS_URL || (data.REDIS_HOST && data.REDIS_PORT), {
     message: 'Either REDIS_URL or both REDIS_HOST and REDIS_PORT are required',

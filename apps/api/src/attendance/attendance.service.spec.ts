@@ -411,6 +411,54 @@ describe('AttendanceService', () => {
   });
 
   describe('override', () => {
+    it('returns a conflict when the target work date already has a record', async () => {
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([mockAttendance]),
+          })),
+        })),
+      }));
+      dbMock.update.mockImplementation(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockRejectedValue({ cause: { code: '23505' } }),
+          })),
+        })),
+      }));
+
+      await expect(
+        service.override('att-123', 'admin-1', {
+          checkInAt: '2026-10-12T10:00:00.000Z',
+          overrideReason: 'Correct check-in',
+        }),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+    });
+
+    it('recomputes the work date when check-in moves across local midnight', async () => {
+      dbMock.select.mockImplementation(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([{ ...mockAttendance, checkOutAt: null }]),
+          })),
+        })),
+      }));
+      dbMock.update.mockImplementation(() => ({
+        set: vi.fn((values) => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([{ ...mockAttendance, ...values }]),
+          })),
+        })),
+      }));
+
+      const result = await service.override('att-123', 'admin-1', {
+        checkInAt: '2026-10-11T22:30:00.000Z',
+        overrideReason: 'Correct check-in',
+      });
+
+      expect(result.workDate).toBe('2026-10-12');
+    });
+
     it('rejects override without reason', async () => {
       dbMock.select.mockImplementation(() => ({
         from: vi.fn(() => ({
