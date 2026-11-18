@@ -113,17 +113,17 @@ export function IpImportDialog({
                 selectedFile={file}
                 onFileSelect={setFile}
                 disabled={isImporting}
-                helperText="ملف CSV بحجم أقصى 5 ميجابايت (الترويسات المقبولة: address, notes)"
+                helperText="ملف CSV بحجم أقصى 5 ميجابايت وبحد أقصى 5000 سطر (الترويسات المقبولة: address, notes)"
               />
 
               <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs space-y-1.5 text-muted-foreground">
                 <div className="font-semibold text-foreground flex items-center gap-1.5">
                   <FileSpreadsheet className="size-4 text-teal-600" />
-                  <span>تنسيق ملف CSV المطلوب:</span>
+                  <span>تنسيق وحدود ملف CSV المطلوب:</span>
                 </div>
-                <p>يجب أن يتضمن الملف العمودين التاليين:</p>
+                <p>يجب أن يلتزم الملف بالضوابط التالية (حد أقصى 5 ميجابايت و 5000 سطر):</p>
                 <ul className="list-disc list-inside space-y-0.5 pr-2 font-mono text-[11px]">
-                  <li>address: عنوان IPv4 الفردي (إلزامي، مثال: 10.0.0.1)</li>
+                  <li>address: عنوان IPv4 الفردي (إلزامي، مثال: 10.0.0.1 - لا يُقبل CIDR أو IPv6)</li>
                   <li>notes: الملاحظات الخاصة بالعنوان (اختياري)</li>
                 </ul>
               </div>

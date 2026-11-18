@@ -34,10 +34,12 @@ import { IpTable } from "@/components/ip-addresses/ip-table";
 import { IpForm } from "@/components/ip-addresses/ip-form";
 import { IpHistoryDialog } from "@/components/ip-addresses/ip-history-dialog";
 import { IpImportDialog } from "@/components/ip-addresses/ip-import-dialog";
+import { IpActionDialog } from "@/components/ip-addresses/ip-action-dialog";
 import type {
   IpAddressRow,
   IpStatusFilter,
   IpArchivedFilter,
+  IpActionType,
 } from "@/components/ip-addresses/types";
 
 function IpPreviewContent() {
@@ -69,6 +71,19 @@ function IpPreviewContent() {
   const [historyIp, setHistoryIp] = useState<IpAddressRow | null>(null);
 
   const [isImportOpen, setIsImportOpen] = useState(false);
+
+  // Action Dialog State (Confirmation for Reserve / Release / Archive / Unarchive)
+  const [actionDialog, setActionDialog] = useState<{
+    isOpen: boolean;
+    action: IpActionType | null;
+    ip: IpAddressRow | null;
+    errorMessage: string | null;
+  }>({
+    isOpen: false,
+    action: null,
+    ip: null,
+    errorMessage: null,
+  });
 
   // Query Params
   const queryParams = useMemo<IpQueryDto>(
@@ -174,39 +189,25 @@ function IpPreviewContent() {
     }
   };
 
-  const handleReserve = async (row: IpAddressRow) => {
-    try {
-      await reserveMutation.mutateAsync({
-        id: row.id,
-        reason: "حجز يدوي من لوحة تحكم الإدارة",
-      });
-      setNotification({
-        type: "success",
-        message: `تم حجز العنوان بنجاح: ${row.address}`,
-      });
-    } catch (err) {
-      const msg = extractErrorMessage(err, "فشل حجز عنوان IP");
-      setNotification({ type: "error", message: msg });
-    }
+  const handleReserve = (row: IpAddressRow) => {
+    setActionDialog({
+      isOpen: true,
+      action: "reserve",
+      ip: row,
+      errorMessage: null,
+    });
   };
 
-  const handleRelease = async (row: IpAddressRow) => {
-    try {
-      await releaseMutation.mutateAsync({
-        id: row.id,
-        reason: "تحرير العنوان وإعادته للمخزون الحر",
-      });
-      setNotification({
-        type: "success",
-        message: `تم تحرير العنوان وإعادته للمتاح: ${row.address}`,
-      });
-    } catch (err) {
-      const msg = extractErrorMessage(err, "فشل تحرير عنوان IP");
-      setNotification({ type: "error", message: msg });
-    }
+  const handleRelease = (row: IpAddressRow) => {
+    setActionDialog({
+      isOpen: true,
+      action: "release",
+      ip: row,
+      errorMessage: null,
+    });
   };
 
-  const handleArchive = async (row: IpAddressRow) => {
+  const handleArchive = (row: IpAddressRow) => {
     if (row.status === "RESERVED") {
       setNotification({
         type: "error",
@@ -214,35 +215,69 @@ function IpPreviewContent() {
       });
       return;
     }
-
-    try {
-      await archiveMutation.mutateAsync({
-        id: row.id,
-        reason: "أرشفة يدوية من لوحة التحكم",
-      });
-      setNotification({
-        type: "success",
-        message: `تم أرشفة العنوان بنجاح: ${row.address}`,
-      });
-    } catch (err) {
-      const msg = extractErrorMessage(err, "فشل أرشفة عنوان IP");
-      setNotification({ type: "error", message: msg });
-    }
+    setActionDialog({
+      isOpen: true,
+      action: "archive",
+      ip: row,
+      errorMessage: null,
+    });
   };
 
-  const handleUnarchive = async (row: IpAddressRow) => {
+  const handleUnarchive = (row: IpAddressRow) => {
+    setActionDialog({
+      isOpen: true,
+      action: "unarchive",
+      ip: row,
+      errorMessage: null,
+    });
+  };
+
+  const handleConfirmAction = async (reason?: string) => {
+    if (!actionDialog.action || !actionDialog.ip) return;
+    const { action, ip } = actionDialog;
+
     try {
-      await unarchiveMutation.mutateAsync({
-        id: row.id,
-        reason: "إلغاء الأرشفة واستعادة العنوان للخدمة",
-      });
-      setNotification({
-        type: "success",
-        message: `تم إلغاء أرشفة العنوان واستعادته للمتاح: ${row.address}`,
-      });
+      if (action === "reserve") {
+        await reserveMutation.mutateAsync({
+          id: ip.id,
+          reason,
+        });
+        setNotification({
+          type: "success",
+          message: `تم حجز العنوان بنجاح: ${ip.address}`,
+        });
+      } else if (action === "release") {
+        await releaseMutation.mutateAsync({
+          id: ip.id,
+          reason,
+        });
+        setNotification({
+          type: "success",
+          message: `تم تحرير العنوان وإعادته للمتاح: ${ip.address}`,
+        });
+      } else if (action === "archive") {
+        await archiveMutation.mutateAsync({
+          id: ip.id,
+          reason,
+        });
+        setNotification({
+          type: "success",
+          message: `تم أرشفة العنوان بنجاح: ${ip.address}`,
+        });
+      } else if (action === "unarchive") {
+        await unarchiveMutation.mutateAsync({
+          id: ip.id,
+          reason,
+        });
+        setNotification({
+          type: "success",
+          message: `تم إلغاء أرشفة العنوان واستعادته للمتاح: ${ip.address}`,
+        });
+      }
+      setActionDialog({ isOpen: false, action: null, ip: null, errorMessage: null });
     } catch (err) {
-      const msg = extractErrorMessage(err, "فشل إلغاء أرشفة عنوان IP");
-      setNotification({ type: "error", message: msg });
+      const msg = extractErrorMessage(err, "فشل تنفيذ العملية على عنوان IP");
+      setActionDialog((prev) => ({ ...prev, errorMessage: msg }));
     }
   };
 
@@ -562,6 +597,26 @@ function IpPreviewContent() {
         isSubmitting={createMutation.isPending || updateMutation.isPending}
         errorMessage={formError}
       />
+
+      {/* Action Confirmation Dialog (Reserve / Release / Archive / Unarchive) */}
+      {canManage && (
+        <IpActionDialog
+          isOpen={actionDialog.isOpen}
+          onClose={() =>
+            setActionDialog({ isOpen: false, action: null, ip: null, errorMessage: null })
+          }
+          onConfirm={handleConfirmAction}
+          action={actionDialog.action}
+          ip={actionDialog.ip}
+          isSubmitting={
+            reserveMutation.isPending ||
+            releaseMutation.isPending ||
+            archiveMutation.isPending ||
+            unarchiveMutation.isPending
+          }
+          errorMessage={actionDialog.errorMessage}
+        />
+      )}
 
       {/* Audit History Dialog (Admin Only) */}
       {canManage && (
