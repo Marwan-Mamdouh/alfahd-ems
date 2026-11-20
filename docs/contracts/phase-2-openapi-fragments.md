@@ -1,6 +1,6 @@
 # Phase 2 OpenAPI fragments — review draft
 
-These **OpenAPI 3.0.3 fragments**, not a complete standalone document or generated Swagger snapshot, describe baseline `97bcd31` from controllers, DTOs, database schema and response interceptor. Path blocks must be embedded under `paths` in a document that defines bearer authentication and the included components. The [standalone review snapshot](phase-2-openapi.json) covers the full action matrix; the [wire catalog](phase-2-wire-contracts.md) adds validation and examples. Future attendance, lookup and product-deactivation routes in [the proposal](phase-2-proposed-contracts.md) are not implemented and are deliberately excluded. Synthetic examples are not live HTTP evidence.
+These **OpenAPI 3.0.3 fragments** supplement the [standalone review snapshot](phase-2-openapi.json) with history, upload and download examples. Path blocks must be embedded under `paths` in a document that defines bearer authentication and the included components. See the [wire catalog](phase-2-wire-contracts.md) for validation and examples. Synthetic examples are not live HTTP evidence.
 
 All six operations require a bearer access token. `x-roles` documents server authorization, not a standard OpenAPI security scheme. Common responses: 400 for malformed UUID/query, 401 for missing/invalid token and 403 for an unauthorized role. Error bodies follow the global filter envelope in the handoff. Check service behavior rather than assuming every valid but unknown history ID produces 404.
 
