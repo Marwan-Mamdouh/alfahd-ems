@@ -29,7 +29,8 @@ export function EmployeeEditForm({
     name: employee.name || "",
     department: (employee.department as Department) || "",
     phone: employee.phone || "",
-    warehouseId: employee.warehouseId || "",
+    warehouseId: employee.assignedWarehouseId || employee.warehouseId || "",
+    assignedWarehouseId: employee.assignedWarehouseId || employee.warehouseId || "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -39,7 +40,13 @@ export function EmployeeEditForm({
   const isBusy = isSubmitting || localSubmitting;
 
   const updateField = <K extends keyof UpdateEmployeeValues>(field: K, val: UpdateEmployeeValues[K]) => {
-    setValues((prev) => ({ ...prev, [field]: val }));
+    setValues((prev) => {
+      const next = { ...prev, [field]: val };
+      if (field === "warehouseId") {
+        next.assignedWarehouseId = val as string;
+      }
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => {
         const copy = { ...prev };
@@ -86,7 +93,8 @@ export function EmployeeEditForm({
         name: values.name.trim(),
         department: values.department,
         phone: values.phone.trim(),
-        warehouseId: values.warehouseId,
+        assignedWarehouseId: values.assignedWarehouseId || values.warehouseId || undefined,
+        warehouseId: values.warehouseId || values.assignedWarehouseId || "",
       };
 
       await onSubmit(cleanedValues);

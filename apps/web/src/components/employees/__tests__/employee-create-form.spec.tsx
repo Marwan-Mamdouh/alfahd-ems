@@ -40,8 +40,22 @@ describe("EmployeeCreateForm Component (Task F1 / Issue #82)", () => {
       />
     );
 
-    expect(html).toContain("صيغ مدعومة: JPEG, PNG, WebP");
+    expect(html).toContain("صيغ مدعومة: JPEG, PNG");
+    expect(html).not.toContain("WebP");
     expect(html).toContain("5 ميجابايت");
+  });
+
+  it("provides warehouse selection matching backend assignedWarehouseId schema", () => {
+    const html = renderToStaticMarkup(
+      <EmployeeCreateForm
+        warehouses={mockWarehouses}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("المخزن التابع له");
+    expect(html).toContain("wh-1");
+    expect(html).toContain("wh-2");
   });
 
   it("prevents double submission by disabling buttons and inputs when isSubmitting is true", () => {

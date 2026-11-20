@@ -51,7 +51,7 @@ function getInitialValues(employee?: EmployeeRow | null): EmployeeFormValues {
     phone: employee.phone ?? "",
     department: (employee.department as string) ?? "",
     role: (employee.role as string) ?? "",
-    warehouseId: employee.warehouseId ?? "",
+    warehouseId: employee.assignedWarehouseId ?? employee.warehouseId ?? "",
     status: employee.status,
     statusReason: "",
     nationalId: employee.nationalId ?? "",

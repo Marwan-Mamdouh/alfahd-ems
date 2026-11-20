@@ -14,6 +14,7 @@ describe("EmployeeEditForm Component (Task F1 / Issue #82)", () => {
     hireDate: "2024-02-01",
     department: "TECHNICAL",
     role: "TECHNICIAN",
+    assignedWarehouseId: "wh-1",
     warehouseId: "wh-1",
     warehouseName: "المخزن الرئيسي",
     status: "ACTIVE",
@@ -68,6 +69,25 @@ describe("EmployeeEditForm Component (Task F1 / Issue #82)", () => {
     // There should NOT be an <input name="email"> or editable email field in the editable section
     expect(html).not.toContain("name=\"email\"");
     expect(html).not.toContain("id=\"edit-emp-email\"");
+  });
+
+  it("initializes warehouse selection from backend assignedWarehouseId field", () => {
+    const employeeWithAssignedWarehouse: EmployeeRow = {
+      ...mockEmployee,
+      warehouseId: undefined,
+      assignedWarehouseId: "wh-2",
+      warehouseName: "مخزن الإسكندرية",
+    };
+
+    const html = renderToStaticMarkup(
+      <EmployeeEditForm
+        employee={employeeWithAssignedWarehouse}
+        warehouses={mockWarehouses}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("wh-2");
   });
 
   it("prevents double submission by disabling buttons when isSubmitting is true", () => {

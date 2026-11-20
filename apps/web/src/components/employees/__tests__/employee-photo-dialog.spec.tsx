@@ -44,7 +44,24 @@ describe("EmployeePhotoDialog Component (Task F1 / Issue #82)", () => {
     expect(html).toContain("https://example.com/photos/yasser.jpg");
     expect(html).toContain("الصورة الحالية للموظف");
     expect(html).toContain("تحديد ملف صورة");
-    expect(html).toContain("صيغ المدعومة: JPEG, PNG, WebP (الحد الأقصى: 5 ميجابايت)");
+    expect(html).toContain("الصيغ المدعومة: JPEG, PNG (الحد الأقصى: 5 ميجابايت)");
+    expect(html).not.toContain("WebP");
+  });
+
+  it("renders rejection error message when unsupported image format is selected", () => {
+    // Verified against backend magic-bytes contract allowing only JPEG and PNG
+    const html = renderToStaticMarkup(
+      <EmployeePhotoDialog
+        employee={mockEmployee}
+        isOpen={true}
+        errorMessage="صيغة الملف غير مدعومة. يرجى اختيار صورة بصيغة JPEG أو PNG."
+        onClose={vi.fn()}
+        onUpload={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("صيغة الملف غير مدعومة. يرجى اختيار صورة بصيغة JPEG أو PNG.");
+    expect(html).not.toContain("WebP");
   });
 
   it("renders error message banner when error is passed", () => {

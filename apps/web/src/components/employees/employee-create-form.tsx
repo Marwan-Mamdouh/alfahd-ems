@@ -19,7 +19,7 @@ interface EmployeeCreateFormProps {
 }
 
 const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB (aligns with backend Multer limit)
-const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png"];
 
 const INITIAL_VALUES: CreateEmployeeValues = {
   name: "",
@@ -29,6 +29,7 @@ const INITIAL_VALUES: CreateEmployeeValues = {
   phone: "",
   nationalId: "",
   hireDate: "",
+  assignedWarehouseId: "",
   warehouseId: "",
   photoFile: null,
 };
@@ -60,7 +61,13 @@ export function EmployeeCreateForm({
   const isBusy = isSubmitting || localSubmitting || isRetryingPhoto;
 
   const updateField = <K extends keyof CreateEmployeeValues>(field: K, val: CreateEmployeeValues[K]) => {
-    setValues((prev) => ({ ...prev, [field]: val }));
+    setValues((prev) => {
+      const next = { ...prev, [field]: val };
+      if (field === "warehouseId") {
+        next.assignedWarehouseId = val as string;
+      }
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => {
         const copy = { ...prev };
@@ -78,7 +85,7 @@ export function EmployeeCreateForm({
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       setErrors((prev) => ({
         ...prev,
-        photoFile: "نوع الصورة غير مدعوم. يرجى اختيار ملف JPEG أو PNG أو WebP.",
+        photoFile: "نوع الصورة غير مدعوم. يرجى اختيار ملف JPEG أو PNG.",
       }));
       return;
     }
@@ -171,6 +178,7 @@ export function EmployeeCreateForm({
         phone: values.phone.trim(),
         nationalId: values.nationalId.trim(),
         hireDate: values.hireDate.trim(),
+        assignedWarehouseId: values.warehouseId || values.assignedWarehouseId || undefined,
       };
 
       const result = await onSubmit(cleanedValues);
@@ -320,7 +328,7 @@ export function EmployeeCreateForm({
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png"
               onChange={handlePhotoSelect}
               disabled={isBusy}
               className="hidden"
@@ -354,7 +362,7 @@ export function EmployeeCreateForm({
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              صيغ مدعومة: JPEG, PNG, WebP — الحد الأقصى: 5 ميجابايت (يفضل صورة مربعة للوجه).
+              صيغ مدعومة: JPEG, PNG — الحد الأقصى: 5 ميجابايت (يفضل صورة مربعة للوجه).
             </p>
             {errors.photoFile && (
               <p className="text-xs font-medium text-destructive">{errors.photoFile}</p>

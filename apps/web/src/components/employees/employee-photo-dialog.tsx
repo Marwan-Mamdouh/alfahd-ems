@@ -16,7 +16,7 @@ interface EmployeePhotoDialogProps {
 }
 
 const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png"];
 
 export function EmployeePhotoDialog({
   employee,
@@ -61,7 +61,7 @@ export function EmployeePhotoDialog({
     if (!file) return;
 
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      setValidationError("صيغة الملف غير مدعومة. يرجى اختيار صورة بصيغة JPEG أو PNG أو WebP.");
+      setValidationError("صيغة الملف غير مدعومة. يرجى اختيار صورة بصيغة JPEG أو PNG.");
       return;
     }
 
@@ -169,7 +169,7 @@ export function EmployeePhotoDialog({
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png"
               onChange={handleFileChange}
               disabled={isBusy}
               className="hidden"
@@ -203,7 +203,7 @@ export function EmployeePhotoDialog({
               )}
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground text-center">
-              الصيغ المدعومة: JPEG, PNG, WebP (الحد الأقصى: 5 ميجابايت).
+              الصيغ المدعومة: JPEG, PNG (الحد الأقصى: 5 ميجابايت).
             </p>
           </div>
 

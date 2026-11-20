@@ -17,6 +17,7 @@ export interface EmployeeRow {
   hireDate?: string | null;
   department: Department | string | null;
   role: Role | string;
+  assignedWarehouseId?: string | null;
   warehouseId?: string | null;
   warehouseName?: string | null;
   status: UserStatus;
@@ -40,6 +41,7 @@ export interface CreateEmployeeValues {
   phone: string;
   nationalId: string;
   hireDate: string;
+  assignedWarehouseId?: string;
   warehouseId: string;
   photoFile?: File | null;
 }
@@ -48,6 +50,7 @@ export interface UpdateEmployeeValues {
   name: string;
   department: Department | "";
   phone: string;
+  assignedWarehouseId?: string;
   warehouseId: string;
 }
 
