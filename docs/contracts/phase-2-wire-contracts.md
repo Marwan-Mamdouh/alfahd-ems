@@ -1,12 +1,12 @@
 # Phase 2 wire catalog — source snapshot for review
 
-Companion to [the handoff](phase-2-handoff.md), baseline `97bcd31` (2026-11-12 source-diff revalidation; original examples from `7606270`). This is an explicit example catalog, **not** an assertion that all contracts or permissions have been approved by reviewers. Paths are API paths; browser requests use `/api` and bearer credentials. The matrix in the handoff gives per-action roles and status codes. All names and identifiers below are synthetic. Object examples show actual selected fields; optional fields can be omitted only where the source DTO permits it. Source interfaces remain authoritative for complete domain objects. Dates in JSON are ISO strings. No live response-conformance test was rerun for this continuation.
+Companion to [the handoff](phase-2-handoff.md), updated against `0ee2118`. This is an example catalog, not approval of the contracts. Paths are API paths; browser requests use `/api` and bearer credentials. Examples are synthetic and may show selected fields; source interfaces remain authoritative for complete objects. Dates in JSON are ISO strings. Source inspection is not live response-conformance evidence.
 
 Common IDs used below: employee `11111111-1111-4111-8111-111111111111`, warehouse `22222222-2222-4222-8222-222222222222`, product `33333333-3333-4333-8333-333333333333`, another warehouse `44444444-4444-4444-8444-444444444444`. `id` path parameters are UUIDs unless referring to jobs. All successful object responses are wrapped once in `data`, except employee list's existing `{data,meta}`; 204 has no body. Error shape and permissions are in the handoff. Invalid DTO/UUID yields 400; missing resources 404; unauthorized 401/403; duplicates and certain state conflicts 409. Some state validation uses 400, so clients must not assume all business conflicts are 409.
 
 ## Employees (implemented)
 
-`POST /employees` accepts `{name,email,role,department?,phone?,nationalId?,hireDate?,assignedWarehouseId?}`. Role is one of `ADMIN`, `WAREHOUSE_STAFF`, `CS`, `TECHNICIAN`; department is `TECHNICAL`, `CUSTOMER_SERVICE`, `WAREHOUSE`, `MANAGEMENT`; name max 255, phone/nationalId max 30, hireDate date string, assignedWarehouseId UUID. Technician warehouse constraints are enforced by service. Creation response is an employee object, not a temporary password. `PATCH /employees/:id` accepts only `{name?,department?,phone?,assignedWarehouseId?}`. `PATCH /employees/:id/status` requires `{status,reason}` where status is `ACTIVE`, `ON_LEAVE`, or `INACTIVE` and reason is nonblank. `POST /employees/:id/photo` accepts multipart `file` (JPEG/PNG magic bytes, max 5 MiB), returns `{data:{profilePhotoKey,url}}`; the key is a provider identifier, not itself a URL. Public frontend-built delivery is a user-approved direction, but provider settings and identifier behavior remain unverified; see [the proposal](phase-2-proposed-contracts.md#3-public-employee-photo-delivery-73).
+`POST /employees` accepts `{name,email,role,department?,phone?,nationalId?,hireDate?,assignedWarehouseId?}`. Role is one of `ADMIN`, `WAREHOUSE_STAFF`, `CS`, `TECHNICIAN`; department is `TECHNICAL`, `CUSTOMER_SERVICE`, `WAREHOUSE`, `MANAGEMENT`; name max 255, phone/nationalId max 30, hireDate date string, assignedWarehouseId UUID. Technician warehouse constraints are enforced by service. Creation response is an employee object, not a temporary password. `PATCH /employees/:id` accepts only `{name?,department?,phone?,assignedWarehouseId?}`. `PATCH /employees/:id/status` requires `{status,reason}` where status is `ACTIVE`, `ON_LEAVE`, or `INACTIVE` and reason is nonblank. `POST /employees/:id/photo` accepts multipart `file` (JPEG/PNG magic bytes, max 5 MiB), returns `{data:{profilePhotoKey,url}}`; the key is a provider identifier, not a URL. The backend-owned container will supply the UI a resolved public URL or `null`; reload resolution remains #73 work.
 
 Example list request `GET /employees?page=1&pageSize=20&role=TECHNICIAN` and 200 response:
 
@@ -16,7 +16,15 @@ Example list request `GET /employees?page=1&pageSize=20&role=TECHNICIAN` and 200
 
 Detail, create and update wrap one such employee under `data`. Example create body: `{"name":"Example Employee","email":"employee@example.invalid","role":"TECHNICIAN","department":"TECHNICAL","assignedWarehouseId":"22222222-2222-4222-8222-222222222222"}`. Status body: `{"status":"ON_LEAVE","reason":"Scheduled leave"}`.
 
-## Attendance (implemented actions; read proposal separate)
+`GET /employees/lookup?role=TECHNICIAN&status=ACTIVE&limit=50` is available to ADMIN and WAREHOUSE_STAFF. Optional parameters are `role`, `status`, `warehouseId` (preferred over the deprecated `warehouse_id` alias), `q` (trimmed name search), and `limit` (1–100, default 50). Results sort by name. The response is a wrapped array without pagination metadata or personal contact/identity fields:
+
+```json
+{"data":[{"id":"11111111-1111-4111-8111-111111111111","name":"Example Employee","role":"TECHNICIAN","status":"ACTIVE","isEligible":true,"assignedWarehouseId":"22222222-2222-4222-8222-222222222222"}]}
+```
+
+The issue owner approved this minimal read for both roles. See the [decision register](phase-2-proposed-contracts.md#minimal-eligible-people-lookups-75) for separate selector eligibility and warehouse write permissions.
+
+## Attendance (implemented)
 
 `POST /attendance/check-in` requires numeric `{lat,lng}` in valid latitude/longitude ranges; check-out requires no body. `PATCH /attendance/:id` accepts `{checkInAt?,checkOutAt?,status?,overrideReason}` with ISO date strings, status `ON_TIME` or `LATE`, and nonempty `overrideReason`. `GET /attendance/report` accepts optional `from`, `to`, `department`, `employee_id`; it enqueues a job, not a list. Check-in may fail 400 for geofence/invalid conditions and conflict for duplicate attendance; exact machine code is not universal.
 
@@ -26,7 +34,19 @@ Representative check-in response; checkout and override return additional fields
 {"data":{"id":"55555555-5555-4555-8555-555555555555","workDate":"2026-11-08","checkInAt":"2026-11-08T09:00:00.000Z","checkInDistanceM":10,"status":"ON_TIME"}}
 ```
 
-ADMIN list/history and contextual totals are **approved direction, not implemented API**. The table's status filter does not narrow the summary totals; see [proposed examples](phase-2-proposed-contracts.md#1-attendance-list-and-employee-history-69). Exact response fields remain review gates; no synthetic ABSENT records.
+ADMIN `GET /attendance` accepts optional `from` and `to` (inclusive `YYYY-MM-DD` work dates), `employee_id` (UUID v4; nonexistent employee → 404), `department` (current department), `status` (`ON_TIME` or `LATE`), `page` (1–2147483647, default 1) and `pageSize` (1–100, default 20). A reversed date range returns 400. Rows sort by work date and then ID, both descending, and do not expose coordinates. Employee history uses `employee_id` without a department filter. `filteredTotal` includes the status filter; `totals` ignore status and pagination. No synthetic ABSENT records are returned.
+
+Example `GET /attendance?employee_id=11111111-1111-4111-8111-111111111111&status=LATE` for an employee with one on-time record:
+
+```json
+{"data":{"items":[],"page":1,"pageSize":20,"filteredTotal":0,"totals":{"total":1,"onTime":1,"late":0}}}
+```
+
+Example row in `items` when the same record matches:
+
+```json
+{"id":"55555555-5555-4555-8555-555555555555","userId":"11111111-1111-4111-8111-111111111111","employeeName":"Example Employee","department":"TECHNICAL","workDate":"2026-11-08","checkInAt":"2026-11-08T09:00:00.000Z","checkOutAt":null,"checkInDistanceM":10,"hoursWorked":null,"status":"ON_TIME","overrideReason":null,"overriddenBy":null,"overriddenAt":null}
+```
 
 ## Warehouses (implemented)
 
@@ -43,10 +63,10 @@ Create accepts `name`, `address`, `latitude` (-90..90), `longitude` (-180..180),
 `POST /products` requires nonempty `name`, `sku`, `model`, `category`, optional `description`, nonnegative integer `lowStockThreshold` (default 10). `PATCH /products/:id` accepts the same fields optionally. SKU is normalized to uppercase and duplicate SKU yields 409. List `GET /products?limit=20&offset=0` yields:
 
 ```json
-{"data":{"items":[{"id":"33333333-3333-4333-8333-333333333333","name":"Example cable","sku":"EX-CABLE","model":"EX-1","category":"ACCESSORY","description":null,"lowStockThreshold":10,"isSerialized":false,"createdAt":"2026-11-08T09:00:00.000Z","updatedAt":"2026-11-08T09:00:00.000Z","totalStock":12,"isLowStock":false}],"total":1}}
+{"data":{"items":[{"id":"33333333-3333-4333-8333-333333333333","name":"Example cable","sku":"EX-CABLE","model":"EX-1","category":"ACCESSORY","description":null,"lowStockThreshold":10,"isSerialized":false,"isActive":true,"createdAt":"2026-11-08T09:00:00.000Z","updatedAt":"2026-11-08T09:00:00.000Z","totalStock":12,"isLowStock":false}],"total":1}}
 ```
 
-Detail returns the same product-with-stock shape; create/update return the base product without `totalStock`/`isLowStock`. Current ADMIN `DELETE /products/:id` is a guarded **hard delete**, not the approved future deactivation; don't expose it in Phase 2. Exact future status/filter/stock safeguards remain #81 gates.
+Detail returns the same product-with-stock shape; create/update return the base product without `totalStock`/`isLowStock`. The list accepts boolean `activeOnly` and `isActive`; `activeOnly=true` takes precedence over `isActive=false`. ADMIN `DELETE /products/:id` performs guarded **soft-deactivation** (204, no body). Missing ID returns 404; positive stock or linked routers in `AVAILABLE`, `ASSIGNED_TO_TECHNICIAN`, `INSTALLED_AT_CUSTOMER` or `UNDER_REPAIR` return 409. Do not parse conflict text into a stable machine code or assume a reactivation endpoint. See the [decision register](phase-2-proposed-contracts.md#product-deactivation-81) for the approved guard and outstanding #81 reactivation action.
 
 Inventory requests, all with UUID IDs and positive integer quantities unless stated:
 
@@ -109,4 +129,4 @@ Report jobs may provide a direct storage URL or an authenticated local `/jobs/:i
 
 Single writers for the proposed shared `apps/web/src/phase2-handoff/` contracts: @Marwan-Mamdouh for HR and shared interfaces, @Hamadaae for supply and network adapters; changes affecting the common file require coordination with @bahaashahin before edits. @bahaashahin owns presentational components/forms. Backend owners own page containers and network/polling/cache code, including API adapters translating DTOs and offset/page differences into view models. Concrete shared-file changes require one agreed writer per change and cross-owner review, not simultaneous edits.
 
-User approved the four **directions** and subsequently refined attendance totals, lookup permissions and product safeguards. Public photo delivery with frontend URL construction supersedes the earlier authenticated-byte decision; see [the decision review agenda](phase-2-review-agenda.md). Exact wire contracts and review by named developers remain open; none authorizes implementing #69/#75/#73/#81 here. Formal acceptance still requires staging; #89 owns execution and @Marwan-Mamdouh owns identifying the environment or obtaining a written waiver. No waiver exists.
+See the [decision register](phase-2-proposed-contracts.md) for open gaps and the [review agenda](phase-2-review-agenda.md) for the Phase 2 staging waiver and remaining #89 browser acceptance.

@@ -1,31 +1,17 @@
 # Phase 2 integration handoff — review draft
 
-**Issue:** #67 (A2), part of #65. **Source baseline:** `97bcd31cdacd9902cc59ea075822ca6cab8114e3` (master, fetched 2026-11-12). **Status:** source-based draft, not a reviewed freeze or acceptance report. The original snapshot was `7606270`; the continuation below records the scope and limitations of revalidation. Revalidate against the merged head before implementation. The accountable owner is @Marwan-Mamdouh; review/handoff partner is @Hamadaae; UI contract review is required from @bahaashahin. No approval is implied by this document.
+**Issue:** #67 (A2), part of #65. **Source baseline:** master `0ee2118491c1da405375e8a00d576cce5bbb4e6a`. **Status:** review draft, not a reviewed freeze or acceptance report. @Marwan-Mamdouh is accountable; @Hamadaae reviews supply and API integration; @bahaashahin reviews UI contracts. #66 is closed.
 
-## Draft continuation — 2026-11-12
+## Changes since the previous draft
 
-The user requested continuation of the existing draft, not a fresh specification. #66 is closed. The #67 discussion contains the original review request but no reviewer approval as of this check. Continue in the isolated `docs/phase2-contract-handoff` worktree; no review decision, staging waiver or permission to publish is inferred.
-
-Source-diff review from `7606270` to the baseline above found:
-
-- Scoped controllers/DTOs and shared HR/supply DTOs have no contract changes in that range. The response interceptor's changes are type annotations, not envelope changes. Attendance still has no list/history reads; employees still have no photo retrieval route; product DELETE still calls removal rather than deactivation.
+- Master now implements attendance list/history, employee lookup and product soft-deactivation. The [wire catalog](phase-2-wire-contracts.md) describes what is implemented; the [decision register](phase-2-proposed-contracts.md) identifies behavior that still needs owner agreement.
 - Router creation now maps its initial warehouse assignment into the returned DTO. For serviceable onboarding, the creation response carries warehouse custody consistently with subsequent reads; duplicate-serial races map to 409. Keep the existing customer-installation exclusion.
 - Warehouse deactivation now also guards active custody, not just inventory, staff and physically located routers. Do not offer deactivation based only on visible warehouse stock.
 - Auth/session behavior changed: refresh rotation updates the HTTP-only cookie; logout revokes the user's sessions. Containers must use the current shared auth adapter, not copy earlier assumptions that refresh never rotates. This does not authorize a new auth implementation in #67.
 
-This is static source/diff evidence, not a rerun of the historical tests below. The matrix and wire catalog remain review drafts. The [decision review agenda](phase-2-review-agenda.md) distinguishes existing behavior, proposed choices and the named approval gates. Complete OpenAPI coverage, module-level history/detail UI interfaces and reviewer agreement remain outstanding before freezing A2.
+[The standalone OpenAPI review snapshot](phase-2-openapi.json) is built from curated source observations by `generate-phase-2-openapi.mjs`. [Supplementary fragments](phase-2-openapi-fragments.md) provide history, multipart and download detail. Neither is live-response conformance evidence.
 
-In this continuation the user confirmed: attendance uses the configured attendance timezone and inclusive work dates with contextual totals over stored records (no generated ABSENT records; see status-filter clarification below); new people selections are ACTIVE-only; public photo delivery with frontend URL construction supersedes the earlier private-byte proposal; product deactivation blocks on positive stock or active router usage. See the agenda for remaining exact-contract gates. These decisions do not create endpoints or substitute for named developer review. Staging remains required; no waiver was requested or granted.
-
-The [proposed future contracts](phase-2-proposed-contracts.md) provide concrete routes and examples for owner review. They are not implemented or frozen, and must not be treated as current OpenAPI.
-
-[The standalone OpenAPI review snapshot](phase-2-openapi.json) covers all 52 implemented actions in the matrix, generated reproducibly by `generate-phase-2-openapi.mjs`. [Supplementary fragments](phase-2-openapi-fragments.md) provide further history, multipart and download detail. Both are source-based drafts, not approved freezes or live-response conformance results; use the wire catalog for validation, error and domain caveats.
-
-Further user-confirmed rules: manager choices are ACTIVE ADMIN/WAREHOUSE_STAFF; cross-warehouse assignments to ACTIVE technicians are allowed and their assigned warehouse is displayed; authorized historical views retain names for inactive people. Product deactivation is blocked by positive stock or any router not DECOMMISSIONED (including LOST); ADMIN may reactivate and inactive SKUs remain reserved. No LOST resolution or new lifecycle transition is implied. Detailed contracts and safeguards still require owner review.
-
-Lookup access is purpose-specific: ADMIN and WAREHOUSE_STAFF may request technician choices; only ADMIN may request warehouse-manager choices. Eligible manager roles are distinct from roles authorized to query the selector.
-
-Attendance clarification: employee-specific history belongs on the employee page and is not restricted by department; the overall ADMIN list retains a current-department filter. Summary totals preserve context by ignoring the status filter while respecting date, employee and department filters; the table applies the status filter. The contract must separately provide the filtered count for pagination.
+Attendance clarification: employee-specific history belongs on the employee page and is not restricted by department; the overall ADMIN list retains a current-department filter. The API's contextual `totals` ignore status, but the approved UI cards count all matching records across pages, including the status filter. The container derives the cards from `filteredTotal` and `totals` without changing the API or fetching all pages.
 
 ## Boundaries and working agreement
 
@@ -49,10 +35,12 @@ Historical `specs/005-m2a-hr-attendance/contracts/api-contracts.md` is useful co
 | --- | --- | --- | --- |
 | POST /employees | Create | A | `CreateEmployeeRequestDto` → 201 `EmployeeDto` |
 | GET /employees | List | A | `EmployeeQueryRequestDto` → employee `data` + `meta` |
+| GET /employees/lookup | Minimal selector data | A, W | `EmployeeLookupQueryRequestDto` → `{data: EmployeeLookupDto[]}` |
 | GET /employees/:id | Detail | A or self | → `EmployeeDto` |
 | PATCH /employees/:id | Update profile | A | `UpdateEmployeeRequestDto` → `EmployeeDto` |
 | PATCH /employees/:id/status | Change status | A | `{status, reason}` → `EmployeeDto` |
 | POST /employees/:id/photo | Upload | A | multipart `file` → 200 `{profilePhotoKey, url}` |
+| GET /attendance | List / employee history | A | `AttendanceListRequestDto` → `{data:{items,page,pageSize,filteredTotal,totals}}` |
 | POST /attendance/check-in | Check in | T | `{lat,lng}` → 201 `AttendanceRecordDto` |
 | POST /attendance/check-out | Check out | T | → 200 `AttendanceRecordDto` |
 | PATCH /attendance/:id | Override | A | `OverrideAttendanceRequestDto` → `AttendanceRecordDto` |
@@ -62,7 +50,7 @@ Historical `specs/005-m2a-hr-attendance/contracts/api-contracts.md` is useful co
 | DELETE /warehouses/:id | Guarded deactivation | A | → 204; not a hard-delete UI promise |
 | GET /products, GET /products/:id | List / detail | A, W, C, T | `QueryProductsDto` for list → `{items,total}` / product with stock |
 | POST /products, PATCH /products/:id | Create / update | A, W | `CreateProductDto` / `UpdateProductDto` → product |
-| DELETE /products/:id | Current guarded hard delete | A | → 204; **do not expose removal until #81 resolves semantics** |
+| DELETE /products/:id | Guarded soft-deactivation | A | → 204; stock or active router blockers → 409 |
 | GET /inventory, GET /inventory/warehouses/:warehouseId | Stock reads | A, W, C | `QueryInventoryDto` → `{items,total}` |
 | POST /inventory/inbound, /outbound, /returns | Stock movement | A, W | respective stock DTO → 201 `{data:{inventory,movement}}` |
 | POST /inventory/transfer | Transfer | A, W | `TransferStockDto` → 200 `{data:{sourceInventory,destInventory}}` |
@@ -90,9 +78,11 @@ See controller and DTO directories in `apps/api/src/{employees,attendance,jobs}`
 | Surface | Accepted parameters | Pagination / wire result |
 | --- | --- | --- |
 | Employees | `role`, `department`, `status`, `warehouse_id`, `q` | `page` default 1; `pageSize` default 20, max 100; top-level `data`, `meta: {page,pageSize,total}` |
+| Employee lookup | `role`, `warehouseId` (legacy `warehouse_id`), `status`, `q` | `limit` default 50, max 100; name order, no offset or total |
+| Attendance list | `from`, `to`, `employee_id`, `department`, `status` | `page` default 1; `pageSize` default 20, max 100; `filteredTotal` for pagination; contextual `totals` ignore status |
 | Attendance report | `from`, `to`, `department`, `employee_id` | job result, not a list |
 | Warehouses | `search` | `limit` default 20, max 100; `offset` default 0; `{data:{items,total}}` |
-| Products | `search`, `category`, `isLowStock` | same limit/offset envelope |
+| Products | `search`, `category`, `isLowStock`, `activeOnly`, `isActive` | same limit/offset envelope |
 | Inventory | `warehouseId`, `productId` | same limit/offset envelope |
 | Movements | `warehouseId`, `productId`, `movementType`, `technicianId` | same limit/offset envelope; inspect service for result DTO |
 | Routers | `status`, `physicalCondition`, `warehouseId`, `productId`, `search` | `page` default 1; `limit` default 20, max 100; `{data:{items,total}}` |
@@ -149,24 +139,26 @@ type FormProps<Values> = {
 };
 ```
 
-Concrete proposed interfaces and synthetic fixtures are provided in `apps/web/src/phase2-handoff/`. Empty results are distinct from errors and loading. These definitions are proposals, not evidence of agreement by the other owners; attendance reads and lookup selections represent approved direction, not existing APIs.
+Concrete proposed interfaces and synthetic fixtures are provided in `apps/web/src/phase2-handoff/`. Empty results are distinct from errors and loading. The attendance and lookup row fixtures reuse current shared wire types; the UI seam still requires owner review.
 
 ## Decision and acceptance gates
 
 | Gate | Responsible owner / handoff | Required before |
 | --- | --- | --- |
-| Attendance reads: ADMIN list/history with date/employee/department/status filters and contextual totals; no current read endpoint exists | @Marwan-Mamdouh with @bahaashahin; #69 | agree exact routes and fields; user confirmed timezone, page bounds and totals excluding status, but no speculative constants may be used |
-| People lookups: ADMIN/W minimal bounded ID/name/status/warehouse selections, no email/national ID, approved in user discussion 2026-11-08 | @Hamadaae with @Marwan-Mamdouh; #75 | agree routes, search limits and inactive/ON_LEAVE eligibility; server mutations revalidate targets |
-| Photo display: user now permits public delivery and frontend-built provider URLs, superseding the earlier ADMIN/self decision | @Marwan-Mamdouh with @bahaashahin; #73 | verify public asset configuration, identifier/replacement behavior, transformations, caching and fallback |
-| Product deactivation, preserved references, exclusion from new selectors and historical visibility approved in user discussion 2026-11-08 | @Hamadaae with @Marwan-Mamdouh; #81 | agree API, safeguards for active stock/usage and historical selector behavior; source currently hard deletes; keep removal unavailable |
-| Formal acceptance environment | @Marwan-Mamdouh; #89 | staging required by `PLAN.md`; identify staging or obtain explicit written waiver. User chose to retain the staging gate; **no waiver is approved**. Do not silently add deployment work |
+| Attendance reads: implemented ADMIN list/history; UI cards count all matching records across pages | @Marwan-Mamdouh with @bahaashahin; #69/#71/#83 | review rows, card mapping, filters, timezone and empty/error states against the merged endpoint |
+| Lookup: broader ADMIN/W read approved; manager eligibility and historical name resolution are separate | @Hamadaae with @Marwan-Mamdouh; #75/#84/#77/#79 | review manager selector and server-side validation, warehouse write permissions and authorized history names |
+| Photo display: authorized employee list/detail resolve public `photoUrl: string \| null` in the API; container passes it through | @Marwan-Mamdouh with @bahaashahin; #73 | confirm the UI seam; verify provider configuration, replacement/cache behavior and fallback in #73 |
+| Product soft-deactivation: four-state guard approved; inactive selectors/writes and ADMIN reactivation still need work | @Hamadaae with @Marwan-Mamdouh and @bahaashahin; #81 | review owner-approved `POST`/`204` contract, safeguards and UI handoff before freeze; #81 owns delivery |
+| Formal acceptance environment | @Marwan-Mamdouh; #89 | staging waived by the issue owner for this Phase 2 only; use a local/demo browser run with real PostgreSQL, Redis and configured storage through the Next `/api` rewrite, using disposable synthetic fixtures. Still run #89 and record results, exact environment and limitations. Not production/staging validation or approval to deploy |
 | Reviewed per-action contract, examples/OpenAPI, concrete fixture types and cross-owner agreement | @Marwan-Mamdouh, @Hamadaae, @bahaashahin; #67 | marking A2 frozen or starting work that depends on it |
 
-Current `apps/web/src/core/api/endpoints.ts` contains unverified or nonexistent endpoints (including `/ips` rather than `/ip-addresses`) and excluded domains; it is not a contract. `permissions.ts` currently grants IP reads to W/CS but not T; the API grants A/T. Fixes belong in the assigned integration tasks, not in this draft.
+The API grants IP reads to ADMIN and TECHNICIAN. Check action visibility in production composition under #88 rather than treating preview visibility or client permission constants as authoritative.
 
 ## Review and closure evidence
 
 Before closing #67, owners must review the matrix, wire catalog, fixtures and outstanding technical gates, explicitly agree the cross-owner interfaces, and record reviewer decisions, merged PR/commit, environment and actual focused test commands/results. The user-approved directions above do not constitute approval by the other developers or approval of exact technical details. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
+
+Local review verification on Windows, Node `24.22.2`, pnpm `12.6.0`, master `0ee2118` plus these handoff files: `pnpm install --frozen-lockfile`, `pnpm --filter @alfahd/types build`, `pnpm typecheck`, and `pnpm --filter fahd-dashboard lint` passed. `pnpm --filter @alfahd/api exec vitest run src/attendance/attendance-list.spec.ts src/employees/employees.service.spec.ts src/modules/products/products.service.spec.ts src/common/interceptors/response.interceptor.spec.ts` passed 33 tests. The OpenAPI generator emitted 54 operations across 43 paths. These are local draft checks, not merged-head CI, live-service/browser verification or reviewer approval.
 
 Historical verification on Windows, Node `24.22.2`, pnpm `12.6.0`, 2026-11-08, baseline `7606270` plus uncommitted handoff files (not a test pass for the 2026-11-12 baseline):
 

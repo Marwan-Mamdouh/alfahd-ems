@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Phase 2 implemented API — review snapshot",
-    "version": "97bcd31",
+    "version": "0ee2118",
     "description": "Source-based draft. Not a freeze or complete validation specification; see phase-2-wire-contracts.md and phase-2-openapi-fragments.md for semantics, errors, examples and exact history schemas. Future contracts excluded."
   },
   "servers": [
@@ -299,6 +299,141 @@
           },
           "409": {
             "description": "Conflict where applicable; see controller/service and wire catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/employees/lookup": {
+      "get": {
+        "operationId": "get__employees_lookup",
+        "summary": "GET /employees/lookup",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-roles": [
+          "ADMIN",
+          "WAREHOUSE_STAFF"
+        ],
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ADMIN",
+                "WAREHOUSE_STAFF",
+                "CS",
+                "TECHNICIAN"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "ON_LEAVE",
+                "INACTIVE"
+              ]
+            }
+          },
+          {
+            "name": "warehouseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "warehouse_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deprecated": true
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EmployeeLookup"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or domain validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden where applicable",
             "content": {
               "application/json": {
                 "schema": {
@@ -693,6 +828,157 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/PhotoUpload"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or domain validation failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden where applicable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource or authorized job not found where applicable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attendance": {
+      "get": {
+        "operationId": "get__attendance",
+        "summary": "GET /attendance",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-roles": [
+          "ADMIN"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "employee_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "department",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TECHNICAL",
+                "CUSTOMER_SERVICE",
+                "WAREHOUSE",
+                "MANAGEMENT"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ON_TIME",
+                "LATE"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AttendanceList"
                     }
                   },
                   "required": [
@@ -1705,6 +1991,22 @@
             }
           },
           {
+            "name": "activeOnly",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "isActive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -2134,7 +2436,7 @@
         "x-roles": [
           "ADMIN"
         ],
-        "description": "Current guarded hard delete; do not expose as deactivation",
+        "description": "Guarded soft-deactivation; positive stock or linked AVAILABLE, ASSIGNED_TO_TECHNICIAN, INSTALLED_AT_CUSTOMER or UNDER_REPAIR routers block it",
         "parameters": [
           {
             "name": "id",
@@ -5751,6 +6053,180 @@
           "createdAt"
         ]
       },
+      "EmployeeLookup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "WAREHOUSE_STAFF",
+              "CS",
+              "TECHNICIAN"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "ON_LEAVE",
+              "INACTIVE"
+            ]
+          },
+          "isEligible": {
+            "type": "boolean"
+          },
+          "assignedWarehouseId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "status",
+          "isEligible"
+        ]
+      },
+      "AttendanceListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "employeeName": {
+            "type": "string"
+          },
+          "department": {
+            "type": "string",
+            "enum": [
+              "TECHNICAL",
+              "CUSTOMER_SERVICE",
+              "WAREHOUSE",
+              "MANAGEMENT"
+            ],
+            "nullable": true
+          },
+          "workDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "checkInAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checkOutAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "checkInDistanceM": {
+            "type": "number"
+          },
+          "hoursWorked": {
+            "type": "number",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ON_TIME",
+              "LATE"
+            ]
+          },
+          "overrideReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "overriddenBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "overriddenAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "employeeName",
+          "department",
+          "workDate",
+          "checkInAt",
+          "checkOutAt",
+          "checkInDistanceM",
+          "hoursWorked",
+          "status",
+          "overrideReason",
+          "overriddenBy",
+          "overriddenAt"
+        ]
+      },
+      "AttendanceList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttendanceListItem"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pageSize": {
+            "type": "integer"
+          },
+          "filteredTotal": {
+            "type": "integer",
+            "description": "Count after all filters, before pagination"
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "onTime": {
+                "type": "integer"
+              },
+              "late": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total",
+              "onTime",
+              "late"
+            ],
+            "description": "Counts before status and pagination filters"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "filteredTotal",
+          "totals"
+        ]
+      },
       "Attendance": {
         "type": "object",
         "properties": {
@@ -5898,6 +6374,9 @@
           "isSerialized": {
             "type": "boolean"
           },
+          "isActive": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5916,6 +6395,7 @@
           "description",
           "lowStockThreshold",
           "isSerialized",
+          "isActive",
           "createdAt",
           "updatedAt"
         ]

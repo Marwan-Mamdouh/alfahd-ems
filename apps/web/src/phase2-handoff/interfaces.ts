@@ -1,11 +1,11 @@
 /** Review proposals for #67, not implemented endpoint contracts. No network code. */
 import type {
-  AssignRouterDto, AttendanceRecordDto, AttendanceStatus, CreateEmployeeDto, CreateIpDto,
+  AssignRouterDto, AttendanceListItemDto, AttendanceStatus, CreateEmployeeDto, CreateIpDto,
   CreateRouterDto, Department, EmployeeDto, EmployeeQueryDto, IpAddressDto, IpHistoryDto, IpQueryDto,
   JobStatusResponseDto, OverrideAttendanceDto, Role, RouterAssignmentDto, RouterConditionHistoryDto,
   RouterDto, RouterQueryDto, RouterStatusHistoryDto,
   TransitionRouterDto, UpdateEmployeeDto, UpdateEmployeeStatusDto, UpdateRouterConditionDto,
-  UserStatus,
+  EmployeeLookupDto,
 } from '@alfahd/types';
 
 export type Remote<T> =
@@ -38,15 +38,15 @@ export type FormProps<Form> = {
   onSubmit: (form: Form) => Promise<void>;
   onCancel: () => void;
 };
-export type Lookup = { id: string; name: string; status: UserStatus; warehouseId: string | null };
+export type Lookup = EmployeeLookupDto;
 
-/** The presentation layer builds public image URLs from the proposed identifier. */
+/** The backend-owned container supplies a resolved public URL, or null. */
 export type EmployeeRow = Omit<EmployeeDto, 'profilePhotoKey'> & {
   warehouseName: string | null;
-  photoId: string | null;
+  photoUrl: string | null;
 };
 export type EmployeePhotoProps = {
-  photoId: string | null;
+  photoUrl: string | null;
   canRetry: boolean;
   onRetry: () => void;
 };
@@ -65,8 +65,7 @@ export type EmployeeDetailProps = {
   attendance: EmployeeAttendanceHistoryProps;
 };
 
-/** Read endpoint/summary shape is a UI proposal, not an existing API. */
-export type AttendanceRow = AttendanceRecordDto & { employeeName: string; userId: string };
+export type AttendanceRow = AttendanceListItemDto;
 export type AttendanceFilter = { from?: string; to?: string; employeeId?: string; department?: Department; status?: AttendanceStatus };
 export type AttendanceTotals = { total: number; onTime: number; late: number };
 /** total is the status-filtered count; totals exclude status but respect other filters. */
@@ -107,14 +106,13 @@ export type WarehouseProps = ListProps<WarehouseRow, WarehouseFilter, WarehouseC
   onDeactivate: (id: string) => Promise<void>;
 };
 
-export type ProductRow = { id: string; name: string; sku: string; model: string; category: string; description: string | null; lowStockThreshold: number; isSerialized: boolean; totalStock: number; isLowStock: boolean };
-export type ProductFilter = { search?: string; category?: string; isLowStock?: boolean };
+export type ProductRow = { id: string; name: string; sku: string; model: string; category: string; description: string | null; lowStockThreshold: number; isSerialized: boolean; isActive: boolean; totalStock: number; isLowStock: boolean };
+export type ProductFilter = { search?: string; category?: string; isLowStock?: boolean; activeOnly?: boolean; isActive?: boolean };
 export type ProductForm = { name: string; sku: string; model: string; category: string; description?: string; lowStockThreshold?: number };
 export type ProductCapabilities = { create: boolean; edit: boolean; deactivate: boolean };
 export type ProductProps = ListProps<ProductRow, ProductFilter, ProductCapabilities> & {
   onCreate: (value: ProductForm) => Promise<void>;
   onUpdate: (id: string, value: Partial<ProductForm>) => Promise<void>;
-  /** Future only; disabled until #81 is implemented and approved. */
   onDeactivate: (id: string) => Promise<void>;
 };
 export type MovementType = 'INBOUND_SUPPLIER' | 'OUTBOUND_TECHNICIAN' | 'RETURN_TECHNICIAN' | 'TRANSFER_WAREHOUSE' | 'ADJUSTMENT';
