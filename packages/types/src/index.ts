@@ -259,6 +259,7 @@ export interface UpdateEmployeeDto {
   name?: string;
   department?: Department;
   phone?: string;
+  hireDate?: string;
   assignedWarehouseId?: string;
 }
 
@@ -735,4 +736,3 @@ export interface QueryStockMovementsDto {
   limit?: number;
   offset?: number;
 }
-

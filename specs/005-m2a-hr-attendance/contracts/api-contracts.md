@@ -125,6 +125,7 @@ Updates profile metadata.
   "name": "Ahmed Mostafa Updated",
   "department": "TECHNICAL",
   "phone": "+201099999999",
+  "hireDate": "2026-01-15",
   "assignedWarehouseId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
 }
 ```

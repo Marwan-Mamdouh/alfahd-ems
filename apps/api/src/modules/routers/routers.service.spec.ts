@@ -1575,7 +1575,11 @@ describe('RoutersService', () => {
           type: 'ROUTER_INVENTORY_REPORT',
           params: { warehouseId: mockWarehouse.id },
         }),
-        expect.objectContaining({ jobId: expect.any(String) }),
+        expect.objectContaining({
+          jobId: expect.any(String),
+          removeOnComplete: { age: 604800 },
+          removeOnFail: { age: 604800 },
+        }),
       );
       expect(result.jobId).toBe('job-router-123');
     });

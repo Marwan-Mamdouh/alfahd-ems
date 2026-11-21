@@ -8,6 +8,7 @@ import {
   type AttendanceStatus,
   type Department,
 } from '@alfahd/types';
+import { CALENDAR_DATE_PATTERN } from '../../common/utils/date.utils.js';
 
 export class AttendanceListRequestDto implements AttendanceListQueryDto {
   @ApiPropertyOptional({
@@ -16,7 +17,7 @@ export class AttendanceListRequestDto implements AttendanceListQueryDto {
     description: 'Inclusive local work date (YYYY-MM-DD)',
   })
   @IsOptional()
-  @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}$/)
+  @Matches(CALENDAR_DATE_PATTERN)
   @IsDateString({ strict: true })
   from?: string;
 
@@ -26,7 +27,7 @@ export class AttendanceListRequestDto implements AttendanceListQueryDto {
     description: 'Inclusive local work date (YYYY-MM-DD)',
   })
   @IsOptional()
-  @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}$/)
+  @Matches(CALENDAR_DATE_PATTERN)
   @IsDateString({ strict: true })
   to?: string;
 

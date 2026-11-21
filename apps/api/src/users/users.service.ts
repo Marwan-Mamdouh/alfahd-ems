@@ -239,6 +239,7 @@ export class UsersService {
       ...(dto.name !== undefined ? { name: dto.name } : {}),
       ...(dto.department !== undefined ? { department: dto.department } : {}),
       ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+      ...(dto.hireDate !== undefined ? { hireDate: dto.hireDate } : {}),
       ...(dto.assignedWarehouseId !== undefined
         ? { assignedWarehouseId: dto.assignedWarehouseId }
         : {}),
@@ -351,7 +352,11 @@ export class UsersService {
     // The self-deactivation guard belongs here (not in the controller) so any
     // caller of update({isActive: false}) enforces it. Missing
     // requestingUserId means an internal call, which skips the guard.
-    if (dto.isActive === false && requestingUserId !== undefined && id === requestingUserId) {
+    if (
+      dto.isActive === false &&
+      requestingUserId !== undefined &&
+      user.id.toLowerCase() === requestingUserId.toLowerCase()
+    ) {
       throw new BadRequestException('Admin cannot deactivate their own account');
     }
     if (dto.email !== undefined && dto.email !== user.email) {
@@ -390,13 +395,13 @@ export class UsersService {
     // employee-status flow already revokes; both paths live here in the
     // service rather than in the controller).
     if (dto.isActive === false) {
-      await this.sessionService.revokeAllSessions(id);
+      await this.sessionService.revokeAllSessions(updated.id);
     }
     return toUserDto(updated);
   }
 
   async deactivate(id: string, requestingUserId: string): Promise<UserDto> {
-    if (id === requestingUserId) {
+    if (id.toLowerCase() === requestingUserId.toLowerCase()) {
       throw new BadRequestException('Admin cannot deactivate their own account');
     }
     // Session revocation happens inside `update` (isActive === false).

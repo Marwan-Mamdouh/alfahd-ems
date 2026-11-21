@@ -11,6 +11,7 @@ import { RateLimitGuard } from './../src/auth/guards/rate-limit.guard.js';
 import { DRIZZLE } from './../src/database/database.module.js';
 import { ARGON2_OPTIONS } from './../src/database/schema/mappers.js';
 import { corsOrigins } from './../src/config/refresh-cookie.js';
+import { SessionService } from './../src/redis/session.service.js';
 
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const CS_ID = '22222222-2222-4222-8222-222222222222';
@@ -411,6 +412,63 @@ describe('Auth (e2e) — refresh cookie transport', () => {
   });
 
   describe('POST /auth/refresh', () => {
+    it.each(['revoked token', 'changed generation'])(
+      'clears the cookie when %s invalidates an in-flight refresh',
+      async (race) => {
+        const { cookie } = await login();
+        const oldToken = tokenFrom(cookie);
+        const sessions = app.get(SessionService);
+        const originalCreate = sessions.createSession.bind(sessions);
+        let newToken = '';
+        const spy = vi
+          .spyOn(sessions, 'createSession')
+          .mockImplementation(async (id, token, gen) => {
+            newToken = token;
+            await originalCreate(id, token, gen);
+            if (race === 'revoked token') {
+              await sessions.revokeAllSessions(id);
+            } else {
+              redisKeys.set(`rt:user_generation:${id}`, '1');
+            }
+          });
+
+        try {
+          const res = await request(app.getHttpServer())
+            .post('/auth/refresh')
+            .set('Cookie', cookie)
+            .send({})
+            .expect(401);
+          const cookies = res.headers['set-cookie'] as unknown as string[] | undefined;
+          expect(cookies?.find((value) => value.startsWith('refresh_token='))).toMatch(
+            /^refresh_token=;/,
+          );
+          expect(newToken).not.toBe('');
+          expect(redisKeys.has(`rt:token:${oldToken}`)).toBe(false);
+          expect(redisKeys.has(`rt:token:${newToken}`)).toBe(false);
+        } finally {
+          spy.mockRestore();
+        }
+      },
+    );
+
+    it('clears the cookie when a pre-upgrade session has no generation metadata', async () => {
+      const { cookie } = await login();
+      const token = tokenFrom(cookie);
+      redisKeys.delete(`rt:token_generation:${token}`);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .set('Cookie', cookie)
+        .send({})
+        .expect(401);
+
+      const cookies = res.headers['set-cookie'] as unknown as string[] | undefined;
+      expect(cookies?.find((value) => value.startsWith('refresh_token='))).toMatch(
+        /^refresh_token=;/,
+      );
+      expect(redisKeys.has(`rt:token:${token}`)).toBe(false);
+    });
+
     it('accepts the cookie alone with an empty body (web flow)', async () => {
       // The regression this guards: requiring a body refresh token would 401 every
       // page reload, because the web client cannot read the cookie to send it back.

@@ -151,6 +151,19 @@ describe('UsersService', () => {
 
       expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
     });
+
+    it('rejects self-deactivation with differently cased identifiers', async () => {
+      await expect(service.update('USER-1', { isActive: false }, 'user-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.deactivate('USER-1', 'user-1')).rejects.toThrow(BadRequestException);
+      expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
+    });
+
+    it('revokes sessions for the persisted ID even when request casing differs', async () => {
+      await service.update('USER-1', { isActive: false }, 'admin-9');
+      expect(sessionServiceMock.revokeAllSessions).toHaveBeenCalledWith('user-1');
+    });
   });
 
   describe('employee warehouse assignment validation', () => {

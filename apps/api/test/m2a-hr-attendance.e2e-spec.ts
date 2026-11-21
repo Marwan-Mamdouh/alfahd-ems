@@ -22,7 +22,7 @@ import {
   type AttendanceRecord,
 } from '../src/database/schema/index.js';
 
-const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
+const ADMIN_ID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const TECH_ID = '22222222-2222-4222-8222-222222222222';
 const WAREHOUSE_ID = '33333333-3333-4333-8333-333333333333';
 const PASSWORD = 'securePassword123';
@@ -659,7 +659,7 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       expect(res.body.statusCode).toBe(400);
     });
 
-    it('rejects a calendar-invalid hire date', async () => {
+    it.each(['2026-02-30', '2026-W08-3'])('rejects invalid hire date %s', async (hireDate) => {
       await request(app.getHttpServer())
         .post('/employees')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -667,8 +667,36 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
           name: 'Invalid date',
           email: 'date@example.test',
           role: 'CS',
-          hireDate: '2026-02-30',
+          hireDate,
         })
+        .expect(400);
+    });
+
+    it.each(['2026-02-30', '2026-W08-3'])(
+      'rejects invalid hire date %s on update',
+      async (hireDate) => {
+        await request(app.getHttpServer())
+          .patch(`/employees/${TECH_ID}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ hireDate })
+          .expect(400);
+      },
+    );
+
+    it('updates a valid hire date', async () => {
+      const response = await request(app.getHttpServer())
+        .patch(`/employees/${TECH_ID}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ hireDate: '2026-02-28' })
+        .expect(200);
+      expect(response.body.data.hireDate).toBe('2026-02-28');
+    });
+
+    it('rejects self-deactivation with an uppercase employee UUID', async () => {
+      await request(app.getHttpServer())
+        .patch(`/employees/${ADMIN_ID.toUpperCase()}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'INACTIVE', reason: 'Test' })
         .expect(400);
     });
 
@@ -824,6 +852,17 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
         .expect(400);
     });
 
+    it.each(['checkInAt', 'checkOutAt'])(
+      'rejects an unparseable ISO week date in %s',
+      async (field) => {
+        await request(app.getHttpServer())
+          .patch(`/attendance/${ATT_ID}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ [field]: '2026-W08-3', overrideReason: 'Correction' })
+          .expect(400);
+      },
+    );
+
     it('overrides attendance record with reason under ADMIN role (200)', async () => {
       const res = await request(app.getHttpServer())
         .patch(`/attendance/${ATT_ID}`)
@@ -850,6 +889,17 @@ describe('Milestone M2a — HR & Attendance (e2e)', () => {
       expect(res.body.data).toHaveProperty('jobId');
       expect(res.body.data.jobId).toBe('report-attendance-981247');
     });
+
+    it.each(['2026-02-30', '2026-W08-3'])(
+      'rejects invalid report calendar date %s',
+      async (from) => {
+        await request(app.getHttpServer())
+          .get('/attendance/report')
+          .query({ from, to: '2026-03-01' })
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(400);
+      },
+    );
 
     it('queries report job status via GET /jobs/:id (200)', async () => {
       const res = await request(app.getHttpServer())

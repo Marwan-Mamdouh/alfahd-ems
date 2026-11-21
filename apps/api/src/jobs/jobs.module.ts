@@ -7,10 +7,6 @@ import { JobsService } from './jobs.service.js';
   imports: [
     BullModule.registerQueue({
       name: 'reports',
-      defaultJobOptions: {
-        removeOnComplete: { age: 7 * 24 * 60 * 60 },
-        removeOnFail: { age: 7 * 24 * 60 * 60 },
-      },
     }),
     BullModule.registerQueue({
       name: 'ip-imports',

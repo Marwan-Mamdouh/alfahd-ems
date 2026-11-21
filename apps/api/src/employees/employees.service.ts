@@ -71,7 +71,7 @@ export class EmployeesService {
     if (!reason || !reason.trim()) {
       throw new BadRequestException('Reason is mandatory for status changes');
     }
-    if (status === 'INACTIVE' && id === actorId) {
+    if (status === 'INACTIVE' && id.toLowerCase() === actorId.toLowerCase()) {
       throw new BadRequestException('Admin cannot deactivate their own account');
     }
 
@@ -79,7 +79,7 @@ export class EmployeesService {
 
     // If status is changed to INACTIVE, revoke all active sessions in Redis
     if (status === 'INACTIVE') {
-      await this.sessionService.revokeAllSessions(id);
+      await this.sessionService.revokeAllSessions(updatedUser.id);
     }
 
     return toEmployeeDto(updatedUser);

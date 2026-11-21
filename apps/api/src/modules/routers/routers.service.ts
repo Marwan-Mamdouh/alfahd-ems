@@ -18,6 +18,7 @@ import {
   type RouterReportQueryDto,
 } from '@alfahd/types';
 import { RepositoryService } from '../repository/repository.service.js';
+import { reportRetentionOptions } from '../../jobs/report-retention.js';
 import type {
   CreateRouterDto,
   AssignRouterDto,
@@ -720,7 +721,7 @@ export class RoutersService {
         params: query,
         requestedBy,
       },
-      { jobId: randomUUID() },
+      { jobId: randomUUID(), ...reportRetentionOptions },
     );
 
     return { jobId: String(job.id) };
