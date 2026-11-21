@@ -11,6 +11,7 @@ import {
 
 export class AttendanceListRequestDto implements AttendanceListQueryDto {
   @ApiPropertyOptional({
+    format: 'date',
     example: '2026-11-01',
     description: 'Inclusive local work date (YYYY-MM-DD)',
   })
@@ -20,6 +21,7 @@ export class AttendanceListRequestDto implements AttendanceListQueryDto {
   from?: string;
 
   @ApiPropertyOptional({
+    format: 'date',
     example: '2026-11-30',
     description: 'Inclusive local work date (YYYY-MM-DD)',
   })
@@ -46,14 +48,14 @@ export class AttendanceListRequestDto implements AttendanceListQueryDto {
   @IsIn(ATTENDANCE_STATUSES)
   status?: AttendanceStatus;
 
-  @ApiPropertyOptional({ default: 1, minimum: 1, maximum: 2147483647 })
+  @ApiPropertyOptional({ type: 'integer', default: 1, minimum: 1, maximum: 2147483647 })
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(2147483647)
   page = 1;
 
-  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @ApiPropertyOptional({ type: 'integer', default: 20, minimum: 1, maximum: 100 })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -65,10 +67,11 @@ export class AttendanceListItemResponseDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) userId!: string;
   @ApiProperty() employeeName!: string;
-  @ApiProperty({ enum: DEPARTMENTS, nullable: true }) department!: Department | null;
+  @ApiProperty({ type: String, enum: [...DEPARTMENTS, null], nullable: true })
+  department!: Department | null;
   @ApiProperty({ format: 'date' }) workDate!: string;
   @ApiProperty({ format: 'date-time' }) checkInAt!: string;
-  @ApiProperty({ format: 'date-time', nullable: true }) checkOutAt!: string | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) checkOutAt!: string | null;
   @ApiProperty() checkInDistanceM!: number;
   @ApiProperty({ type: Number, nullable: true }) hoursWorked!: number | null;
   @ApiProperty({ enum: ATTENDANCE_STATUSES }) status!: AttendanceStatus;
@@ -78,16 +81,16 @@ export class AttendanceListItemResponseDto {
 }
 
 export class AttendanceTotalsResponseDto {
-  @ApiProperty() total!: number;
-  @ApiProperty() onTime!: number;
-  @ApiProperty() late!: number;
+  @ApiProperty({ type: 'integer' }) total!: number;
+  @ApiProperty({ type: 'integer' }) onTime!: number;
+  @ApiProperty({ type: 'integer' }) late!: number;
 }
 
 export class AttendanceListResponseDto {
   @ApiProperty({ type: [AttendanceListItemResponseDto] }) items!: AttendanceListItemResponseDto[];
-  @ApiProperty() page!: number;
-  @ApiProperty() pageSize!: number;
-  @ApiProperty({ description: 'Count after all filters, before pagination' })
+  @ApiProperty({ type: 'integer' }) page!: number;
+  @ApiProperty({ type: 'integer' }) pageSize!: number;
+  @ApiProperty({ type: 'integer', description: 'Count after all filters, before pagination' })
   filteredTotal!: number;
   @ApiProperty({
     type: AttendanceTotalsResponseDto,
