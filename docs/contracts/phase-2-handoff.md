@@ -80,7 +80,7 @@ See controller and DTO directories in `apps/api/src/{employees,attendance,jobs}`
 | Employees | `role`, `department`, `status`, `warehouse_id`, `q` | `page` default 1; `pageSize` default 20, max 100; top-level `data`, `meta: {page,pageSize,total}` |
 | Employee lookup | `role`, `warehouseId` (legacy `warehouse_id`), `status`, `q` | `limit` default 50, max 100; name order, no offset or total |
 | Attendance list | `from`, `to`, `employee_id`, `department`, `status` | `page` default 1; `pageSize` default 20, max 100; `filteredTotal` for pagination; contextual `totals` ignore status |
-| Attendance report | `from`, `to`, `department`, `employee_id` | job result, not a list |
+| Attendance report | required ISO 8601 `from`, `to` (ordered range of at most 366 days); optional `department`, `employee_id` | job result, not a list; over-limit range → 400 `DATE_RANGE_EXCEEDS_MAXIMUM` |
 | Warehouses | `search` | `limit` default 20, max 100; `offset` default 0; `{data:{items,total}}` |
 | Products | `search`, `category`, `isLowStock`, `activeOnly`, `isActive` | same limit/offset envelope |
 | Inventory | `warehouseId`, `productId` | same limit/offset envelope |

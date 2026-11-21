@@ -68,7 +68,7 @@ export type EmployeeDetailProps = {
 export type AttendanceRow = AttendanceListItemDto;
 export type AttendanceFilter = { from?: string; to?: string; employeeId?: string; department?: Department; status?: AttendanceStatus };
 export type AttendanceTotals = { total: number; onTime: number; late: number };
-/** total is the status-filtered count; totals exclude status but respect other filters. */
+/** Both page.total and card totals include all selected filters, before pagination. */
 export type AttendancePage = { page: Page<AttendanceRow>; totals: AttendanceTotals };
 export type AttendanceLoadState =
   | { kind: 'loading' }
@@ -109,11 +109,13 @@ export type WarehouseProps = ListProps<WarehouseRow, WarehouseFilter, WarehouseC
 export type ProductRow = { id: string; name: string; sku: string; model: string; category: string; description: string | null; lowStockThreshold: number; isSerialized: boolean; isActive: boolean; totalStock: number; isLowStock: boolean };
 export type ProductFilter = { search?: string; category?: string; isLowStock?: boolean; activeOnly?: boolean; isActive?: boolean };
 export type ProductForm = { name: string; sku: string; model: string; category: string; description?: string; lowStockThreshold?: number };
-export type ProductCapabilities = { create: boolean; edit: boolean; deactivate: boolean };
+export type ProductCapabilities = { create: boolean; edit: boolean; deactivate: boolean; reactivate: boolean };
 export type ProductProps = ListProps<ProductRow, ProductFilter, ProductCapabilities> & {
   onCreate: (value: ProductForm) => Promise<void>;
   onUpdate: (id: string, value: Partial<ProductForm>) => Promise<void>;
   onDeactivate: (id: string) => Promise<void>;
+  reactivation: { pending: boolean; error: string | null };
+  onReactivate: (id: string) => Promise<void>;
 };
 export type MovementType = 'INBOUND_SUPPLIER' | 'OUTBOUND_TECHNICIAN' | 'RETURN_TECHNICIAN' | 'TRANSFER_WAREHOUSE' | 'ADJUSTMENT';
 export type InventoryRow = { id: string; productId: string; warehouseId: string; quantity: number; productName: string; warehouseName: string };
