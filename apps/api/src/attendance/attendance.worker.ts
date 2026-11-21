@@ -380,10 +380,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       }
 
       const assignedAtFormatted = item.custody?.assignedAt
-        ? formatLocalTimestamp(
-            item.custody.assignedAt,
-            this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo',
-          )
+        ? formatLocalTimestamp(item.custody.assignedAt)
         : '-';
 
       detailsSheet.addRow({

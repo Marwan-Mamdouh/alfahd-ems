@@ -119,6 +119,35 @@ describe('EmployeesService', () => {
       expect(sessionServiceMock.revokeAllSessions).not.toHaveBeenCalled();
     });
 
+    it('prevents self-deactivation when the UUID uses different casing', async () => {
+      await expect(
+        service.updateStatus(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'.toUpperCase(),
+          'INACTIVE',
+          'Reason',
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        ),
+      ).rejects.toThrow('Admin cannot deactivate their own account');
+      expect(usersServiceMock.updateEmployeeStatus).not.toHaveBeenCalled();
+    });
+
+    it('revokes sessions using the persisted user ID rather than the requested casing', async () => {
+      usersServiceMock.updateEmployeeStatus.mockResolvedValue({
+        ...mockUser,
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        status: 'INACTIVE',
+      });
+      await service.updateStatus(
+        'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+        'INACTIVE',
+        'Reason',
+        'admin-123',
+      );
+      expect(sessionServiceMock.revokeAllSessions).toHaveBeenCalledWith(
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      );
+    });
+
     it('rejects status update if reason is empty', async () => {
       await expect(
         service.updateStatus('user-123', 'INACTIVE', '   ', 'admin-123'),

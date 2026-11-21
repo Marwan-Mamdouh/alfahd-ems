@@ -535,7 +535,11 @@ describe('AttendanceService', () => {
           type: 'ATTENDANCE_SUMMARY',
           requestedBy: 'admin-1',
         }),
-        expect.objectContaining({ jobId: expect.any(String) }),
+        expect.objectContaining({
+          jobId: expect.any(String),
+          removeOnComplete: { age: 604800 },
+          removeOnFail: { age: 604800 },
+        }),
       );
     });
 

@@ -149,6 +149,9 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
     if (userId !== owner || generation === null) {
+      // This token cannot produce a winning refresh; let the controller clear
+      // its stale cookie instead of treating it as a successful rotation.
+      await this.sessionService.clearRotated(refreshToken);
       await this.sessionService.revokeSession(userId, refreshToken);
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -167,11 +170,19 @@ export class AuthService {
     await this.sessionService.createSession(user.id, newTokenId, generation);
     // The consumed token stays indexed until rotation completes. If an
     // account-wide revoke ran in the meantime, it marks that token revoked.
-    if (await this.sessionService.isRevoked(refreshToken)) {
-      await this.sessionService.revokeSession(user.id, newTokenId);
-      throw new UnauthorizedException('Invalid refresh token');
+    try {
+      if (await this.sessionService.isRevoked(refreshToken)) {
+        await this.sessionService.revokeSession(user.id, newTokenId);
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      await this.assertSessionStillAuthorized(user, newTokenId, generation);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        await this.sessionService.clearRotated(refreshToken);
+        await this.sessionService.revokeSession(user.id, refreshToken);
+      }
+      throw error;
     }
-    await this.assertSessionStillAuthorized(user, newTokenId, generation);
     await this.sessionService.revokeSession(user.id, refreshToken);
 
     return {

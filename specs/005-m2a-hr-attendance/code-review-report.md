@@ -84,6 +84,7 @@
   - `revokeSession` = pipelined `DEL` token key + `SREM` from the set + denylist `SET`.
 - **Tests:** `session.service.spec.ts` rewritten — same behavioral coverage (TTLs, revoke counts, denylist, password-reset atomicity) plus explicit regression guards `expect(redis.scan).not.toHaveBeenCalled()`.
 - **Deployment note:** sessions created under the old `rt:{userId}:{tokenId}` layout are unreadable by the new lookup → **all users must re-login once** after deploy (refresh tokens are the only casualty; access JWTs run out naturally).
+- **Issue #41 deployment note:** refresh tokens created before generation metadata was introduced are also rejected on refresh. Plan a one-time sign-in for affected users when deploying this hardening change; existing access tokens remain valid until their normal expiry.
 
 ### SIMP-03 — Cutoff comparison simplified ✅
 - `clock.service.ts`: `isAfterCutoff` now formats `"HH:MM:SS"` with a **per-timezone cached** `Intl.DateTimeFormat` (`hourCycle: 'h23'`) and does one lexicographic comparison against `cutoff:00` — from ~18 lines of `formatToParts`/`find`/chained comparisons to 2 lines. Semantics identical (strictly-after, zero-padded 24h ordering).

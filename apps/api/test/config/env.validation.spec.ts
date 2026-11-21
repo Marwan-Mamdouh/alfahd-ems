@@ -16,6 +16,12 @@ const validEnv = {
 };
 
 describe('envSchema validation', () => {
+  it('rejects fixed-offset timezones and accepts named IANA zones', () => {
+    expect(envSchema.safeParse({ ...validEnv, APP_TIMEZONE: '+02:00' }).success).toBe(false);
+    expect(envSchema.safeParse({ ...validEnv, APP_TIMEZONE: 'Africa/Cairo' }).success).toBe(true);
+    expect(envSchema.safeParse({ ...validEnv, APP_TIMEZONE: 'UTC' }).success).toBe(true);
+  });
+
   it('parses valid env with REDIS_HOST/PORT', () => {
     const result = envSchema.parse(validEnv);
     expect(result.DATABASE_URL).toBe(validEnv.DATABASE_URL);

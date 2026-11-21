@@ -6,9 +6,11 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { DEPARTMENTS, Role, type Department, type CreateEmployeeDto } from '@alfahd/types';
+import { CALENDAR_DATE_PATTERN } from '../../common/utils/date.utils.js';
 
 export class CreateEmployeeRequestDto implements CreateEmployeeDto {
   // users.name is varchar(255): without MaxLength an over-long value reaches
@@ -43,6 +45,7 @@ export class CreateEmployeeRequestDto implements CreateEmployeeDto {
   // users.hire_date is a `date` column: `@IsString()` would let "not-a-date"
   // through to a Postgres date-parse error (500).
   @IsOptional()
+  @Matches(CALENDAR_DATE_PATTERN)
   @IsDateString({ strict: true })
   hireDate?: string;
 

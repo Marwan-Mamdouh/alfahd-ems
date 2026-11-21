@@ -31,6 +31,21 @@ import { ClockService, getLocalWorkDate, isAfterCutoff } from '../common/service
 import type { OverrideAttendanceRequestDto } from './dto/override-attendance.dto.js';
 import type { AttendanceQueryRequestDto } from './dto/attendance-query.dto.js';
 import type { AttendanceListRequestDto } from './dto/attendance-list.dto.js';
+import { reportRetentionOptions } from '../jobs/report-retention.js';
+import { parseValidDate } from '../common/utils/date.utils.js';
+
+function isAttendanceWorkDateConflict(error: unknown): boolean {
+  const wrapped = error as {
+    code?: string;
+    constraint?: string;
+    cause?: { code?: string; constraint?: string };
+  };
+  const pgError = wrapped.cause ?? wrapped;
+  return (
+    pgError?.code === '23505' ||
+    pgError?.constraint === 'attendance_records_user_id_work_date_unique'
+  );
+}
 
 @Injectable()
 export class AttendanceService {
@@ -214,16 +229,7 @@ export class AttendanceService {
       // Two concurrent check-ins can both pass the pre-insert existence check;
       // the loser hits the (user_id, work_date) unique constraint (23505).
       // Surface that as 409 ALREADY_CHECKED_IN instead of an unhandled 500.
-      const wrapped = error as {
-        code?: string;
-        constraint?: string;
-        cause?: { code?: string; constraint?: string };
-      };
-      const pgError = wrapped.cause ?? wrapped;
-      if (
-        pgError?.code === '23505' ||
-        pgError?.constraint === 'attendance_records_user_id_work_date_unique'
-      ) {
+      if (isAttendanceWorkDateConflict(error)) {
         throw new HttpException(
           {
             code: 'ALREADY_CHECKED_IN',
@@ -335,8 +341,12 @@ export class AttendanceService {
 
     // Chronological sanity on the *effective* record: whatever pair of
     // check-in/check-out will exist after this update must be ordered.
-    const effectiveCheckIn = dto.checkInAt ? new Date(dto.checkInAt) : record.checkInAt;
-    const effectiveCheckOut = dto.checkOutAt ? new Date(dto.checkOutAt) : record.checkOutAt;
+    const effectiveCheckIn = dto.checkInAt
+      ? parseValidDate(dto.checkInAt, 'Invalid check-in or check-out timestamp')
+      : record.checkInAt;
+    const effectiveCheckOut = dto.checkOutAt
+      ? parseValidDate(dto.checkOutAt, 'Invalid check-in or check-out timestamp')
+      : record.checkOutAt;
     if (effectiveCheckOut && effectiveCheckOut.getTime() < effectiveCheckIn.getTime()) {
       throw new HttpException(
         {
@@ -376,16 +386,7 @@ export class AttendanceService {
         .where(eq(attendanceRecords.id, id))
         .returning();
     } catch (error) {
-      const wrapped = error as {
-        code?: string;
-        constraint?: string;
-        cause?: { code?: string; constraint?: string };
-      };
-      const pgError = wrapped.cause ?? wrapped;
-      if (
-        pgError?.code === '23505' ||
-        pgError?.constraint === 'attendance_records_user_id_work_date_unique'
-      ) {
+      if (isAttendanceWorkDateConflict(error)) {
         throw new HttpException(
           { code: 'ALREADY_CHECKED_IN', message: 'Attendance record already exists for that day' },
           HttpStatus.CONFLICT,
@@ -417,12 +418,8 @@ export class AttendanceService {
       throw new BadRequestException('Both "from" and "to" date parameters are required');
     }
 
-    const fromDate = new Date(dto.from);
-    const toDate = new Date(dto.to);
-
-    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-      throw new BadRequestException('Invalid date format for "from" or "to"');
-    }
+    const fromDate = parseValidDate(dto.from, 'Invalid date format for "from" or "to"');
+    const toDate = parseValidDate(dto.to, 'Invalid date format for "from" or "to"');
 
     if (fromDate > toDate) {
       throw new BadRequestException('"from" date must be earlier than "to" date');
@@ -450,7 +447,7 @@ export class AttendanceService {
         params: dto,
         requestedBy,
       },
-      { jobId: randomUUID() },
+      { jobId: randomUUID(), ...reportRetentionOptions },
     );
 
     return { jobId: String(job.id) };

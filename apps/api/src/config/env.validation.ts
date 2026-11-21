@@ -47,6 +47,7 @@ export const envSchema = z
     APP_TIMEZONE: z
       .string()
       .refine((value) => {
+        if (/^[+-]/.test(value)) return false;
         try {
           new Intl.DateTimeFormat('en', { timeZone: value });
           return true;
