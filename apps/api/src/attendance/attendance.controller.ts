@@ -50,6 +50,7 @@ export class AttendanceController {
   @ApiOkResponse({
     schema: {
       type: 'object',
+      required: ['data'],
       properties: { data: { $ref: getSchemaPath(AttendanceListResponseDto) } },
     },
   })
