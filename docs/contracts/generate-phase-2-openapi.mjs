@@ -79,6 +79,7 @@ const request = {
   file: obj({ file: { type: 'string', format: 'binary' } }, ['file']),
 };
 const q = (name, schema = text) => ({ name, in: 'query', required: false, schema });
+const reportDate = (name, other, example) => ({ ...q(name), required: true, description: `ISO 8601 date string; required with ${other}. The range must be ordered and at most 366 days.`, example });
 const limit = q('limit', { type: 'integer', minimum: 1, maximum: 100, default: 20 });
 const offset = q('offset', { type: 'integer', minimum: 0, default: 0 });
 const pageNum = q('page', { type: 'integer', minimum: 1, default: 1 });
@@ -86,7 +87,7 @@ const queries = {
   employees: [q('role', role), q('department', department), q('status', userStatus), q('warehouse_id', uuid), q('q'), pageNum, q('pageSize', { type: 'integer', minimum: 1, maximum: 100, default: 20 })],
   employeeLookup: [q('role', role), q('status', userStatus), q('warehouseId', uuid), { ...q('warehouse_id', uuid), deprecated: true }, q('q'), q('limit', { type: 'integer', minimum: 1, maximum: 100, default: 50 })],
   attendanceList: [q('from', { type: 'string', format: 'date' }), q('to', { type: 'string', format: 'date' }), q('employee_id', uuid), q('department', department), q('status', attendanceStatus), q('page', { ...pageNum.schema, maximum: 2147483647 }), q('pageSize', { ...limit.schema })],
-  report: [q('from'), q('to'), q('department', department), q('employee_id', uuid)],
+  report: [reportDate('from', 'to', '2026-11-01'), reportDate('to', 'from', '2026-11-30'), q('department', department), { ...q('employee_id', uuid), description: 'Employee ID must be a UUID v4.' }],
   warehouses: [q('search'), limit, offset], products: [q('search'), q('category'), q('isLowStock', boolean), q('activeOnly', boolean), q('isActive', boolean), limit, offset],
   inventory: [q('warehouseId', uuid), q('productId', uuid), limit, offset],
   movements: [q('warehouseId', uuid), q('productId', uuid), q('movementType', strEnum('INBOUND_SUPPLIER', 'OUTBOUND_TECHNICIAN', 'RETURN_TECHNICIAN', 'TRANSFER_WAREHOUSE', 'ADJUSTMENT')), q('technicianId', uuid), limit, offset],
@@ -115,7 +116,7 @@ for (const [method, path, roles, status, result, body, query, note] of ops) {
   if (query) parameters.push(...queries[query]);
   const responses = { [status]: status === 204 ? { description: 'No content' } : result === 'binary' ? { description: 'Authorized XLSX bytes', content: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { schema: { type: 'string', format: 'binary' } } } } : { description: 'Successful response', content: { 'application/json': { schema: results[result] } } }, 401: { description: 'Unauthenticated', content: { 'application/json': { schema: ref('Error') } } }, 403: { description: 'Forbidden where applicable', content: { 'application/json': { schema: ref('Error') } } } };
   const error = (description) => ({ description, content: { 'application/json': { schema: ref('Error') } } });
-  if (body || query || (parameters.length && !isJob)) responses[400] = error('Invalid input or domain validation failure');
+  if (body || query || (parameters.length && !isJob)) responses[400] = error(query === 'report' ? 'Missing dates, dates that fail ISO 8601 validation or cannot be parsed, reversed range, range over 366 days, unsupported department, or employee_id that is not a UUID v4; the over-limit range uses error.code DATE_RANGE_EXCEEDS_MAXIMUM' : 'Invalid input or domain validation failure');
   if (query === 'attendanceList' || parameters.some((p) => p.in === 'path')) responses[404] = error('Resource or authorized job not found where applicable');
   if (['post', 'patch', 'delete'].includes(method) && body !== 'file') responses[409] = error('Conflict where applicable; see controller/service and wire catalog');
   const operation = { operationId: `${method}_${path.replace(/[^a-zA-Z0-9]+/g, '_')}`, summary: `${method.toUpperCase()} ${path}`, security: [{ bearerAuth: [] }], ...(roles ? { 'x-roles': roles } : {}), ...(note ? { description: note } : {}), ...(parameters.length ? { parameters } : {}), ...(body ? { requestBody: { required: body !== 'reason' && body !== 'routerExport', content: { [body === 'file' ? 'multipart/form-data' : 'application/json']: { schema: request[body] } } } } : {}), responses };

@@ -63,5 +63,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify Phase 2 OpenAPI snapshot
+        run: node --test docs/contracts/phase-2-openapi.test.mjs
+
       - name: E2E Test
         run: pnpm --filter @alfahd/api test:e2e
