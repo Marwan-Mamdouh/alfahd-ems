@@ -13,7 +13,7 @@ import type { RouterPhysicalCondition } from "@alfahd/types";
 
 import type { RouterRegistrationFormValues } from "./types";
 
-interface ProductOption {
+export interface ProductOption {
   id: string;
   name: string;
   sku?: string;
@@ -21,17 +21,20 @@ interface ProductOption {
   isSerialized?: boolean;
 }
 
-interface WarehouseOption {
+export interface WarehouseOption {
   id: string;
   name: string;
 }
 
-interface RouterFormProps {
+export interface RouterFormProps {
   products: ProductOption[];
   warehouses: WarehouseOption[];
   onSubmit: (values: RouterRegistrationFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
+  serverError?: string | null;
+  fieldErrors?: Partial<Record<keyof RouterRegistrationFormValues, string>>;
+  initialValues?: Partial<RouterRegistrationFormValues>;
 }
 
 const INPUT_CLASS =
@@ -39,7 +42,7 @@ const INPUT_CLASS =
 
 const LABEL_CLASS = "mb-2 block text-sm font-medium text-foreground";
 
-const INITIAL_VALUES: RouterRegistrationFormValues = {
+const DEFAULT_INITIAL_VALUES: RouterRegistrationFormValues = {
   serialNumber: "",
   productId: "",
   warehouseId: "",
@@ -54,9 +57,17 @@ export function RouterForm({
   onSubmit,
   onCancel,
   isSubmitting = false,
+  serverError = null,
+  fieldErrors = {},
+  initialValues,
 }: RouterFormProps) {
-  const [values, setValues] = useState<RouterRegistrationFormValues>(INITIAL_VALUES);
-  const [errors, setErrors] = useState<Partial<Record<keyof RouterRegistrationFormValues, string>>>({});
+  const [values, setValues] = useState<RouterRegistrationFormValues>({
+    ...DEFAULT_INITIAL_VALUES,
+    ...initialValues,
+  });
+  const [clientErrors, setClientErrors] = useState<
+    Partial<Record<keyof RouterRegistrationFormValues, string>>
+  >({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
@@ -74,7 +85,7 @@ export function RouterForm({
       [field]: value,
     }));
 
-    setErrors((previous) => ({
+    setClientErrors((previous) => ({
       ...previous,
       [field]: undefined,
     }));
@@ -100,7 +111,7 @@ export function RouterForm({
       nextErrors.warehouseId = "يرجى اختيار المخزن الفعلي.";
     }
 
-    setErrors(nextErrors);
+    setClientErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
 
@@ -127,6 +138,9 @@ export function RouterForm({
       setLocalSubmitting(false);
     }
   }
+
+  const errors = { ...fieldErrors, ...clientErrors };
+  const activeError = serverError || submitError;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6" dir="rtl">
@@ -232,7 +246,8 @@ export function RouterForm({
             <option value="">اختر الموديل من الكتالوج</option>
             {serializedProducts.map((product) => (
               <option key={product.id} value={product.id}>
-                {product.name} {product.model ? `(${product.model})` : ""} {product.sku ? `— ${product.sku}` : ""}
+                {product.name} {product.model ? `(${product.model})` : ""}{" "}
+                {product.sku ? `— ${product.sku}` : ""}
               </option>
             ))}
           </select>
@@ -308,7 +323,7 @@ export function RouterForm({
       </div>
 
       {/* Server Rejection Alert Banner */}
-      {submitError && (
+      {activeError && (
         <div
           role="alert"
           className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
@@ -317,7 +332,7 @@ export function RouterForm({
             <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
             تعذر تسجيل الراوتر
           </div>
-          <p className="mt-1 text-xs leading-relaxed">{submitError}</p>
+          <p className="mt-1 text-xs leading-relaxed">{activeError}</p>
         </div>
       )}
 

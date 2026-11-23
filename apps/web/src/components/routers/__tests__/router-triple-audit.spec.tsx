@@ -119,5 +119,35 @@ describe("RouterTripleAudit Component", () => {
 
     expect(html).toContain("لا توجد سجلات عهدة سابقة لهذا الجهاز");
   });
+
+  it("renders with direct props without invoking query hooks", () => {
+    const directAssignments = [
+      {
+        id: "asgn-direct-1",
+        routerId: "router-direct",
+        holderType: "TECHNICIAN" as const,
+        warehouseId: null,
+        technicianId: "tech-99",
+        assignedAt: "2026-03-01T10:00:00Z",
+        releasedAt: null,
+        assignedBy: "admin-user",
+        notes: "Direct prop assignment",
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <RouterTripleAudit
+        routerId="router-direct"
+        assignments={directAssignments}
+        conditionHistory={[]}
+        statusHistory={[]}
+        isLoading={false}
+      />
+    );
+
+    expect(html).toContain("عهدة فني");
+    expect(html).toContain("Direct prop assignment");
+    expect(html).toContain("admin-us");
+  });
 });
 

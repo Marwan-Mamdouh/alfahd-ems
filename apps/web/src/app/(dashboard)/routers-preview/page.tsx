@@ -4,20 +4,16 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  ArrowRightLeft,
   Boxes,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  MapPin,
   PackageCheck,
   Plus,
   Router as RouterIcon,
   Search,
-  UserRound,
   UserRoundPlus,
   Wifi,
-  Wrench,
 } from "lucide-react";
 
 import { RoleGuard } from "@/core/auth/guards";
@@ -35,12 +31,15 @@ import {
   extractErrorMessage,
 } from "@/core/query/use-routers";
 
-import { RouterTable } from "@/components/routers/router-table";
-import { RouterForm } from "@/components/routers/router-form";
-import { RouterAssignmentForm } from "@/components/routers/router-assignment-form";
-import { RouterTransitionDialog } from "@/components/routers/router-transition-dialog";
-import { RouterConditionDialog } from "@/components/routers/router-condition-dialog";
-import { RouterTripleAudit } from "@/components/routers/router-triple-audit";
+import {
+  RouterTable,
+  RouterForm,
+  RouterAssignmentForm,
+  RouterTransitionDialog,
+  RouterConditionDialog,
+  RouterDetail,
+  RouterReportControl,
+} from "@/components/routers";
 
 import type {
   RouterRow,
@@ -49,6 +48,7 @@ import type {
   RouterAssignmentFormValues,
   RouterTransitionFormValues,
   RouterConditionFormValues,
+  RouterReportJobState,
 } from "@/components/routers/types";
 
 const STATUS_OPTIONS: {
@@ -69,22 +69,6 @@ type PageMode = "list" | "create" | "details" | "assign";
 
 const inputClass =
   "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-teal-500";
-
-function getStatusLabel(status: RouterStatus): string {
-  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  return new Intl.DateTimeFormat("ar-EG", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "Africa/Cairo",
-  }).format(date);
-}
 
 function RouterPreviewContent() {
   const user = useAuthStore((s) => s.user);
@@ -187,6 +171,30 @@ function RouterPreviewContent() {
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
 
   const [notification, setNotification] = useState<string | null>(null);
+  const [reportJob, setReportJob] = useState<RouterReportJobState | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportReport = async () => {
+    setIsExporting(true);
+    setReportJob({ status: "QUEUED" });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      setReportJob({ status: "RUNNING", progress: 60 });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      setReportJob({
+        status: "COMPLETED",
+        progress: 100,
+        downloadUrl: "/api/routers/export/download",
+      });
+    } catch {
+      setReportJob({
+        status: "FAILED",
+        error: "فشل طلب تصدير تقرير أجهزة الراوتر.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const selectedRouter = useMemo(
     () => routers.find((router) => router.id === selectedRouterId) ?? null,
@@ -492,6 +500,17 @@ function RouterPreviewContent() {
             </select>
           </div>
 
+          {/* Export Report Control */}
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <RouterReportControl
+              job={reportJob}
+              canExport={isAuthorizedToManage}
+              isExporting={isExporting}
+              onExport={handleExportReport}
+              onReset={() => setReportJob(null)}
+            />
+          </div>
+
           <p className="text-sm text-muted-foreground">
             عدد الأجهزة المعروضة: {routers.length} من إجمالي {totalRoutersCount}
           </p>
@@ -586,150 +605,14 @@ function RouterPreviewContent() {
       {/* Router Details */}
       {pageMode === "details" && selectedRouter && (
         <div className="space-y-6">
-          <section className="space-y-6 rounded-2xl border bg-card p-6 shadow-sm">
-            <button
-              type="button"
-              onClick={backToList}
-              className="inline-flex items-center gap-2 text-sm font-medium text-teal-700 hover:underline dark:text-teal-300"
-            >
-              <ArrowRight className="h-4 w-4" />
-              العودة إلى قائمة الراوترات
-            </button>
-
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">الرقم التسلسلي للجهاز</p>
-
-                <h2 className="mt-1 font-mono text-2xl font-bold" dir="ltr">
-                  {selectedRouter.serialNumber}
-                </h2>
-
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {selectedRouter.productName} {selectedRouter.productModel ? `(${selectedRouter.productModel})` : ""} {selectedRouter.productSku ? `— ${selectedRouter.productSku}` : ""}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-muted px-4 py-2 text-sm font-semibold">
-                  {getStatusLabel(selectedRouter.status)}
-                </span>
-                <span className="rounded-full border px-3 py-1 text-xs font-semibold">
-                  {selectedRouter.physicalCondition === "SERVICEABLE"
-                    ? "سليم (صالح للاستخدام)"
-                    : selectedRouter.physicalCondition === "DAMAGED"
-                    ? "تالف"
-                    : "قيد الصيانة"}
-                </span>
-              </div>
-            </div>
-
-            {/* Details Cards */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-xl border p-4">
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <MapPin className="h-4 w-4" />
-                  الموقع الفيزيائي
-                </p>
-                <p className="mt-2 font-semibold">
-                  {selectedRouter.warehouseName || selectedRouter.externalLocation || "غير محدد"}
-                </p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <UserRound className="h-4 w-4" />
-                  جهة العهدة الحالية
-                </p>
-                <p className="mt-2 font-semibold">
-                  {selectedRouter.currentHolderType === "WAREHOUSE"
-                    ? `عهدة المخزن (${selectedRouter.warehouseName ?? "المخزن"})`
-                    : selectedRouter.currentHolderType === "TECHNICIAN"
-                    ? (selectedRouter.currentHolderName ?? `فني (${selectedRouter.currentHolderId?.slice(0, 8)})`)
-                    : selectedRouter.currentHolderType === "CUSTOMER"
-                    ? "مركب لدى عميل"
-                    : "بدون عهدة مسجلة"}
-                </p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">الموديل والكتالوج</p>
-                <p className="mt-2 font-semibold">{selectedRouter.productName}</p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-sm text-muted-foreground">تاريخ تسجيل الجهاز</p>
-                <p className="mt-2 font-semibold">{formatDate(selectedRouter.createdAt)}</p>
-              </div>
-
-              {selectedRouter.notes && (
-                <div className="md:col-span-2 rounded-xl border p-4">
-                  <p className="text-sm text-muted-foreground">ملاحظات مسجلة</p>
-                  <p className="mt-2 text-sm leading-relaxed">{selectedRouter.notes}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            {isAuthorizedToManage && (
-              <div className="flex flex-wrap items-center gap-3 border-t pt-5">
-                {/* 1. Assign to Technician: Available only if AVAILABLE, SERVICEABLE, and in warehouse */}
-                {selectedRouter.status === "AVAILABLE" &&
-                  selectedRouter.physicalCondition === "SERVICEABLE" &&
-                  selectedRouter.warehouseId && (
-                    <button
-                      type="button"
-                      onClick={() => openAssign(selectedRouter.id)}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700"
-                    >
-                      <UserRoundPlus className="h-4 w-4" />
-                      صرف وتخصيص للفني
-                    </button>
-                  )}
-
-                {/* 2. Lifecycle Transition: Enabled if not in terminal state */}
-                {selectedRouter.status !== "LOST" &&
-                  selectedRouter.status !== "DECOMMISSIONED" && (
-                    <button
-                      type="button"
-                      onClick={() => setIsTransitionOpen(true)}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-600 px-4 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-950/40"
-                    >
-                      <ArrowRightLeft className="h-4 w-4" />
-                      تغيير حالة الدورة
-                    </button>
-                  )}
-
-                {/* 3. Physical Condition / Location: Enabled if not in terminal state */}
-                {selectedRouter.status !== "LOST" &&
-                  selectedRouter.status !== "DECOMMISSIONED" && (
-                    <button
-                      type="button"
-                      onClick={() => setIsConditionOpen(true)}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted"
-                    >
-                      <Wrench className="h-4 w-4" />
-                      تحديث الحالة والموقع
-                    </button>
-                  )}
-              </div>
-            )}
-          </section>
-
-          {/* Triple Audit Histories */}
-          {isAuthorizedToManage && (
-            <section className="space-y-4">
-              <div>
-                <h3 className="text-base font-bold text-foreground">
-                  السجلات الرقابية والتدقيق التاريخي للجهاز (Triple Audit Ledger)
-                </h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  تتبع حركة العهدة، تقارير الفحص والحالة الفيزيائية، وانتقالات دورة الحياة.
-                </p>
-              </div>
-
-              <RouterTripleAudit routerId={selectedRouter.id} />
-            </section>
-          )}
+          <RouterDetail
+            router={selectedRouter}
+            canManage={isAuthorizedToManage}
+            onBack={backToList}
+            onAssign={() => openAssign(selectedRouter.id)}
+            onTransition={() => setIsTransitionOpen(true)}
+            onUpdateCondition={() => setIsConditionOpen(true)}
+          />
 
           {/* Transition Dialog */}
           <RouterTransitionDialog

@@ -16,9 +16,18 @@ import {
   useRouterConditionHistory,
   useRouterStatusHistory,
 } from "@/core/query/use-routers";
+import type {
+  RouterAssignmentItem,
+  RouterConditionHistoryItem,
+  RouterStatusHistoryItem,
+} from "./types";
 
-interface RouterTripleAuditProps {
-  routerId: string;
+export interface RouterTripleAuditProps {
+  routerId?: string;
+  assignments?: RouterAssignmentItem[];
+  conditionHistory?: RouterConditionHistoryItem[];
+  statusHistory?: RouterStatusHistoryItem[];
+  isLoading?: boolean;
 }
 
 type TabType = "assignments" | "condition" | "status";
@@ -55,24 +64,29 @@ function formatDate(isoString?: string | null): string {
   }).format(date);
 }
 
-export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
+export function RouterTripleAudit({
+  routerId,
+  assignments: propAssignments,
+  conditionHistory: propConditionHistory,
+  statusHistory: propStatusHistory,
+  isLoading: propLoading,
+}: RouterTripleAuditProps) {
   const [activeTab, setActiveTab] = useState<TabType>("assignments");
 
-  // Live queries for all three audit ledgers
-  const {
-    assignments,
-    isLoading: isAssignmentsLoading,
-  } = useRouterAssignments(routerId);
+  // Hook queries (called unconditionally as per React rules)
+  const queryAssignments = useRouterAssignments(routerId);
+  const queryCondition = useRouterConditionHistory(routerId);
+  const queryStatus = useRouterStatusHistory(routerId);
 
-  const {
-    conditionHistory,
-    isLoading: isConditionLoading,
-  } = useRouterConditionHistory(routerId);
+  // Resolve whether to use direct props or hook query data
+  const assignments = propAssignments ?? queryAssignments.assignments;
+  const isAssignmentsLoading = propLoading ?? (propAssignments ? false : queryAssignments.isLoading);
 
-  const {
-    statusHistory,
-    isLoading: isStatusLoading,
-  } = useRouterStatusHistory(routerId);
+  const conditionHistory = propConditionHistory ?? queryCondition.conditionHistory;
+  const isConditionLoading = propLoading ?? (propConditionHistory ? false : queryCondition.isLoading);
+
+  const statusHistory = propStatusHistory ?? queryStatus.statusHistory;
+  const isStatusLoading = propLoading ?? (propStatusHistory ? false : queryStatus.isLoading);
 
   return (
     <div className="rounded-2xl border bg-card shadow-sm" dir="rtl">
@@ -155,6 +169,7 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                     <tr>
                       <th className="py-3 px-4">نوع العهدة</th>
                       <th className="py-3 px-4">المستلم / المعين إليه</th>
+                      <th className="py-3 px-4">المسؤول عن الصرف</th>
                       <th className="py-3 px-4">تاريخ الاستلام</th>
                       <th className="py-3 px-4">حالة العهدة</th>
                       <th className="py-3 px-4">ملاحظات</th>
@@ -191,6 +206,9 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                               : asgn.warehouseId
                               ? `مخزن (${asgn.warehouseId.slice(0, 8)})`
                               : "—"}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground">
+                            {asgn.assignedBy ? (asgn.assignedBy.length > 8 ? asgn.assignedBy.slice(0, 8) : asgn.assignedBy) : "—"}
                           </td>
                           <td className="py-3 px-4 text-xs">
                             {formatDate(asgn.assignedAt)}
@@ -239,6 +257,7 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                       <th className="py-3 px-4">الحالة الفيزيائية</th>
                       <th className="py-3 px-4">الموقع الفيزيائي</th>
                       <th className="py-3 px-4">سبب التعديل / تقرير الفحص</th>
+                      <th className="py-3 px-4">المسؤول</th>
                       <th className="py-3 px-4">التاريخ والوقت</th>
                     </tr>
                   </thead>
@@ -268,6 +287,9 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                         </td>
                         <td className="py-3 px-4 text-xs font-medium text-foreground">
                           {item.reason}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-muted-foreground">
+                          {item.changedBy ? (item.changedBy.length > 8 ? item.changedBy.slice(0, 8) : item.changedBy) : "—"}
                         </td>
                         <td className="py-3 px-4 text-xs text-muted-foreground">
                           {formatDate(item.createdAt)}
@@ -299,6 +321,7 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                     <tr>
                       <th className="py-3 px-4">الانتقال</th>
                       <th className="py-3 px-4">سبب الانتقال</th>
+                      <th className="py-3 px-4">المسؤول</th>
                       <th className="py-3 px-4">التاريخ والوقت</th>
                     </tr>
                   </thead>
@@ -318,6 +341,9 @@ export function RouterTripleAudit({ routerId }: RouterTripleAuditProps) {
                         </td>
                         <td className="py-3 px-4 text-xs font-medium text-foreground">
                           {item.reason}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-muted-foreground">
+                          {item.changedBy ? (item.changedBy.length > 8 ? item.changedBy.slice(0, 8) : item.changedBy) : "—"}
                         </td>
                         <td className="py-3 px-4 text-xs text-muted-foreground">
                           {formatDate(item.createdAt)}

@@ -31,6 +31,13 @@ export interface RouterRow {
   createdAt: string;
 }
 
+export interface RouterFilter {
+  search?: string;
+  status?: RouterStatus | "all";
+  physicalCondition?: RouterPhysicalCondition | "all";
+  warehouseId?: string | "all";
+}
+
 export interface RouterRegistrationFormValues {
   serialNumber: string;
   productId: string;
@@ -64,6 +71,42 @@ export interface RouterConditionFormValues {
   reason: string;
 }
 
+export interface RouterAssignmentItem {
+  id: string;
+  routerId: string;
+  holderType: RouterHolderType;
+  warehouseId: string | null;
+  technicianId: string | null;
+  customerId?: string | null;
+  assignedBy: string;
+  assignedAt: string;
+  releasedAt: string | null;
+  notes: string | null;
+}
+
+export interface RouterConditionHistoryItem {
+  id: string;
+  routerId: string;
+  fromCondition: RouterPhysicalCondition;
+  toCondition: RouterPhysicalCondition;
+  fromWarehouseId: string | null;
+  toWarehouseId: string | null;
+  externalLocation: string | null;
+  reason: string;
+  changedBy: string;
+  createdAt: string;
+}
+
+export interface RouterStatusHistoryItem {
+  id: string;
+  routerId: string;
+  fromStatus: RouterStatus;
+  toStatus: RouterStatus;
+  reason: string;
+  changedBy: string;
+  createdAt: string;
+}
+
 export interface RouterHistoryRow {
   id: string;
   routerId: string;
@@ -73,4 +116,22 @@ export interface RouterHistoryRow {
   performedBy: string;
   createdAt: string;
   notes: string | null;
+}
+
+export interface RouterCapabilities {
+  canManage: boolean;
+  canExport: boolean;
+  canAssign: boolean;
+  canTransition: boolean;
+  canUpdateCondition: boolean;
+}
+
+export type JobStatusType = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface RouterReportJobState {
+  id?: string;
+  status: JobStatusType;
+  progress?: number;
+  downloadUrl?: string;
+  error?: string;
 }

@@ -10,21 +10,27 @@ import {
   AlertTriangle,
   Wrench,
   Building2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
 import type { RouterRow, RouterStatus, RouterPhysicalCondition } from "./types";
 
-interface RouterTableProps {
+export interface RouterTableProps {
   routers: RouterRow[];
   isLoading?: boolean;
   error?: Error | null;
   onRetry?: () => void;
   onRouterClick?: (router: RouterRow) => void;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  onPageChange?: (page: number) => void;
 }
 
-const STATUS_CONFIG: Record<
+export const STATUS_CONFIG: Record<
   RouterStatus,
   { label: string; className: string }
 > = {
@@ -70,7 +76,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-const CONDITION_CONFIG: Record<
+export const CONDITION_CONFIG: Record<
   RouterPhysicalCondition,
   { label: string; icon: typeof CheckCircle2; className: string }
 > = {
@@ -97,6 +103,10 @@ export function RouterTable({
   error,
   onRetry,
   onRouterClick,
+  page,
+  pageSize,
+  total,
+  onPageChange,
 }: RouterTableProps) {
   const columns = useMemo<ColumnDef<RouterRow>[]>(
     () => [
@@ -241,17 +251,59 @@ export function RouterTable({
     [onRouterClick]
   );
 
+  const totalPages =
+    total !== undefined && pageSize !== undefined && pageSize > 0
+      ? Math.ceil(total / pageSize)
+      : 1;
+
   return (
-    <DataTable
-      columns={columns}
-      data={routers}
-      isLoading={isLoading}
-      error={error}
-      onRetry={onRetry}
-      getRowKey={(router) => router.id}
-      onRowClick={onRouterClick}
-      emptyTitle="لا توجد أجهزة راوتر"
-      emptyDescription="لم يتم تسجيل أي أجهزة راوتر مطابقة لمعايير البحث الحالية."
-    />
+    <div className="space-y-4">
+      <DataTable
+        columns={columns}
+        data={routers}
+        isLoading={isLoading}
+        error={error}
+        onRetry={onRetry}
+        getRowKey={(router) => router.id}
+        onRowClick={onRouterClick}
+        emptyTitle="لا توجد أجهزة راوتر"
+        emptyDescription="لم يتم تسجيل أي أجهزة راوتر مطابقة لمعايير البحث الحالية."
+      />
+
+      {total !== undefined && pageSize !== undefined && total > pageSize && onPageChange && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground">
+          <p>
+            عرض {(page ?? 1) * pageSize - pageSize + 1} -{" "}
+            {Math.min((page ?? 1) * pageSize, total)} من أصل {total.toLocaleString("ar-EG")} جهاز
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={(page ?? 1) <= 1 || isLoading}
+              onClick={() => onPageChange((page ?? 1) - 1)}
+              className="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 font-medium hover:bg-muted disabled:opacity-50"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+              السابق
+            </button>
+
+            <span className="font-semibold text-foreground">
+              صفحة {(page ?? 1).toLocaleString("ar-EG")} من {totalPages.toLocaleString("ar-EG")}
+            </span>
+
+            <button
+              type="button"
+              disabled={(page ?? 1) >= totalPages || isLoading}
+              onClick={() => onPageChange((page ?? 1) + 1)}
+              className="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 font-medium hover:bg-muted disabled:opacity-50"
+            >
+              التالي
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
