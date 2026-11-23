@@ -1,6 +1,8 @@
-# Phase 2 integration handoff — review draft
+# Phase 2 integration handoff — owner-approved decisions
 
-**Issue:** #67 (A2), part of #65. **Source baseline:** master `0ee2118491c1da405375e8a00d576cce5bbb4e6a`. **Status:** review draft, not a reviewed freeze or acceptance report. @Marwan-Mamdouh is accountable; @Hamadaae reviews supply and API integration; @bahaashahin reviews UI contracts. #66 is closed.
+**Issue:** #67 (A2), part of #65. **Audited source baseline:** `1ab7655dbf3571efc704e4707fc4af63820171b2`. **Status:** owner-approved decisions; freeze verification on the eventual merged result is pending. This is not an acceptance report or a claim of named reviewers' approval. @Marwan-Mamdouh is accountable; @Hamadaae reviews supply and API integration; @bahaashahin reviews UI contracts. #66 is closed.
+
+The owner authorized **Terra** as substitute for the supply and UI review lanes for this contract handoff. Terra's supply disposition: the documented roles, wire envelopes, pagination and outstanding manager, historical-name and product work are suitable for handoff subject to the stated future-work and merged-verification gates. Terra's UI disposition: the documented state, selector, photo and download seam semantics are suitable for handoff subject to the sibling types implementation and merged verification. These dispositions are Terra's, not approvals by @Hamadaae or @bahaashahin; their ongoing implementation and ownership responsibilities remain unchanged.
 
 ## Changes since the previous draft
 
@@ -9,7 +11,7 @@
 - Warehouse deactivation now also guards active custody, not just inventory, staff and physically located routers. Do not offer deactivation based only on visible warehouse stock.
 - Auth/session behavior changed: refresh rotation updates the HTTP-only cookie; logout revokes the user's sessions. Containers must use the current shared auth adapter, not copy earlier assumptions that refresh never rotates. This does not authorize a new auth implementation in #67.
 
-[The standalone OpenAPI review snapshot](phase-2-openapi.json) is built from curated source observations by `generate-phase-2-openapi.mjs`. [Supplementary fragments](phase-2-openapi-fragments.md) provide history, multipart and download detail. Neither is live-response conformance evidence.
+[The standalone OpenAPI snapshot](phase-2-openapi.json) is a generated artifact of `generate-phase-2-openapi.mjs`, built from curated observations of the audited source, not generated Nest Swagger. [Supplementary fragments](phase-2-openapi-fragments.md) provide history, multipart and download detail. Neither proves live-response conformance. The eventual merged SHA is not yet known; record it externally with verification after merge, not as a self-referential claim in this artifact.
 
 Attendance clarification: employee-specific history belongs on the employee page and is not restricted by department; the overall ADMIN list retains a current-department filter. The API's contextual `totals` ignore status, but the approved UI cards count all matching records across pages, including the status filter. The container derives the cards from `filteredTotal` and `totals` without changing the API or fetching all pages.
 
@@ -114,9 +116,9 @@ These are wire envelopes, not complete object schemas or evidence of a live HTTP
 
 Example request fragment: `POST /ip-addresses` with JSON `{ "address": "192.0.2.1", "notes": "synthetic example" }`; ADMIN only, 201 wraps the returned `IpAddressDto` in `data`. The wire catalog gives additional examples; review remains required.
 
-## Proposed prop/callback seam — review required
+## Owner-approved prop/callback seam semantics
 
-The following is a proposed UI interface vocabulary, not an approved shared package or an API DTO. Backend containers adapt actual DTOs to UI view models; UI receives supplied state and invokes callbacks, never calls the API itself. Avoid using `apps/web/src/components/routers/types.ts` status aliases as backend statuses.
+The following is illustrative vocabulary, not an API DTO or a claim about peer type names. The sibling types lane implements the seam. Backend containers adapt actual DTOs to UI view models; UI receives supplied state and invokes callbacks, never calls the API itself. Avoid using `apps/web/src/components/routers/types.ts` status aliases as backend statuses.
 
 ```ts
 type LoadState<T> =
@@ -139,7 +141,7 @@ type FormProps<Values> = {
 };
 ```
 
-Concrete proposed interfaces and synthetic fixtures are provided in `apps/web/src/phase2-handoff/`. Empty results are distinct from errors and loading. The attendance and lookup row fixtures reuse current shared wire types; the UI seam still requires owner review.
+Empty results are distinct from errors and loading. Each action has its own pending and error state. Manager choices include active eligible people; an existing inactive or unknown assignment is retained as current-only and preserved on unrelated edits, not offered as a new eligible choice. Supplied names include inactive people where resolvable; otherwise display “Name unavailable”, not a fabricated name. After employee creation, a failed upload can be retried against the saved employee ID without re-creating the employee; upload retry is distinct from image display/load fallback. The container downloads reports by job ID using authorization; the ID is not authorization. These are approved semantics, not claims that the future API work or sibling implementation has shipped.
 
 ## Decision and acceptance gates
 
@@ -150,13 +152,13 @@ Concrete proposed interfaces and synthetic fixtures are provided in `apps/web/sr
 | Photo display: authorized employee list/detail resolve public `photoUrl: string \| null` in the API; container passes it through | @Marwan-Mamdouh with @bahaashahin; #73 | confirm the UI seam; verify provider configuration, replacement/cache behavior and fallback in #73 |
 | Product soft-deactivation: four-state guard approved; inactive selectors/writes and ADMIN reactivation still need work | @Hamadaae with @Marwan-Mamdouh and @bahaashahin; #81 | review owner-approved `POST`/`204` contract, safeguards and UI handoff before freeze; #81 owns delivery |
 | Formal acceptance environment | @Marwan-Mamdouh; #89 | staging waived by the issue owner for this Phase 2 only; use a local/demo browser run with real PostgreSQL, Redis and configured storage through the Next `/api` rewrite, using disposable synthetic fixtures. Still run #89 and record results, exact environment and limitations. Not production/staging validation or approval to deploy |
-| Reviewed per-action contract, examples/OpenAPI, concrete fixture types and cross-owner agreement | @Marwan-Mamdouh, @Hamadaae, @bahaashahin; #67 | marking A2 frozen or starting work that depends on it |
+| Per-action contract, examples/OpenAPI and sibling seam types | @Marwan-Mamdouh accountable; ongoing supply/UI ownership remains with @Hamadaae / @bahaashahin; #67 | Terra's authorized substitute dispositions are recorded above; verify the merged result before marking A2 frozen |
 
 The API grants IP reads to ADMIN and TECHNICIAN. Check action visibility in production composition under #88 rather than treating preview visibility or client permission constants as authoritative.
 
 ## Review and closure evidence
 
-Before closing #67, owners must review the matrix, wire catalog, fixtures and outstanding technical gates, explicitly agree the cross-owner interfaces, and record reviewer decisions, merged PR/commit, environment and actual focused test commands/results. The user-approved directions above do not constitute approval by the other developers or approval of exact technical details. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
+Before closing #67, verify the matrix, wire catalog, sibling types and outstanding technical gates on the merged result, and record the merged PR/commit, environment and actual focused test commands/results. The owner authorized Terra's substitute dispositions above; they do not constitute approval by the other developers or proof that implementation is complete. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
 
 Local review verification on Windows, Node `24.22.2`, pnpm `12.6.0`, master `0ee2118` plus these handoff files: `pnpm install --frozen-lockfile`, `pnpm --filter @alfahd/types build`, `pnpm typecheck`, and `pnpm --filter fahd-dashboard lint` passed. `pnpm --filter @alfahd/api exec vitest run src/attendance/attendance-list.spec.ts src/employees/employees.service.spec.ts src/modules/products/products.service.spec.ts src/common/interceptors/response.interceptor.spec.ts` passed 33 tests. The OpenAPI generator emitted 54 operations across 43 paths. These are local draft checks, not merged-head CI, live-service/browser verification or reviewer approval.
 

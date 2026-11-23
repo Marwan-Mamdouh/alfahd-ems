@@ -1,6 +1,6 @@
 # Phase 2 decisions and open contract gaps
 
-This register distinguishes implemented behavior on `0ee2118` from the previously agreed direction and work still needed. See the [wire catalog](phase-2-wire-contracts.md) for current requests and responses.
+This register distinguishes implemented behavior on audited source `1ab7655dbf3571efc704e4707fc4af63820171b2` from owner-approved direction and work still needed. See the [wire catalog](phase-2-wire-contracts.md) for current requests and responses. Freeze verification on the eventual merged result is pending.
 
 ## Attendance list and employee history (#69)
 
@@ -14,15 +14,15 @@ Master has a single `GET /employees/lookup` endpoint for ADMIN and WAREHOUSE_STA
 
 The issue owner approved this broader **minimal read**, superseding the previous purpose-specific read restriction. New technician selections use ACTIVE eligible technicians; router and inventory mutations revalidate eligibility. Cross-warehouse technician assignments remain allowed; show assigned warehouse when known.
 
-**Approved manager contract:** Use a lookup-backed selector for ACTIVE ADMIN and WAREHOUSE_STAFF. Do not use the technician-only `isEligible` flag for managers. Master only accepts a manager UUID; require server-side eligibility validation for new or changed assignments and retain existing assignments on unrelated edits. Warehouse writes remain ADMIN-only. Coordinate API work in #75 and selector delivery in #84.
+**Approved manager contract:** Use a lookup-backed selector for ACTIVE ADMIN and WAREHOUSE_STAFF. Do not use the technician-only `isEligible` flag for managers. Retain an inactive or unknown existing assignment as current-only, not as an eligible new choice, and preserve it on unrelated edits. Master only accepts a manager UUID; require server-side eligibility validation for new or changed assignments. Warehouse writes remain ADMIN-only. Coordinate API work in #75 and selector delivery in #84.
 
-**Approved history contract:** Authorized history/detail must resolve human-readable names for inactive people, separately from new-choice lookups. Master can fall back to an abbreviated ID without resolving the name. Under the affected inventory and router tickets (#77/#79), supply names through authorized history/detail data and use an honest fallback only when the reference cannot be resolved.
+**Approved history contract:** Authorized history/detail must resolve human-readable names for inactive people, separately from new-choice lookups. Master can fall back to an abbreviated ID without resolving the name. Under the affected inventory and router tickets (#77/#79), supply names through authorized history/detail data and display “Name unavailable” when the reference cannot be resolved.
 
 ## Public employee photo delivery (#73)
 
 The issue owner confirmed public delivery: anyone with the URL may view or share the image. This supersedes private ADMIN/self delivery for the image bytes, **not** existing employee record authorization or ADMIN-only upload. The backend-owned container supplies a resolved `photoUrl: string | null`; the presentational component renders it or falls back to a placeholder, including when image load fails. It must not construct a provider URL from `profilePhotoKey`.
 
-Master employee reads expose `profilePhotoKey`, and upload returns `{profilePhotoKey,url}`. **Approved #73 contract:** Add a nullable `photoUrl` to authorized employee list/detail responses, resolved by the API using the storage adapter. The container passes it to the UI. Do not invent a separate resolver endpoint or construct a provider URL in the UI. #73 owns implementation and provider verification: public asset compatibility, replacement/cache behavior, fallback/retry, and reload after successful upload. Old URLs and cached copies can remain accessible; no provider configuration or existing assets are changed by this handoff. Upload is multipart `file`, JPEG/PNG, maximum 5 MiB as implemented and specified by #73. After employee creation, retry a failed photo upload without creating a second employee.
+Master employee reads expose `profilePhotoKey`, and upload returns `{profilePhotoKey,url}`. **Approved #73 contract:** Add a nullable `photoUrl` to authorized employee list/detail responses, resolved by the API using the storage adapter. The container passes it to the UI. Do not invent a separate resolver endpoint or construct a provider URL in the UI. #73 owns implementation and provider verification: public asset compatibility, replacement/cache behavior, fallback/retry, and reload after successful upload. Old URLs and cached copies can remain accessible; no provider configuration or existing assets are changed by this handoff. Upload is multipart `file`, JPEG/PNG, maximum 5 MiB as implemented and specified by #73. After employee creation, retry only the failed upload against the saved employee ID without creating a second employee; this retry is separate from the image display fallback.
 
 ## Product deactivation (#81)
 
