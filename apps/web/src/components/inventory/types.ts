@@ -1,19 +1,62 @@
 /**
- * Inventory Management — Frontend display models.
+ * Inventory & Product Management — Frontend display models and types.
+ * Aligned with Phase 2 contracts (#67, #76, #77, #81) and backend DTOs.
  */
 
-import type { StockMovementType } from "@alfahd/types";
+import type { Role, StockMovementType } from "@alfahd/types";
 
-export interface InventoryItemRow {
+export type MovementType =
+  | "INBOUND_SUPPLIER"
+  | "OUTBOUND_TECHNICIAN"
+  | "RETURN_TECHNICIAN"
+  | "TRANSFER_WAREHOUSE"
+  | "ADJUSTMENT";
+
+export type LegacyMovementAlias = "INBOUND" | "OUTBOUND" | "RETURN";
+export type InventoryMovementType = MovementType | StockMovementType | LegacyMovementAlias;
+
+export interface ProductRow {
   id: string;
   name: string;
-  sku?: string;
+  sku: string;
   model: string;
   category: string;
   description: string | null;
-  lowStockThreshold?: number;
-  isSerialized?: boolean;
-  isActive?: boolean;
+  lowStockThreshold: number;
+  isSerialized: boolean;
+  isActive: boolean;
+  totalStock?: number;
+  isLowStock?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type InventoryItemRow = ProductRow;
+
+export interface ProductFilter {
+  search?: string;
+  category?: string;
+  isLowStock?: boolean;
+  activeOnly?: boolean;
+  isActive?: boolean | "all";
+}
+
+export interface ProductFormValues {
+  name: string;
+  sku: string;
+  model: string;
+  category: string;
+  description: string;
+  lowStockThreshold: string;
+}
+
+export type InventoryItemFormValues = ProductFormValues;
+
+export interface ProductCapabilities {
+  create: boolean;
+  edit: boolean;
+  deactivate: boolean;
+  reactivate?: boolean;
 }
 
 export interface InventoryStockRow {
@@ -30,8 +73,14 @@ export interface InventoryStockRow {
   isSerialized?: boolean;
 }
 
-export type LegacyMovementAlias = "INBOUND" | "OUTBOUND" | "RETURN";
-export type InventoryMovementType = StockMovementType | LegacyMovementAlias;
+export type InventoryRow = {
+  id: string;
+  productId: string;
+  warehouseId: string;
+  quantity: number;
+  productName: string;
+  warehouseName: string;
+};
 
 export interface InventoryMovementRow {
   id: string;
@@ -47,16 +96,11 @@ export interface InventoryMovementRow {
   supplierName?: string | null;
   technicianId?: string | null;
   technicianName?: string | null;
+  toWarehouseId?: string | null;
+  toWarehouseName?: string | null;
 }
 
-export interface InventoryItemFormValues {
-  name: string;
-  sku: string;
-  model: string;
-  category: string;
-  description: string;
-  lowStockThreshold: string;
-}
+export type StockMovementRow = InventoryMovementRow;
 
 export interface InventoryMovementFormValues {
   itemId: string;
@@ -69,3 +113,25 @@ export interface InventoryMovementFormValues {
   newQuantity?: string;
   notes: string;
 }
+
+export interface MovementFilter {
+  warehouseId?: string;
+  productId?: string;
+  movementType?: InventoryMovementType | "all";
+  technicianId?: string;
+  search?: string;
+}
+
+export interface SelectOption {
+  id: string;
+  name: string;
+}
+
+export interface ItemSelectOption extends SelectOption {
+  isSerialized?: boolean;
+  sku?: string;
+  category?: string;
+  model?: string;
+}
+
+export type CurrentUserRole = Role | null | undefined;

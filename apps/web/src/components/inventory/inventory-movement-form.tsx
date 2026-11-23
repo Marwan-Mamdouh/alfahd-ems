@@ -16,18 +16,12 @@ import {
 } from "lucide-react";
 import { Role } from "@alfahd/types";
 
-import type { InventoryMovementFormValues, InventoryMovementType } from "./types";
-
-export interface ItemSelectOption {
-  id: string;
-  name: string;
-  isSerialized?: boolean;
-}
-
-export interface SelectOption {
-  id: string;
-  name: string;
-}
+import type {
+  InventoryMovementFormValues,
+  InventoryMovementType,
+  ItemSelectOption,
+  SelectOption,
+} from "./types";
 
 interface InventoryMovementFormProps {
   items: ItemSelectOption[];
@@ -38,6 +32,8 @@ interface InventoryMovementFormProps {
   onSubmit: (values: InventoryMovementFormValues) => void | Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
+  serverError?: string | null;
+  fieldErrors?: Partial<Record<keyof InventoryMovementFormValues, string>>;
 }
 
 const ALL_MOVEMENT_TYPES = [
@@ -102,13 +98,15 @@ export function InventoryMovementForm({
   onSubmit,
   onCancel,
   isSubmitting = false,
+  serverError = null,
+  fieldErrors = {},
 }: InventoryMovementFormProps) {
   const [values, setValues] = useState<InventoryMovementFormValues>({
     ...EMPTY_VALUES,
     ...(initialType ? { type: initialType } : {}),
   });
 
-  const [errors, setErrors] = useState<Partial<Record<keyof InventoryMovementFormValues, string>>>(
+  const [clientErrors, setClientErrors] = useState<Partial<Record<keyof InventoryMovementFormValues, string>>>(
     {}
   );
 
@@ -130,7 +128,7 @@ export function InventoryMovementForm({
       [field]: value,
     }));
 
-    setErrors((previous) => ({
+    setClientErrors((previous) => ({
       ...previous,
       [field]: undefined,
     }));
@@ -148,7 +146,7 @@ export function InventoryMovementForm({
       newQuantity: "",
     }));
 
-    setErrors({});
+    setClientErrors({});
     setSubmitError(null);
   }
 
@@ -219,7 +217,7 @@ export function InventoryMovementForm({
       }
     }
 
-    setErrors(nextErrors);
+    setClientErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
 
@@ -258,6 +256,9 @@ export function InventoryMovementForm({
       setLocalSubmitting(false);
     }
   }
+
+  const errors = { ...fieldErrors, ...clientErrors };
+  const activeError = serverError || submitError;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6" dir="rtl">
@@ -366,6 +367,8 @@ export function InventoryMovementForm({
               ? "المخزن المصدر *"
               : values.type === "OUTBOUND_TECHNICIAN" || values.type === "OUTBOUND"
               ? "مخزن الصرف *"
+              : values.type === "RETURN_TECHNICIAN" || values.type === "RETURN"
+              ? "مخزن الاستلام *"
               : "المخزن *"}
           </label>
           <select
@@ -541,7 +544,7 @@ export function InventoryMovementForm({
         </div>
       </div>
 
-      {submitError && (
+      {activeError && (
         <div
           role="alert"
           className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
@@ -550,7 +553,7 @@ export function InventoryMovementForm({
             <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
             فشلت العملية
           </div>
-          <p className="mt-1 text-xs">{submitError}</p>
+          <p className="mt-1 text-xs">{activeError}</p>
         </div>
       )}
 
