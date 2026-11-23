@@ -6,7 +6,7 @@ The owner authorized **Terra** as substitute for the supply and UI review lanes 
 
 ## Changes since the previous draft
 
-- Master now implements attendance list/history, employee lookup and product soft-deactivation. The [wire catalog](phase-2-wire-contracts.md) describes what is implemented; the [decision register](phase-2-proposed-contracts.md) identifies behavior that still needs owner agreement.
+- Master now implements attendance list/history, employee lookup and product soft-deactivation. The [wire catalog](phase-2-wire-contracts.md) describes what is implemented; the [decision register](phase-2-proposed-contracts.md) distinguishes owner-approved directions from implementation work still needed.
 - Router creation now maps its initial warehouse assignment into the returned DTO. For serviceable onboarding, the creation response carries warehouse custody consistently with subsequent reads; duplicate-serial races map to 409. Keep the existing customer-installation exclusion.
 - Warehouse deactivation now also guards active custody, not just inventory, staff and physically located routers. Do not offer deactivation based only on visible warehouse stock.
 - Auth/session behavior changed: refresh rotation updates the HTTP-only cookie; logout revokes the user's sessions. Containers must use the current shared auth adapter, not copy earlier assumptions that refresh never rotates. This does not authorize a new auth implementation in #67.
@@ -94,7 +94,7 @@ Do not derive page count from `items.length`; use `total`. Router status, physic
 
 ## Source-shaped examples (synthetic, illustrative)
 
-The detailed request/response catalog with populated examples is [phase-2-wire-contracts.md](phase-2-wire-contracts.md). The typed UI proposal and fixtures are in `apps/web/src/phase2-handoff/`; they are independently typechecked but remain subject to human review.
+The detailed request/response catalog with populated examples is [phase-2-wire-contracts.md](phase-2-wire-contracts.md). The typed UI proposal and fixtures are in `apps/web/src/phase2-handoff/`; they are independently typechecked. Terra's authorized substitute UI disposition covers the handoff; verify the actual sibling types on the merged result.
 
 These are wire envelopes, not complete object schemas or evidence of a live HTTP test:
 
@@ -114,7 +114,7 @@ These are wire envelopes, not complete object schemas or evidence of a live HTTP
 {"statusCode":403,"message":"Insufficient role","error":{"code":"ERROR","message":"Insufficient role"},"path":"/ip-addresses","timestamp":"2026-11-07T00:00:00.000Z"}
 ```
 
-Example request fragment: `POST /ip-addresses` with JSON `{ "address": "192.0.2.1", "notes": "synthetic example" }`; ADMIN only, 201 wraps the returned `IpAddressDto` in `data`. The wire catalog gives additional examples; review remains required.
+Example request fragment: `POST /ip-addresses` with JSON `{ "address": "192.0.2.1", "notes": "synthetic example" }`; ADMIN only, 201 wraps the returned `IpAddressDto` in `data`. The wire catalog gives additional examples; verify the catalog against the merged result.
 
 ## Owner-approved prop/callback seam semantics
 
@@ -150,7 +150,7 @@ Empty results are distinct from errors and loading. Each action has its own pend
 | Attendance reads: implemented ADMIN list/history; UI cards count all matching records across pages | @Marwan-Mamdouh with @bahaashahin; #69/#71/#83 | review rows, card mapping, filters, timezone and empty/error states against the merged endpoint |
 | Lookup: broader ADMIN/W read approved; manager eligibility and historical name resolution are separate | @Hamadaae with @Marwan-Mamdouh; #75/#84/#77/#79 | review manager selector and server-side validation, warehouse write permissions and authorized history names |
 | Photo display: authorized employee list/detail resolve public `photoUrl: string \| null` in the API; container passes it through | @Marwan-Mamdouh with @bahaashahin; #73 | confirm the UI seam; verify provider configuration, replacement/cache behavior and fallback in #73 |
-| Product soft-deactivation: four-state guard approved; inactive selectors/writes and ADMIN reactivation still need work | @Hamadaae with @Marwan-Mamdouh and @bahaashahin; #81 | review owner-approved `POST`/`204` contract, safeguards and UI handoff before freeze; #81 owns delivery |
+| Product soft-deactivation: four-state guard approved; inactive selectors/writes and ADMIN reactivation still need work | @Hamadaae with @Marwan-Mamdouh and @bahaashahin; #81 | Terra's substitute dispositions cover the handoff; verify the owner-approved `POST`/`204` contract, safeguards and UI handoff on the merged result; #81 owns delivery |
 | Formal acceptance environment | @Marwan-Mamdouh; #89 | staging waived by the issue owner for this Phase 2 only; use a local/demo browser run with real PostgreSQL, Redis and configured storage through the Next `/api` rewrite, using disposable synthetic fixtures. Still run #89 and record results, exact environment and limitations. Not production/staging validation or approval to deploy |
 | Per-action contract, examples/OpenAPI and sibling seam types | @Marwan-Mamdouh accountable; ongoing supply/UI ownership remains with @Hamadaae / @bahaashahin; #67 | Terra's authorized substitute dispositions are recorded above; verify the merged result before marking A2 frozen |
 
@@ -158,7 +158,7 @@ The API grants IP reads to ADMIN and TECHNICIAN. Check action visibility in prod
 
 ## Review and closure evidence
 
-Before closing #67, verify the matrix, wire catalog, sibling types and outstanding technical gates on the merged result, and record the merged PR/commit, environment and actual focused test commands/results. The owner authorized Terra's substitute dispositions above; they do not constitute approval by the other developers or proof that implementation is complete. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
+Before closing #67, verify the matrix, wire catalog, sibling types and outstanding technical gates on the exact merged result, record the merged PR/commit, environment and actual focused test commands/results, and obtain the owner's freeze decision. The owner authorized Terra's substitute dispositions above; no further named human approval is a prerequisite for the handoff. They do not constitute approval by the other developers or proof that implementation is complete. #89 remains separate. Existing A1 evidence in #66 is baseline evidence only. Do not close on an unmerged draft.
 
 Local review verification on Windows, Node `24.22.2`, pnpm `12.6.0`, master `0ee2118` plus these handoff files: `pnpm install --frozen-lockfile`, `pnpm --filter @alfahd/types build`, `pnpm typecheck`, and `pnpm --filter fahd-dashboard lint` passed. `pnpm --filter @alfahd/api exec vitest run src/attendance/attendance-list.spec.ts src/employees/employees.service.spec.ts src/modules/products/products.service.spec.ts src/common/interceptors/response.interceptor.spec.ts` passed 33 tests. The OpenAPI generator emitted 54 operations across 43 paths. These are local draft checks, not merged-head CI, live-service/browser verification or reviewer approval.
 
