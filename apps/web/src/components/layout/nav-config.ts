@@ -102,7 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "الإدارة",
     items: [
-      { label: "الموظفون", href: "/employees", icon: "Users", permission: "employees.manage" },
+      { label: "الموظفون", href: "/employees", icon: "Users", permission: "employees.view" },
       {
         label: "التقارير",
         href: "/reports",

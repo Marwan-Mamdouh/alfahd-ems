@@ -28,7 +28,7 @@ export const PERMISSIONS = {
 
   // --- Warehouses (A2) ---
   "warehouses.view": [Role.ADMIN, Role.WAREHOUSE_STAFF, Role.CS],
-  "warehouses.manage": [Role.ADMIN, Role.WAREHOUSE_STAFF],
+  "warehouses.manage": [Role.ADMIN],
   "warehouses.create": [Role.ADMIN],
   "warehouses.update": [Role.ADMIN],
   "warehouses.deactivate": [Role.ADMIN],

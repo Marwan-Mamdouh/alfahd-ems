@@ -133,5 +133,36 @@ describe("Shared UI States & RoleGuard Components (Issue #88 / F7)", () => {
       expect(html).not.toContain("بيانات الموظفين");
       expect(html).toContain("غير مصرح بالوصول");
     });
+
+    it("renders ForbiddenState when CS or WAREHOUSE_STAFF attempts direct access to IPv4 (ips.view)", () => {
+      currentGuardRole = Role.CS;
+      let html = renderToStaticMarkup(
+        <RoleGuard permission="ips.view">
+          <div>بيانات عناوين IP</div>
+        </RoleGuard>
+      );
+      expect(html).not.toContain("بيانات عناوين IP");
+      expect(html).toContain("غير مصرح بالوصول");
+
+      currentGuardRole = Role.WAREHOUSE_STAFF;
+      html = renderToStaticMarkup(
+        <RoleGuard permission="ips.view">
+          <div>بيانات عناوين IP</div>
+        </RoleGuard>
+      );
+      expect(html).not.toContain("بيانات عناوين IP");
+      expect(html).toContain("غير مصرح بالوصول");
+    });
+
+    it("renders ForbiddenState when WAREHOUSE_STAFF attempts direct access to attendance (attendance.view)", () => {
+      currentGuardRole = Role.WAREHOUSE_STAFF;
+      const html = renderToStaticMarkup(
+        <RoleGuard permission="attendance.view">
+          <div>سجلات الحضور</div>
+        </RoleGuard>
+      );
+      expect(html).not.toContain("سجلات الحضور");
+      expect(html).toContain("غير مصرح بالوصول");
+    });
   });
 });

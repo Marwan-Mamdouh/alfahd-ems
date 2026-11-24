@@ -23,7 +23,7 @@ This contract establishes the authoritative exposure rules for all frontend rout
 | Module | Preview Route | Production Route | Real Integration on Master | Required Permission | Safe to Expose Live | Dependency / Blocker |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Dashboard Overview** | N/A | `/dashboard` | **Yes** (M1 baseline connected) | `dashboard.view` (`ADMIN`) | **YES** | None |
-| **Employee Management** | `/employees-preview` | `/employees` | **Partial** (`/employees` serves M1 `GET /users`; M2 HR UI is in PR #108) | `employees.manage` (`ADMIN`) | **YES** (Retains M1 live route) | PR #108 merge + Backend HR container |
+| **Employee Management** | `/employees-preview` | `/employees` | **Partial** (`/employees` serves M1 `GET /users`; M2 HR UI is in PR #108) | `employees.view` (`ADMIN`) | **YES** (Retains M1 live route) | PR #108 merge + Backend HR container |
 | **Attendance Tracking** | `/attendance-preview` | `/attendance` | **No** (Preview uses demo fixtures; Real UI in PR #113) | `attendance.view` (`ADMIN`) | **NO** (Gated via `comingSoon`) | PR #113 merge + Backend network container |
 | **Warehouse Management** | `/warehouses-preview` | `/warehouses` | **Partial** (Preview wired to API; Production container in PR #114) | `warehouses.view` (`ADMIN`, `WAREHOUSE_STAFF`, `CS`) | **NO** (Gated via `comingSoon`) | PR #114 merge + Production route mounting |
 | **Product & Inventory** | `/inventory-preview` | `/inventory` | **Partial** (Preview wired to API; Production UI in PR #115) | `inventory.view` (`ADMIN`, `WAREHOUSE_STAFF`, `CS`) | **NO** (Gated via `comingSoon`) | PR #115 merge + Production route mounting |

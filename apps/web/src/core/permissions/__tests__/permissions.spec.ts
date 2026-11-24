@@ -77,21 +77,22 @@ describe("Permissions Matrix & Action Capabilities (Issue #88 / Phase 2 F7)", ()
       expect(hasPermission(Role.TECHNICIAN, "warehouses.view")).toBe(false);
     });
 
-    it("allows ADMIN and WAREHOUSE_STAFF to manage warehouses", () => {
+    it("strictly restricts warehouse management, creation, update, and deactivation to ADMIN (Least Privilege)", () => {
       expect(hasPermission(Role.ADMIN, "warehouses.manage")).toBe(true);
-      expect(hasPermission(Role.WAREHOUSE_STAFF, "warehouses.manage")).toBe(true);
-      expect(hasPermission(Role.CS, "warehouses.manage")).toBe(false);
-      expect(hasPermission(Role.TECHNICIAN, "warehouses.manage")).toBe(false);
-    });
-
-    it("strictly restricts warehouse creation, update, and deactivation to ADMIN", () => {
       expect(hasPermission(Role.ADMIN, "warehouses.create")).toBe(true);
       expect(hasPermission(Role.ADMIN, "warehouses.update")).toBe(true);
       expect(hasPermission(Role.ADMIN, "warehouses.deactivate")).toBe(true);
 
+      // WAREHOUSE_STAFF can only read, cannot mutate warehouses
+      expect(hasPermission(Role.WAREHOUSE_STAFF, "warehouses.manage")).toBe(false);
       expect(hasPermission(Role.WAREHOUSE_STAFF, "warehouses.create")).toBe(false);
+      expect(hasPermission(Role.WAREHOUSE_STAFF, "warehouses.update")).toBe(false);
       expect(hasPermission(Role.WAREHOUSE_STAFF, "warehouses.deactivate")).toBe(false);
+
+      // CS and TECHNICIAN cannot mutate warehouses
+      expect(hasPermission(Role.CS, "warehouses.manage")).toBe(false);
       expect(hasPermission(Role.CS, "warehouses.create")).toBe(false);
+      expect(hasPermission(Role.TECHNICIAN, "warehouses.manage")).toBe(false);
     });
 
     it("evaluates WarehouseCapabilities correctly per role", () => {
@@ -99,18 +100,26 @@ describe("Permissions Matrix & Action Capabilities (Issue #88 / Phase 2 F7)", ()
       expect(adminCaps.canView).toBe(true);
       expect(adminCaps.canManage).toBe(true);
       expect(adminCaps.canCreate).toBe(true);
+      expect(adminCaps.canUpdate).toBe(true);
       expect(adminCaps.canDeactivate).toBe(true);
 
       const staffCaps = getWarehouseCapabilities(Role.WAREHOUSE_STAFF);
       expect(staffCaps.canView).toBe(true);
-      expect(staffCaps.canManage).toBe(true);
+      expect(staffCaps.canManage).toBe(false);
       expect(staffCaps.canCreate).toBe(false);
+      expect(staffCaps.canUpdate).toBe(false);
       expect(staffCaps.canDeactivate).toBe(false);
 
       const csCaps = getWarehouseCapabilities(Role.CS);
       expect(csCaps.canView).toBe(true);
       expect(csCaps.canManage).toBe(false);
       expect(csCaps.canCreate).toBe(false);
+      expect(csCaps.canUpdate).toBe(false);
+      expect(csCaps.canDeactivate).toBe(false);
+
+      const techCaps = getWarehouseCapabilities(Role.TECHNICIAN);
+      expect(techCaps.canView).toBe(false);
+      expect(techCaps.canManage).toBe(false);
     });
   });
 
