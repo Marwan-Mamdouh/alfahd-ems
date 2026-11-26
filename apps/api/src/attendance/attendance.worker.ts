@@ -102,10 +102,11 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
     };
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
 
+    const timezone = this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo';
+
     for (const item of rows) {
       const hours = calculateHoursWorked(item.record.checkInAt, item.record.checkOutAt);
       const hoursWorked = hours === null ? '-' : hours.toFixed(2);
-      const timezone = this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo';
 
       worksheet.addRow({
         name: sanitizeSpreadsheetCell(item.user.name),
@@ -358,6 +359,8 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
     };
     detailsHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' };
 
+    const timezone = this.configService?.get<string>('APP_TIMEZONE') ?? 'Africa/Cairo';
+
     for (const item of routerRows) {
       const isUsable =
         item.router.status === 'AVAILABLE' &&
@@ -380,7 +383,7 @@ export class AttendanceReportWorker extends WorkerHost implements OnApplicationS
       }
 
       const assignedAtFormatted = item.custody?.assignedAt
-        ? formatLocalTimestamp(item.custody.assignedAt)
+        ? formatLocalTimestamp(item.custody.assignedAt, timezone)
         : '-';
 
       detailsSheet.addRow({

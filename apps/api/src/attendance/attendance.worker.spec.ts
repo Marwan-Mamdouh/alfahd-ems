@@ -561,5 +561,75 @@ describe('AttendanceReportWorker', () => {
       expect(extLocCell.startsWith("'=")).toBe(true);
       expect(notesCell.startsWith("'+")).toBe(true);
     });
+
+    it('formats router custody assignedAt using APP_TIMEZONE from ConfigService', async () => {
+      const utcWorker = new AttendanceReportWorker(
+        dbMock as unknown as Db,
+        storageServiceMock as unknown as StorageService,
+        { get: vi.fn().mockReturnValue('UTC') } as never,
+      );
+
+      let selectCallCount = 0;
+      dbMock.select.mockImplementation(() => {
+        selectCallCount += 1;
+        if (selectCallCount === 1) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          };
+        }
+        return {
+          from: vi.fn().mockReturnValue({
+            innerJoin: vi.fn().mockReturnValue({
+              leftJoin: vi.fn().mockReturnValue({
+                leftJoin: vi.fn().mockReturnValue({
+                  leftJoin: vi.fn().mockReturnValue({
+                    leftJoin: vi.fn().mockReturnValue({
+                      where: vi.fn().mockReturnValue({
+                        orderBy: vi.fn().mockResolvedValue([
+                          {
+                            router: {
+                              id: 'r-tz',
+                              serialNumber: 'SN-TZ-1',
+                              status: 'ASSIGNED',
+                              physicalCondition: 'SERVICEABLE',
+                              warehouseId: null,
+                              externalLocation: null,
+                              notes: null,
+                            },
+                            product: { name: 'Router', sku: 'SKU-1', model: 'M1' },
+                            physicalWarehouse: null,
+                            custody: {
+                              holderType: 'CUSTOMER',
+                              assignedAt: new Date('2026-07-15T06:00:00Z'),
+                            },
+                            custodyTechnician: null,
+                            custodyWarehouse: null,
+                          },
+                        ]),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      });
+
+      await utcWorker.process({
+        data: { type: 'ROUTER_INVENTORY_REPORT', params: {} },
+      } as unknown as Parameters<typeof worker.process>[0]);
+
+      const uploadedBuffer = storageServiceMock.uploadFile.mock.calls[0][0];
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(uploadedBuffer);
+
+      const detailsSheet = wb.getWorksheet('Router Inventory Details');
+      expect(detailsSheet?.getRow(2).getCell(13).value).toBe('15/07/2026, 06:00:00');
+    });
   });
 });
