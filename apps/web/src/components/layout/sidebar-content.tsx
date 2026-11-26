@@ -26,7 +26,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       {/* التنقل */}
-      <nav className="flex-1 space-y-6 overflow-y-auto p-4">
+      <nav className="flex-1 space-y-6 overflow-y-auto p-4" aria-label="التنقل الرئيسي" dir="rtl">
         {NAV_SECTIONS.map((section) => {
           const visibleItems = section.items.filter((item) => hasPermission(role, item.permission));
           if (visibleItems.length === 0) return null;
@@ -42,12 +42,16 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     isActive
                       ? "bg-primary font-medium text-primary-foreground"
                       : "text-foreground/80 hover:bg-accent hover:text-accent-foreground",
-                    item.comingSoon && "pointer-events-none opacity-60"
+                    item.comingSoon && "opacity-60 cursor-not-allowed select-none"
                   );
                   return (
                     <li key={item.href}>
                       {item.comingSoon ? (
-                        <span className={linkClassName} aria-disabled="true" title="قريباً">
+                        <span
+                          className={linkClassName}
+                          aria-disabled="true"
+                          title={`${item.label} (قريباً - بانتظار دمج مسار الإنتاج)`}
+                        >
                           <NavIcon name={item.icon} className="h-4 w-4 shrink-0" />
                           <span className="flex-1">{item.label}</span>
                           <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
@@ -55,9 +59,14 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                           </span>
                         </span>
                       ) : (
-                        <Link href={item.href} onClick={onNavigate} className={linkClassName}>
+                        <Link
+                          href={item.href}
+                          onClick={onNavigate}
+                          className={linkClassName}
+                          aria-current={isActive ? "page" : undefined}
+                        >
                           <NavIcon name={item.icon} className="h-4 w-4 shrink-0" />
-                          {item.label}
+                          <span className="flex-1">{item.label}</span>
                         </Link>
                       )}
                     </li>

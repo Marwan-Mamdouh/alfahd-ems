@@ -73,21 +73,21 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "المخازن",
         href: "/warehouses",
         icon: "Warehouse",
-        permission: "warehouses.manage",
+        permission: "warehouses.view",
         comingSoon: true,
       },
       {
         label: "المخزون",
         href: "/inventory",
         icon: "Package",
-        permission: "inventory.manage",
+        permission: "inventory.view",
         comingSoon: true,
       },
       {
         label: "الراوترات",
         href: "/routers",
         icon: "Router",
-        permission: "routers.manage",
+        permission: "routers.view",
         comingSoon: true,
       },
       {
@@ -102,7 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "الإدارة",
     items: [
-      { label: "الموظفون", href: "/employees", icon: "Users", permission: "employees.manage" },
+      { label: "الموظفون", href: "/employees", icon: "Users", permission: "employees.view" },
       {
         label: "التقارير",
         href: "/reports",
