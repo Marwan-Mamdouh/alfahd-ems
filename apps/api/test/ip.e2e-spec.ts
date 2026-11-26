@@ -25,7 +25,13 @@ describe('IP Management (e2e)', () => {
 
   const mockReportsQueue = {
     opts: {
-      connection: { host: 'localhost', port: 6379 },
+      connection: {
+        host: 'localhost',
+        port: 6379,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        retryStrategy: () => null,
+      },
     },
     add: vi.fn(async () => ({ id: 'mock-report-job-id' })),
     getJob: vi.fn(async () => null),
@@ -33,7 +39,13 @@ describe('IP Management (e2e)', () => {
 
   const mockIpImportsQueue = {
     opts: {
-      connection: { host: 'localhost', port: 6379 },
+      connection: {
+        host: 'localhost',
+        port: 6379,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        retryStrategy: () => null,
+      },
     },
     add: vi.fn(async (_name, data, opts) => ({
       id: opts?.jobId ?? 'mock-ip-import-job-id',
