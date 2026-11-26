@@ -5,15 +5,7 @@ import { AlertTriangle, CheckCircle2, Package } from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
 import type { ColumnDef } from "@/components/shared/data-table/types";
-
-export interface WarehouseStockRow {
-  id: string;
-  itemName: string;
-  model: string;
-  category: string;
-  quantity: number;
-  lowStockThreshold: number;
-}
+import type { WarehouseStockRow } from "./types";
 
 interface WarehouseStockTableProps {
   items: WarehouseStockRow[];
