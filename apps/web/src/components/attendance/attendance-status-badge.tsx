@@ -1,11 +1,12 @@
 import { AttendanceStatus } from "@alfahd/types";
 import { cn } from "@/lib/utils";
 
-interface AttendanceStatusBadgeProps {
+export interface AttendanceStatusBadgeProps {
   status: AttendanceStatus;
+  className?: string;
 }
 
-const STATUS_CONFIG = {
+export const ATTENDANCE_STATUS_CONFIG = {
   ON_TIME: {
     label: "في الموعد",
     className:
@@ -20,18 +21,27 @@ const STATUS_CONFIG = {
   },
 } as const;
 
-export function AttendanceStatusBadge({ status }: AttendanceStatusBadgeProps) {
-  const config = STATUS_CONFIG[status];
+export function getAttendanceStatusLabel(status: AttendanceStatus): string {
+  return ATTENDANCE_STATUS_CONFIG[status]?.label ?? status;
+}
+
+export function AttendanceStatusBadge({ status, className }: AttendanceStatusBadgeProps) {
+  const config = ATTENDANCE_STATUS_CONFIG[status] ?? {
+    label: status,
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    dotClassName: "bg-slate-500",
+  };
 
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold whitespace-nowrap",
-        config.className
+        config.className,
+        className
       )}
+      data-testid={`attendance-status-${status}`}
     >
       <span className={cn("h-1.5 w-1.5 rounded-full", config.dotClassName)} />
-
       {config.label}
     </span>
   );

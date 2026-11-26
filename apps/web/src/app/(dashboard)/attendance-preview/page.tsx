@@ -1,260 +1,309 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CalendarCheck, Users, Clock3, CheckCircle2, FlaskConical } from "lucide-react";
-
+import React, { useMemo, useState } from "react";
+import { FlaskConical } from "lucide-react";
+import type { AttendanceStatus, Department, JobStatusResponseDto, OverrideAttendanceDto } from "@alfahd/types";
 import { RoleGuard } from "@/core/auth/guards";
-
-import { AttendanceTable, type AttendanceRow } from "@/components/attendance/attendance-table";
-
 import {
-  AttendanceFilters,
+  AttendanceManagement,
   EMPTY_ATTENDANCE_FILTERS,
   type AttendanceFiltersValue,
-} from "@/components/attendance/attendance-filters";
+  type AttendanceRow,
+  type AttendanceLoadState,
+  type Job,
+  type ReportExportFormData,
+} from "@/components/attendance";
 
-import { EmployeeAttendanceHistory } from "@/components/attendance/employee-attendance-history";
-
-// Preview data only. No backend requests.
-const DEMO_ATTENDANCE: AttendanceRow[] = [
+// Authoritative DTO-shaped preview fixture records
+const INITIAL_DEMO_RECORDS: AttendanceRow[] = [
   {
-    id: "attendance-1",
-    employeeId: "emp-1",
+    id: "att-101",
+    userId: "emp-1",
     employeeName: "أحمد محمد",
-    department: "TECHNICAL",
-    date: "2026-10-15",
-    checkIn: "2026-10-15T08:00:00+03:00",
-    checkOut: "2026-10-15T16:00:00+03:00",
-    workingMinutes: 480,
-    status: "ON_TIME",
+    department: "TECHNICAL" as Department,
+    workDate: "2026-10-15",
+    checkInAt: "2026-10-15T08:00:00+03:00",
+    checkOutAt: "2026-10-15T16:00:00+03:00",
+    checkInDistanceM: 25,
+    hoursWorked: 8.0,
+    status: "ON_TIME" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
   },
   {
-    id: "attendance-2",
-    employeeId: "emp-2",
+    id: "att-102",
+    userId: "emp-2",
     employeeName: "محمد علي",
-    department: "WAREHOUSE",
-    date: "2026-10-15",
-    checkIn: "2026-10-15T08:35:00+03:00",
-    checkOut: "2026-10-15T16:15:00+03:00",
-    workingMinutes: 460,
-    status: "LATE",
+    department: "WAREHOUSE" as Department,
+    workDate: "2026-10-15",
+    checkInAt: "2026-10-15T08:35:00+03:00",
+    checkOutAt: "2026-10-15T16:15:00+03:00",
+    checkInDistanceM: 10,
+    hoursWorked: 7.6,
+    status: "LATE" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
   },
   {
-    id: "attendance-4",
-    employeeId: "emp-4",
-    employeeName: "محمود خالد",
-    department: "MANAGEMENT",
-    date: "2026-10-15",
-    checkIn: "2026-10-15T07:55:00+03:00",
-    checkOut: "2026-10-15T16:05:00+03:00",
-    workingMinutes: 490,
-    status: "ON_TIME",
-  },
-  {
-    id: "attendance-5",
-    employeeId: "emp-1",
-    employeeName: "أحمد محمد",
-    department: "TECHNICAL",
-    date: "2026-10-14",
-    checkIn: "2026-10-14T08:20:00+03:00",
-    checkOut: "2026-10-14T16:00:00+03:00",
-    workingMinutes: 460,
-    status: "LATE",
-  },
-  {
-    id: "attendance-6",
-    employeeId: "emp-2",
-    employeeName: "محمد علي",
-    department: "WAREHOUSE",
-    date: "2026-10-14",
-    checkIn: "2026-10-14T08:00:00+03:00",
-    checkOut: "2026-10-14T16:00:00+03:00",
-    workingMinutes: 480,
-    status: "ON_TIME",
-  },
-  {
-    id: "attendance-7",
-    employeeId: "emp-3",
+    id: "att-103",
+    userId: "emp-3",
     employeeName: "سارة أحمد",
-    department: "CUSTOMER_SERVICE",
-    date: "2026-10-14",
-    checkIn: "2026-10-14T08:05:00+03:00",
-    checkOut: "2026-10-14T16:05:00+03:00",
-    workingMinutes: 480,
-    status: "ON_TIME",
+    department: "CUSTOMER_SERVICE" as Department,
+    workDate: "2026-10-15",
+    checkInAt: "2026-10-15T08:05:00+03:00",
+    checkOutAt: "2026-10-15T16:05:00+03:00",
+    checkInDistanceM: 45,
+    hoursWorked: 8.0,
+    status: "ON_TIME" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
+  },
+  {
+    id: "att-104",
+    userId: "emp-4",
+    employeeName: "محمود خالد",
+    department: "MANAGEMENT" as Department,
+    workDate: "2026-10-15",
+    checkInAt: "2026-10-15T07:55:00+03:00",
+    checkOutAt: "2026-10-15T16:05:00+03:00",
+    checkInDistanceM: 12,
+    hoursWorked: 8.1,
+    status: "ON_TIME" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
+  },
+  {
+    id: "att-105",
+    userId: "emp-1",
+    employeeName: "أحمد محمد",
+    department: "TECHNICAL" as Department,
+    workDate: "2026-10-14",
+    checkInAt: "2026-10-14T08:20:00+03:00",
+    checkOutAt: "2026-10-14T16:00:00+03:00",
+    checkInDistanceM: 30,
+    hoursWorked: 7.6,
+    status: "LATE" as AttendanceStatus,
+    overrideReason: "إذن رسمي من مدير القسم",
+    overriddenBy: "Admin",
+    overriddenAt: "2026-10-14T17:00:00Z",
+  },
+  {
+    id: "att-106",
+    userId: "emp-2",
+    employeeName: "محمد علي",
+    department: "WAREHOUSE" as Department,
+    workDate: "2026-10-14",
+    checkInAt: "2026-10-14T08:00:00+03:00",
+    checkOutAt: "2026-10-14T16:00:00+03:00",
+    checkInDistanceM: 15,
+    hoursWorked: 8.0,
+    status: "ON_TIME" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
+  },
+  {
+    id: "att-107",
+    userId: "emp-3",
+    employeeName: "سارة أحمد",
+    department: "CUSTOMER_SERVICE" as Department,
+    workDate: "2026-10-14",
+    checkInAt: "2026-10-14T08:05:00+03:00",
+    checkOutAt: "2026-10-14T16:05:00+03:00",
+    checkInDistanceM: 20,
+    hoursWorked: 8.0,
+    status: "ON_TIME" as AttendanceStatus,
+    overrideReason: null,
+    overriddenBy: null,
+    overriddenAt: null,
   },
 ];
 
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-  className: string;
-}
-
-function StatCard({ title, value, icon, className }: StatCardProps) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border bg-card p-5 shadow-sm">
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-
-        <p className="text-3xl font-bold text-foreground">{value.toLocaleString("ar-EG")}</p>
-      </div>
-
-      <div
-        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${className}`}
-      >
-        {icon}
-      </div>
-    </div>
-  );
-}
-
 function AttendancePreviewContent() {
+  const [records, setRecords] = useState<AttendanceRow[]>(INITIAL_DEMO_RECORDS);
   const [filters, setFilters] = useState<AttendanceFiltersValue>({
     ...EMPTY_ATTENDANCE_FILTERS,
   });
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
 
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+  // Visual simulation states for QA and developer review
+  const [stateMode, setStateMode] = useState<"ready" | "loading" | "error" | "forbidden">("ready");
+  const [job, setJob] = useState<Job>({ kind: "idle" });
 
-  const invalidDateRange = Boolean(
-    filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo
-  );
-
-  const filteredRecords = useMemo(() => {
-    if (invalidDateRange) return [];
-
+  // Filtered matching records
+  const allMatchingRecords = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
+    return records
+      .filter((rec) => {
+        const matchesSearch = !search || rec.employeeName.toLowerCase().includes(search);
+        const matchesDateFrom = !filters.dateFrom || (rec.workDate && rec.workDate >= filters.dateFrom);
+        const matchesDateTo = !filters.dateTo || (rec.workDate && rec.workDate <= filters.dateTo);
+        const matchesDept = !filters.department || rec.department === filters.department;
+        const matchesStatus = !filters.status || rec.status === filters.status;
+        return matchesSearch && matchesDateFrom && matchesDateTo && matchesDept && matchesStatus;
+      })
+      .sort((a, b) => (b.workDate || "").localeCompare(a.workDate || "") || a.employeeName.localeCompare(b.employeeName));
+  }, [records, filters]);
 
-    return DEMO_ATTENDANCE.filter((record) => {
-      const matchesSearch = !search || record.employeeName.toLowerCase().includes(search);
-
-      const matchesDateFrom = !filters.dateFrom || record.date >= filters.dateFrom;
-
-      const matchesDateTo = !filters.dateTo || record.date <= filters.dateTo;
-
-      const matchesDepartment = !filters.department || record.department === filters.department;
-
-      const matchesStatus = !filters.status || record.status === filters.status;
-
-      return (
-        matchesSearch && matchesDateFrom && matchesDateTo && matchesDepartment && matchesStatus
-      );
-    }).sort((a, b) => b.date.localeCompare(a.date) || a.employeeName.localeCompare(b.employeeName));
-  }, [filters, invalidDateRange]);
-
-  const stats = useMemo(
+  // Server totals across ALL matching records (not current page only)
+  const serverTotals = useMemo(
     () => ({
-      total: filteredRecords.length,
-      onTime: filteredRecords.filter((record) => record.status === "ON_TIME").length,
-      late: filteredRecords.filter((record) => record.status === "LATE").length,
+      total: allMatchingRecords.length,
+      onTime: allMatchingRecords.filter((r) => r.status === "ON_TIME").length,
+      late: allMatchingRecords.filter((r) => r.status === "LATE").length,
     }),
-    [filteredRecords]
+    [allMatchingRecords]
   );
 
-  function openEmployeeHistory(record: AttendanceRow) {
-    setSelectedEmployeeId(record.employeeId);
-  }
+  // Paginated slice for current page
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return allMatchingRecords.slice(start, start + pageSize);
+  }, [allMatchingRecords, currentPage, pageSize]);
 
-  function backToAttendanceList() {
-    setSelectedEmployeeId(null);
-  }
+  // Construct AttendanceLoadState
+  const loadState: AttendanceLoadState = useMemo(() => {
+    if (stateMode === "loading") {
+      return { kind: "loading" };
+    }
+    if (stateMode === "error") {
+      return {
+        kind: "error",
+        message: "فشل تحميل سجلات الحضور من الخادم. يرجى التحقق من الاتصال بالشبكة.",
+        retry: () => setStateMode("ready"),
+      };
+    }
+    if (stateMode === "forbidden") {
+      return {
+        kind: "forbidden",
+        message: "ليس لديك صلاحية الوصول إلى سجلات الحضور والانصراف (يتطلب صلاحية ADMIN).",
+      };
+    }
+    return {
+      kind: "ready",
+      value: {
+        page: {
+          items: paginatedItems,
+          total: allMatchingRecords.length,
+          page: currentPage,
+          pageSize,
+        },
+        totals: serverTotals,
+      },
+    };
+  }, [stateMode, paginatedItems, allMatchingRecords.length, currentPage, pageSize, serverTotals]);
+
+  // Handle Admin Override mutation
+  const handleOverride = async (id: string, value: OverrideAttendanceDto) => {
+    // Simulate mutation latency
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    setRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.id !== id) return rec;
+        return {
+          ...rec,
+          status: value.status ?? rec.status,
+          checkInAt: value.checkInAt ?? rec.checkInAt,
+          checkOutAt: value.checkOutAt ?? rec.checkOutAt,
+          overrideReason: value.overrideReason,
+          overriddenBy: "مسؤول النظام (Admin)",
+          overriddenAt: new Date().toISOString(),
+        };
+      })
+    );
+  };
+
+  // Handle Async Report Export Job simulation
+  const handleExportRequest = async (_params: ReportExportFormData) => {
+    setJob({ kind: "submitting" });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const mockJob: JobStatusResponseDto = {
+      id: `job-${Date.now()}`,
+      status: "QUEUED",
+      downloadUrl: null,
+    };
+    setJob({ kind: "polling", job: mockJob });
+
+    // Transition to RUNNING
+    setTimeout(() => {
+      setJob({
+        kind: "polling",
+        job: { ...mockJob, status: "RUNNING" },
+      });
+    }, 1200);
+
+    // Transition to COMPLETE
+    setTimeout(() => {
+      setJob({
+        kind: "complete",
+        job: {
+          ...mockJob,
+          status: "COMPLETED",
+          downloadUrl: "https://example.com/reports/attendance-export.xlsx",
+        },
+      });
+    }, 2500);
+  };
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Preview Warning */}
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        <FlaskConical className="mt-0.5 h-5 w-5 shrink-0" />
+      {/* Compliance & Preview Warning */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        <div className="flex items-start gap-3">
+          <FlaskConical className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-semibold text-sm">وضع المعاينة المعتمد — Phase 2 Frontend Review</p>
+            <p className="mt-0.5 text-xs">
+              مكونات الواجهة تعمل بنماذج البيانات المعتمدة لعقود المرحلة الثانية (المشكلة #83).
+            </p>
+          </div>
+        </div>
 
-        <div>
-          <p className="font-semibold">وضع المعاينة — بيانات تجريبية</p>
-
-          <p className="mt-1 text-sm">
-            جميع سجلات الحضور المعروضة تجريبية. الصفحة غير متصلة بقاعدة البيانات، والإحصائيات تعتمد
-            على بيانات المعاينة.
-          </p>
+        {/* State Toggle Buttons for Review */}
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="font-medium text-muted-foreground ml-1">محاكاة الحالة:</span>
+          {(["ready", "loading", "error", "forbidden"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setStateMode(mode)}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                stateMode === mode
+                  ? "bg-amber-600 text-white"
+                  : "bg-white/80 hover:bg-white text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-teal-700 via-teal-600 to-teal-500 p-6 text-white shadow-sm">
-        <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
-              <CalendarCheck className="h-6 w-6" />
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-bold">إدارة الحضور والانصراف</h1>
-
-              <p className="mt-1 text-sm text-white/80">Attendance Management — Phase 2</p>
-            </div>
-          </div>
-
-          <div className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold">سجل تجريبي</div>
-        </div>
-
-        <div className="absolute -left-12 -top-16 h-44 w-44 rounded-full bg-white/10" />
-        <div className="absolute -bottom-24 left-24 h-48 w-48 rounded-full bg-white/5" />
-      </div>
-
-      {selectedEmployeeId ? (
-        <EmployeeAttendanceHistory
-          employeeId={selectedEmployeeId}
-          records={DEMO_ATTENDANCE}
-          onBack={backToAttendanceList}
-        />
-      ) : (
-        <>
-          {/* Statistics */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              title="إجمالي السجلات"
-              value={stats.total}
-              icon={<Users className="h-6 w-6" />}
-              className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            />
-
-            <StatCard
-              title="في الموعد"
-              value={stats.onTime}
-              icon={<CheckCircle2 className="h-6 w-6" />}
-              className="bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300"
-            />
-
-            <StatCard
-              title="المتأخرون"
-              value={stats.late}
-              icon={<Clock3 className="h-6 w-6" />}
-              className="bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-            />
-
-          </div>
-
-          {/* Records */}
-          <section className="space-y-5 rounded-2xl border bg-card p-5 shadow-sm">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">سجلات الحضور والانصراف</h2>
-
-              <p className="mt-1 text-sm text-muted-foreground">
-                ابحث في السجلات، واضغط على أي صف لعرض السجل التاريخي للموظف.
-              </p>
-            </div>
-
-            <AttendanceFilters value={filters} onChange={setFilters} />
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">
-                عدد السجلات المطابقة: {filteredRecords.length}
-              </p>
-
-              <p className="text-xs text-muted-foreground">اضغط على السجل لعرض تاريخ الموظف</p>
-            </div>
-
-            <AttendanceTable records={filteredRecords} onRecordClick={openEmployeeHistory} />
-          </section>
-        </>
-      )}
+      {/* Unified Presentational Component */}
+      <AttendanceManagement
+        data={loadState}
+        filter={filters}
+        capabilities={{
+          view: true,
+          override: true,
+          export: true,
+        }}
+        onFilterChange={(newFilters) => {
+          setFilters(newFilters);
+          setCurrentPage(1);
+        }}
+        onPageChange={setCurrentPage}
+        job={job}
+        onOverride={handleOverride}
+        onExportRequest={handleExportRequest}
+      />
     </div>
   );
 }
