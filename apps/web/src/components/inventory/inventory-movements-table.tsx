@@ -8,6 +8,8 @@ import {
   ArrowLeftRight,
   SlidersHorizontal,
   Activity,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { DataTable } from "@/components/shared/data-table/data-table";
@@ -15,11 +17,15 @@ import type { ColumnDef } from "@/components/shared/data-table/types";
 
 import type { InventoryMovementRow } from "./types";
 
-interface InventoryMovementsTableProps {
+export interface InventoryMovementsTableProps {
   movements: InventoryMovementRow[];
   isLoading?: boolean;
-  error?: Error | null;
+  error?: Error | string | null;
   onRetry?: () => void;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  onPageChange?: (page: number) => void;
 }
 
 interface MovementStyle {
@@ -107,9 +113,15 @@ function formatDateTime(value: string): string {
 export function InventoryMovementsTable({
   movements,
   isLoading = false,
-  error,
+  error = null,
   onRetry,
+  page,
+  pageSize = 10,
+  total,
+  onPageChange,
 }: InventoryMovementsTableProps) {
+  const resolvedError = typeof error === "string" ? new Error(error) : error;
+
   const columns = useMemo<ColumnDef<InventoryMovementRow>[]>(
     () => [
       {
@@ -173,16 +185,48 @@ export function InventoryMovementsTable({
     []
   );
 
+  const totalPages = total && pageSize ? Math.ceil(total / pageSize) : 1;
+
   return (
-    <DataTable
-      columns={columns}
-      data={movements}
-      isLoading={isLoading}
-      error={error}
-      onRetry={onRetry}
-      getRowKey={(row) => row.id}
-      emptyTitle="لا توجد حركات مخزون"
-      emptyDescription="لم يتم تسجيل أي عمليات وارد أو صادر أو تحويلات بعد."
-    />
+    <div className="space-y-4">
+      <DataTable
+        columns={columns}
+        data={movements}
+        isLoading={isLoading}
+        error={resolvedError}
+        onRetry={onRetry}
+        getRowKey={(row) => row.id}
+        emptyTitle="لا توجد حركات مخزون"
+        emptyDescription="لم يتم تسجيل أي عمليات وارد أو صادر أو تحويلات بعد."
+      />
+
+      {typeof page === "number" && total !== undefined && onPageChange && totalPages > 1 && (
+        <div className="flex items-center justify-between border-t pt-4 text-xs text-muted-foreground">
+          <p>
+            صفحة {page} من {totalPages} (إجمالي {total} حركة)
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => onPageChange(page - 1)}
+              className="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 hover:bg-muted disabled:opacity-50"
+            >
+              <ChevronRight className="h-4 w-4" />
+              السابق
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => onPageChange(page + 1)}
+              className="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 hover:bg-muted disabled:opacity-50"
+            >
+              التالي
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
