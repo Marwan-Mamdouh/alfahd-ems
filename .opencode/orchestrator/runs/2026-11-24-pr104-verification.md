@@ -1,16 +1,19 @@
 # run: pr104-verification   status: done
 request: Verify PR #104 and local repair atop current upstream — acceptance: isolated immutable snapshot, focused review, workspace quality gates and opt-in #41 real-service tests; report before any push.
 base: origin/master @ aeb6ab86e976dca865ba6b8f138ae989ad3765fe
+
 | id | kind | status | complexity | model | session | worktree/branch | validated_commit | rounds | depends_on |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | verify-pr104 | verification | validated finding (direct checks) | complex | opencode/nemotron-3.5-lightning-free | ses_df0c33268ffeS0HHXdZOXN6ID4 | verify-pr104-20261124 / detached | - | 2 | - |
 | review-pr104 | verification | validated finding | complex | opencode/nemotron-3.5-lightning-free | ses_df0c30bc5ffekCvWWu6S9NWlaw | verify-pr104-20261124 / detached, read-only Git objects | - | 0 | - |
+
 ## Decisions
 - 2026-11-24: Owner approved local verification before push. Preserve both branch histories and the paused #67 ledger; use a detached integration snapshot instead of rewriting the existing PR branch. No code changes, publication or merge to master authorized.
 - 2026-11-24: Verification passed on the exact combined snapshot; recommend publishing the existing repair without rewriting history, then checking fresh GitHub CI and seeking code-owner approval. Do not treat the old remote head or this temporary merge as a published delivery.
+
 ## Findings & risks
 - Remote PR head `1bd2f703188db7bf91bc7e4b272b56f9df240d60`; local repair `88d57635f5407b920c3694ee2cf3f35b15cac667`; existing PR worktree clean. Main checkout has only the unrelated #67 ledger edit. Docker server available.
-- Conflict-free detached snapshot `5404f6150597f249b3f00dca84e8b76f0760e00b`, tree `11c0e8fa472043538250659eb74af1ab3672cd4b`, in `C:/Users/marwa/AppData/Local/Temp/opencode/verify-pr104-20261124`; neither source branch moved.
+- Conflict-free detached snapshot `5404f6150597f249b3f00dca84e8b76f0760e00b`, tree `11c0e8fa472043538250659eb74af1ab3672cd4b`, in `<temp>/verify-pr104-20261124`; neither source branch moved.
 - Start ledger commit `9d1b133` passed hooks at local master; those results do not validate the PR snapshot. Nemotron review and verification dispatched in parallel; only verification executes test suites.
 - Nemotron source review reported no scoped blocker and called out re-login, lazy job retention, and strict date shape. The report conflicts with itself on pre-upgrade refresh compatibility and overstates opt-in coverage; independently check source before adopting the finding.
 - Independently confirmed legacy refresh without generation is rejected (the existing mocked e2e expects stale cookie clearing), both report producers carry age options, and the attendance-list response Swagger metadata is unchanged. Existing opt-in #41 suite is three service-level concurrent-operation tests; its Redis case checks final revocability, not the whole HTTP refresh flow under real-service timing. Review accepted with those corrections; no merge verdict until actual snapshot gates return.
@@ -23,3 +26,4 @@ base: origin/master @ aeb6ab86e976dca865ba6b8f138ae989ad3765fe
 - Captured direct workspace gate passed at `5404f61`: frozen install, shared types, typecheck, lint, workspace build (one unchanged retry after genuine existing Next.js 16.4.3 advisory), API unit 429/62 skipped, web 229, API e2e 228/2 skipped, OpenAPI 3, diff and clean worktree. The opt-in suite remains to be confirmed.
 - Direct opt-in shell `sh_20f5d6215001rA8XGFX6frm4j7`: dedicated PostgreSQL and Redis loopback containers started and migrated, then Vitest failed at startup in Vite's Windows filesystem case probe before collecting any tests; both containers removed. No assertion result.
 - Direct retry `sh_20f5f545a001865naFYUW25dx2`: frozen force reinstall restored missing Vite files; sanity run collected and skipped all 3 without opt-in variables. Fresh isolated PostgreSQL 16/Redis 7 mapped only to random loopback ports; tracked migrations applied, actual opt-in run passed 3/3 on `5404f61` with clean tracked tree, both containers and their volumes removed. No runtime HTTP test against those real services was added or claimed.
+- 2026-11-27 (PR #119 review): PR #104 merged as `681b826` on 2026-11-26 from head `3215eeaa7395dbe5a911db9faad8344ae3079cd0`. The `1bd2f703` remote head and `88d5763` local repair recorded above are not in that merged lineage, so this entry documents the 2026-11-24 verification snapshot only and makes no claim about how #104 was finally delivered.
