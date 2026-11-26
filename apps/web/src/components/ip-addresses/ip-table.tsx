@@ -10,9 +10,13 @@ import {
   History,
   FileEdit,
   Loader2,
-  CheckCircle2,
   Clock,
 } from "lucide-react";
+import { IpStatus } from "@alfahd/types";
+import {
+  IpOperationalStatusBadge,
+  IpArchivedStatusBadge,
+} from "./ip-status-badge";
 import type { IpAddressRow } from "./types";
 
 export interface IpTableProps {
@@ -70,7 +74,10 @@ export function IpTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs" data-testid="ip-table">
+    <div
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs"
+      data-testid="ip-table"
+    >
       <div className="overflow-x-auto">
         <table className="w-full text-right text-sm">
           <thead className="border-b border-border bg-muted/40 text-xs font-semibold uppercase text-muted-foreground">
@@ -85,8 +92,8 @@ export function IpTable({
           </thead>
           <tbody className="divide-y divide-border">
             {items.map((row) => {
-              const isReserved = row.status === "RESERVED";
-              const isFree = row.status === "FREE";
+              const isReserved = row.status === IpStatus.RESERVED;
+              const isFree = row.status === IpStatus.FREE;
               const isArchived = row.isArchived;
 
               return (
@@ -108,49 +115,35 @@ export function IpTable({
                     </div>
                   </td>
 
-                  {/* Status Badge */}
+                  {/* Operational Status Badge */}
                   <td className="px-5 py-4 text-center">
-                    {isFree ? (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                        data-testid={`ip-status-free-${row.id}`}
-                      >
-                        <CheckCircle2 className="size-3.5" />
-                        متاح (FREE)
-                      </span>
-                    ) : (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-                        data-testid={`ip-status-reserved-${row.id}`}
-                      >
-                        <Lock className="size-3.5" />
-                        محجوز (RESERVED)
-                      </span>
-                    )}
+                    <IpOperationalStatusBadge
+                      status={row.status}
+                      testId={
+                        isFree
+                          ? `ip-status-free-${row.id}`
+                          : `ip-status-reserved-${row.id}`
+                      }
+                    />
                   </td>
 
                   {/* Archive Badge */}
                   <td className="px-5 py-4 text-center">
-                    {isArchived ? (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        data-testid={`ip-archived-badge-${row.id}`}
-                      >
-                        <Archive className="size-3.5" />
-                        مؤرشف
-                      </span>
-                    ) : (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300"
-                        data-testid={`ip-active-badge-${row.id}`}
-                      >
-                        نشط
-                      </span>
-                    )}
+                    <IpArchivedStatusBadge
+                      isArchived={isArchived}
+                      testId={
+                        isArchived
+                          ? `ip-archived-badge-${row.id}`
+                          : `ip-active-badge-${row.id}`
+                      }
+                    />
                   </td>
 
                   {/* Notes */}
-                  <td className="px-5 py-4 text-muted-foreground max-w-[220px] truncate" title={row.notes ?? ""}>
+                  <td
+                    className="px-5 py-4 text-muted-foreground max-w-[220px] truncate"
+                    title={row.notes ?? ""}
+                  >
                     {row.notes ? row.notes : <span className="text-muted-foreground/50">—</span>}
                   </td>
 

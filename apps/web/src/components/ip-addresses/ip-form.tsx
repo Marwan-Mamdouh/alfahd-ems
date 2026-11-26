@@ -1,12 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  Globe,
-  Loader2,
-  AlertCircle,
-  X,
-} from "lucide-react";
+import { Globe, Loader2, AlertCircle, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { IpFormValues } from "./types";
 
 export interface IpFormProps {
@@ -48,32 +46,76 @@ export function IpForm({
   isSubmitting = false,
   errorMessage = null,
 }: IpFormProps) {
-  const [address, setAddress] = useState(initialValues?.address ?? "");
-  const [notes, setNotes] = useState(initialValues?.notes ?? "");
-  const [clientError, setClientError] = useState<string | null>(null);
+  const contextKey = `${isOpen ? "open" : "closed"}-${mode}-${initialValues?.address ?? "new"}-${initialValues?.notes ?? ""}`;
+  const [formState, setFormState] = useState<{
+    key: string;
+    address: string;
+    notes: string;
+    clientError: string | null;
+  }>({
+    key: contextKey,
+    address: initialValues?.address ?? "",
+    notes: initialValues?.notes ?? "",
+    clientError: null,
+  });
+  const [localSubmitting, setLocalSubmitting] = useState(false);
+
+  const activeState =
+    formState.key === contextKey
+      ? formState
+      : {
+          key: contextKey,
+          address: initialValues?.address ?? "",
+          notes: initialValues?.notes ?? "",
+          clientError: null,
+        };
+
+  const { address, notes, clientError } = activeState;
+  const submitting = isSubmitting || localSubmitting;
 
   if (!isOpen) return null;
 
+  const resetForm = () => {
+    setFormState({
+      key: contextKey,
+      address: initialValues?.address ?? "",
+      notes: initialValues?.notes ?? "",
+      clientError: null,
+    });
+  };
+
+  const handleClose = () => {
+    if (submitting) return;
+    resetForm();
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setClientError(null);
+    if (submitting) return;
+
+    setFormState({ ...activeState, clientError: null });
 
     if (mode === "create") {
       const valError = validateIpv4Host(address);
       if (valError) {
-        setClientError(valError);
+        setFormState({ ...activeState, clientError: valError });
         return;
       }
     }
 
     try {
+      setLocalSubmitting(true);
       await onSubmit({
         address: address.trim(),
         notes: notes.trim() ? notes.trim() : undefined,
       });
+      resetForm();
       onClose();
     } catch {
-      // Retain form inputs upon conflict/error
+      // Retain form inputs upon conflict/server error
+    } finally {
+      setLocalSubmitting(false);
     }
   };
 
@@ -108,20 +150,24 @@ export function IpForm({
             </div>
           </div>
 
-          <button
+          <Button
             type="button"
-            disabled={isSubmitting}
-            onClick={onClose}
+            variant="ghost"
+            size="icon-sm"
+            disabled={submitting}
+            onClick={handleClose}
             aria-label="إغلاق"
-            className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            className="text-muted-foreground hover:text-foreground"
+            data-testid="ip-form-close-btn"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4" data-testid="ip-form">
           {displayError && (
             <div
+              role="alert"
               className="flex items-start gap-2.5 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive"
               data-testid="ip-form-error"
             >
@@ -132,16 +178,19 @@ export function IpForm({
 
           {/* IPv4 Address */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground block">
+            <Label htmlFor="ip-address-input" className="text-xs font-medium text-foreground">
               عنوان IPv4 <span className="text-destructive">*</span>
-            </label>
-            <input
+            </Label>
+            <Input
+              id="ip-address-input"
               type="text"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              disabled={isEditMode || isSubmitting}
+              onChange={(e) =>
+                setFormState({ ...activeState, address: e.target.value })
+              }
+              disabled={isEditMode || submitting}
               placeholder="مثال: 192.168.1.100"
-              className="h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm dir-ltr text-left outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="h-10 font-mono text-sm dir-ltr text-left focus-visible:border-teal-500 focus-visible:ring-teal-500/10"
               data-testid="ip-address-input"
             />
             {!isEditMode && (
@@ -153,13 +202,16 @@ export function IpForm({
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground block">
+            <Label htmlFor="ip-notes-input" className="text-xs font-medium text-foreground">
               الملاحظات (اختياري)
-            </label>
+            </Label>
             <textarea
+              id="ip-notes-input"
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={isSubmitting}
+              onChange={(e) =>
+                setFormState({ ...activeState, notes: e.target.value })
+              }
+              disabled={submitting}
               rows={3}
               placeholder="أي ملاحظات تخص الاستخدام أو الموقع الشبكي..."
               className="w-full rounded-lg border border-input bg-background p-3 text-sm outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 disabled:opacity-60"
@@ -169,22 +221,23 @@ export function IpForm({
 
           {/* Actions */}
           <div className="mt-6 flex items-center justify-end gap-2.5 pt-2 border-t">
-            <button
+            <Button
               type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="h-9 px-4 rounded-lg border border-border bg-background text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+              variant="outline"
+              onClick={handleClose}
+              disabled={submitting}
+              className="h-9 px-4 text-xs"
               data-testid="ip-form-cancel-btn"
             >
               إلغاء
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              disabled={isSubmitting}
-              className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-teal-600 text-xs font-medium text-white hover:bg-teal-700 transition-colors disabled:opacity-50"
+              disabled={submitting}
+              className="h-9 px-5 bg-teal-600 text-xs text-white hover:bg-teal-700"
               data-testid="ip-form-submit-btn"
             >
-              {isSubmitting ? (
+              {submitting ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
                   جاري الحفظ...
@@ -194,7 +247,7 @@ export function IpForm({
               ) : (
                 "تسجيل العنوان"
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

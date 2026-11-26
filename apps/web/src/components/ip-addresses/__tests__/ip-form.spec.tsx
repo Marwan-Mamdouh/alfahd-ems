@@ -3,7 +3,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IpForm, validateIpv4Host } from "../ip-form";
 
-describe("IpForm & IPv4 Validator (Task B6)", () => {
+describe("IpForm & IPv4 Validator (Task B6 / F6)", () => {
   describe("validateIpv4Host", () => {
     it("accepts valid individual IPv4 hosts", () => {
       expect(validateIpv4Host("192.168.1.1")).toBeNull();
@@ -50,7 +50,7 @@ describe("IpForm & IPv4 Validator (Task B6)", () => {
       expect(html).toBe("");
     });
 
-    it("renders create dialog with input fields and validation hint", () => {
+    it("renders create dialog with input fields, UI primitives, and IPv4-only validation hint", () => {
       const html = renderToStaticMarkup(
         <IpForm
           isOpen={true}
@@ -65,6 +65,9 @@ describe("IpForm & IPv4 Validator (Task B6)", () => {
       expect(html).toContain("يقبل عناوين IPv4 الفردية فقط");
       expect(html).toContain("الملاحظات (اختياري)");
       expect(html).toContain("تسجيل العنوان");
+      expect(html).toContain('data-slot="input"');
+      expect(html).toContain('data-slot="label"');
+      expect(html).toContain('data-slot="button"');
     });
 
     it("renders editNotes dialog with disabled address field", () => {
@@ -85,19 +88,37 @@ describe("IpForm & IPv4 Validator (Task B6)", () => {
       expect(html).toContain("حفظ الملاحظات");
     });
 
-    it("renders error message banner when passed", () => {
+    it("renders duplicate/server error banner while retaining input values", () => {
       const html = renderToStaticMarkup(
         <IpForm
           isOpen={true}
           onClose={vi.fn()}
           onSubmit={vi.fn()}
           mode="create"
-          errorMessage="عنوان IP '192.168.1.1' موجود بالفعل (409 Conflict)"
+          initialValues={{ address: "192.168.1.50", notes: "Core switch" }}
+          errorMessage="عنوان IP '192.168.1.50' موجود بالفعل (409 Conflict)"
         />
       );
 
       expect(html).toContain("ip-form-error");
-      expect(html).toContain("عنوان IP &#x27;192.168.1.1&#x27; موجود بالفعل (409 Conflict)");
+      expect(html).toContain("عنوان IP &#x27;192.168.1.50&#x27; موجود بالفعل (409 Conflict)");
+      expect(html).toContain('value="192.168.1.50"');
+      expect(html).toContain("Core switch");
+    });
+
+    it("disables submit and form controls while submitting to prevent double submission", () => {
+      const html = renderToStaticMarkup(
+        <IpForm
+          isOpen={true}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          mode="create"
+          isSubmitting={true}
+        />
+      );
+
+      expect(html).toContain("جاري الحفظ...");
+      expect(html).toContain("disabled");
     });
   });
 });

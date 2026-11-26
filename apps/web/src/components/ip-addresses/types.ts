@@ -27,3 +27,5 @@ export interface IpFormValues {
 export type IpStatusFilter = "all" | "FREE" | "RESERVED";
 export type IpArchivedFilter = "active" | "archived" | "all";
 
+export type IpActionType = "reserve" | "release" | "archive" | "unarchive";
+
