@@ -2,7 +2,91 @@
 
 import React from "react";
 import { CheckCircle2, Lock, Archive, Check } from "lucide-react";
-import type { IpStatus } from "@alfahd/types";
+import { IpStatus } from "@alfahd/types";
+import { StatusBadge, type StatusBadgeConfig } from "@/components/shared/status-badge";
+import { cn } from "@/lib/utils";
+
+export const IP_OPERATIONAL_STATUS_CONFIG: Record<IpStatus, StatusBadgeConfig> = {
+  [IpStatus.FREE]: {
+    label: "متاح (FREE)",
+    className:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+    icon: CheckCircle2,
+  },
+  [IpStatus.RESERVED]: {
+    label: "محجوز (RESERVED)",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+    icon: Lock,
+  },
+};
+
+export const IP_ARCHIVED_STATUS_CONFIG: Record<"archived" | "active", StatusBadgeConfig> = {
+  archived: {
+    label: "مؤرشف",
+    className:
+      "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+    icon: Archive,
+  },
+  active: {
+    label: "نشط",
+    className:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300",
+    icon: Check,
+  },
+};
+
+export interface IpOperationalStatusBadgeProps {
+  status: IpStatus;
+  className?: string;
+  testId?: string;
+}
+
+export function IpOperationalStatusBadge({
+  status,
+  className,
+  testId,
+}: IpOperationalStatusBadgeProps) {
+  const config = IP_OPERATIONAL_STATUS_CONFIG[status];
+  if (!config) return null;
+
+  const defaultTestId =
+    status === IpStatus.FREE ? "status-badge-free" : "status-badge-reserved";
+
+  return (
+    <StatusBadge
+      config={config}
+      className={className}
+      data-testid={testId ?? defaultTestId}
+    />
+  );
+}
+
+export interface IpArchivedStatusBadgeProps {
+  isArchived: boolean;
+  className?: string;
+  testId?: string;
+}
+
+export function IpArchivedStatusBadge({
+  isArchived,
+  className,
+  testId,
+}: IpArchivedStatusBadgeProps) {
+  const config = isArchived
+    ? IP_ARCHIVED_STATUS_CONFIG.archived
+    : IP_ARCHIVED_STATUS_CONFIG.active;
+
+  const defaultTestId = isArchived ? "status-badge-archived" : "status-badge-active";
+
+  return (
+    <StatusBadge
+      config={config}
+      className={className}
+      data-testid={testId ?? defaultTestId}
+    />
+  );
+}
 
 export interface IpStatusBadgeProps {
   status: IpStatus;
@@ -11,48 +95,13 @@ export interface IpStatusBadgeProps {
 }
 
 export function IpStatusBadge({ status, isArchived, className }: IpStatusBadgeProps) {
-  const isFree = status === "FREE";
-  const isReserved = status === "RESERVED";
-
   return (
-    <div className={`inline-flex items-center gap-1.5 ${className ?? ""}`} data-testid="ip-status-badge-container">
-      {/* Operational Status */}
-      {isFree ? (
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-          data-testid="status-badge-free"
-        >
-          <CheckCircle2 className="size-3.5" />
-          متاح (FREE)
-        </span>
-      ) : isReserved ? (
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-          data-testid="status-badge-reserved"
-        >
-          <Lock className="size-3.5" />
-          محجوز (RESERVED)
-        </span>
-      ) : null}
-
-      {/* Archival Status */}
-      {isArchived ? (
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-          data-testid="status-badge-archived"
-        >
-          <Archive className="size-3.5" />
-          مؤرشف
-        </span>
-      ) : (
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300"
-          data-testid="status-badge-active"
-        >
-          <Check className="size-3.5" />
-          نشط
-        </span>
-      )}
+    <div
+      className={cn("inline-flex items-center gap-1.5", className)}
+      data-testid="ip-status-badge-container"
+    >
+      <IpOperationalStatusBadge status={status} />
+      <IpArchivedStatusBadge isArchived={isArchived} />
     </div>
   );
 }

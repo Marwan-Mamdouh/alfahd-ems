@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { RoleGuard } from "@/core/auth/guards";
 import { useAuthStore } from "@/core/auth/auth.store";
-import { Role, type IpQueryDto, type IpStatus } from "@alfahd/types";
+import { Role, IpStatus, type IpQueryDto } from "@alfahd/types";
 import {
   useIpAddresses,
   useCreateIpAddress,
@@ -30,6 +30,8 @@ import {
   useUnarchiveIpAddress,
   extractErrorMessage,
 } from "@/core/query/use-ip-addresses";
+import { useIpImport } from "@/core/query/use-report-jobs";
+import { Button } from "@/components/ui/button";
 import { IpTable } from "@/components/ip-addresses/ip-table";
 import { IpForm } from "@/components/ip-addresses/ip-form";
 import { IpHistoryDialog } from "@/components/ip-addresses/ip-history-dialog";
@@ -42,7 +44,7 @@ import type {
   IpActionType,
 } from "@/components/ip-addresses/types";
 
-function IpPreviewContent() {
+export function IpPreviewContent() {
   const user = useAuthStore((s) => s.user);
   const userRole = user?.role ?? null;
   const canManage = userRole === Role.ADMIN;
@@ -93,9 +95,7 @@ function IpPreviewContent() {
       search: search.trim() || undefined,
       status: statusFilter === "all" ? undefined : (statusFilter as IpStatus),
       isArchived:
-        archivedFilter === "all"
-          ? undefined
-          : archivedFilter === "archived",
+        archivedFilter === "all" ? undefined : archivedFilter === "archived",
     }),
     [page, pageSize, search, statusFilter, archivedFilter]
   );
@@ -129,9 +129,11 @@ function IpPreviewContent() {
   const stats = useMemo(() => {
     const total = liveTotal;
     const freeActive = liveIpAddresses.filter(
-      (ip) => ip.status === "FREE" && !ip.isArchived
+      (ip) => ip.status === IpStatus.FREE && !ip.isArchived
     ).length;
-    const reserved = liveIpAddresses.filter((ip) => ip.status === "RESERVED").length;
+    const reserved = liveIpAddresses.filter(
+      (ip) => ip.status === IpStatus.RESERVED
+    ).length;
     const archived = liveIpAddresses.filter((ip) => ip.isArchived).length;
 
     return { total, freeActive, reserved, archived };
@@ -144,6 +146,43 @@ function IpPreviewContent() {
   const releaseMutation = useReleaseIpAddress();
   const archiveMutation = useArchiveIpAddress();
   const unarchiveMutation = useUnarchiveIpAddress();
+
+  // CSV Import A9 polling hook (container-owned; dialog remains purely prop-driven)
+  const ipImport = useIpImport({
+    onSuccess: () => {
+      refetch();
+      setNotification({
+        type: "success",
+        message: "تم تحديث قائمة العناوين بعد استيراد ملف CSV بنجاح.",
+      });
+    },
+  });
+
+  // Lookup map keyed by IpActionType for action execution
+  const actionHandlers: Record<
+    IpActionType,
+    {
+      mutate: (args: { id: string; reason?: string }) => Promise<unknown>;
+      successMessage: (address: string) => string;
+    }
+  > = {
+    reserve: {
+      mutate: (args) => reserveMutation.mutateAsync(args),
+      successMessage: (address) => `تم حجز العنوان بنجاح: ${address}`,
+    },
+    release: {
+      mutate: (args) => releaseMutation.mutateAsync(args),
+      successMessage: (address) => `تم تحرير العنوان وإعادته للمتاح: ${address}`,
+    },
+    archive: {
+      mutate: (args) => archiveMutation.mutateAsync(args),
+      successMessage: (address) => `تم أرشفة العنوان بنجاح: ${address}`,
+    },
+    unarchive: {
+      mutate: (args) => unarchiveMutation.mutateAsync(args),
+      successMessage: (address) => `تم إلغاء أرشفة العنوان واستعادته للمتاح: ${address}`,
+    },
+  };
 
   // Handlers
   const handleOpenCreate = () => {
@@ -189,44 +228,10 @@ function IpPreviewContent() {
     }
   };
 
-  const handleReserve = (row: IpAddressRow) => {
+  const openActionDialog = (action: IpActionType, row: IpAddressRow) => {
     setActionDialog({
       isOpen: true,
-      action: "reserve",
-      ip: row,
-      errorMessage: null,
-    });
-  };
-
-  const handleRelease = (row: IpAddressRow) => {
-    setActionDialog({
-      isOpen: true,
-      action: "release",
-      ip: row,
-      errorMessage: null,
-    });
-  };
-
-  const handleArchive = (row: IpAddressRow) => {
-    if (row.status === "RESERVED") {
-      setNotification({
-        type: "error",
-        message: "لا يمكن أرشفة عنوان محجوز. يرجى تحريره أولاً.",
-      });
-      return;
-    }
-    setActionDialog({
-      isOpen: true,
-      action: "archive",
-      ip: row,
-      errorMessage: null,
-    });
-  };
-
-  const handleUnarchive = (row: IpAddressRow) => {
-    setActionDialog({
-      isOpen: true,
-      action: "unarchive",
+      action,
       ip: row,
       errorMessage: null,
     });
@@ -235,45 +240,14 @@ function IpPreviewContent() {
   const handleConfirmAction = async (reason?: string) => {
     if (!actionDialog.action || !actionDialog.ip) return;
     const { action, ip } = actionDialog;
+    const executor = actionHandlers[action];
 
     try {
-      if (action === "reserve") {
-        await reserveMutation.mutateAsync({
-          id: ip.id,
-          reason,
-        });
-        setNotification({
-          type: "success",
-          message: `تم حجز العنوان بنجاح: ${ip.address}`,
-        });
-      } else if (action === "release") {
-        await releaseMutation.mutateAsync({
-          id: ip.id,
-          reason,
-        });
-        setNotification({
-          type: "success",
-          message: `تم تحرير العنوان وإعادته للمتاح: ${ip.address}`,
-        });
-      } else if (action === "archive") {
-        await archiveMutation.mutateAsync({
-          id: ip.id,
-          reason,
-        });
-        setNotification({
-          type: "success",
-          message: `تم أرشفة العنوان بنجاح: ${ip.address}`,
-        });
-      } else if (action === "unarchive") {
-        await unarchiveMutation.mutateAsync({
-          id: ip.id,
-          reason,
-        });
-        setNotification({
-          type: "success",
-          message: `تم إلغاء أرشفة العنوان واستعادته للمتاح: ${ip.address}`,
-        });
-      }
+      await executor.mutate({ id: ip.id, reason });
+      setNotification({
+        type: "success",
+        message: executor.successMessage(ip.address),
+      });
       setActionDialog({ isOpen: false, action: null, ip: null, errorMessage: null });
     } catch (err) {
       const msg = extractErrorMessage(err, "فشل تنفيذ العملية على عنوان IP");
@@ -287,11 +261,28 @@ function IpPreviewContent() {
     setIsHistoryOpen(true);
   };
 
+  const isImportSubmitting =
+    ipImport.isImporting ||
+    (Boolean(ipImport.jobId) && !ipImport.status && !ipImport.error && !ipImport.isTimedOut);
+
+  const importResult =
+    ipImport.job?.result ??
+    (ipImport.job
+      ? {
+          inserted: ipImport.job.inserted,
+          skipped: ipImport.job.skipped,
+          errors: ipImport.job.errors,
+        }
+      : null);
+
   return (
     <div className="space-y-6" data-testid="ip-preview-page">
       {/* Top Banner / Role Notice */}
       {isTechnician && (
-        <div className="flex items-center gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-800 dark:text-blue-300">
+        <div
+          className="flex items-center gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-800 dark:text-blue-300"
+          data-testid="ip-technician-notice"
+        >
           <ShieldAlert className="size-4 shrink-0" />
           <span>
             أنت مسجل بصلاحية <strong>فني (TECHNICIAN)</strong>: يمكنك استعراض العناوين وحالاتها التشغيلية بصفة قراءة فقط، وتقتصر صلاحيات الحجز والتحرير والأرشفة وسجل التدقيق على الإدارة.
@@ -317,13 +308,15 @@ function IpPreviewContent() {
             )}
             <span className="font-medium">{notification.message}</span>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setNotification(null)}
-            className="rounded-lg p-1 hover:bg-black/5 dark:hover:bg-white/5"
+            aria-label="إغلاق التنبيه"
           >
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -347,25 +340,26 @@ function IpPreviewContent() {
 
         {canManage && (
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setIsImportOpen(true)}
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-card text-xs font-semibold text-foreground hover:bg-muted transition-colors shadow-xs"
+              className="h-10 px-4 rounded-xl text-xs font-semibold shadow-xs"
               data-testid="ip-import-open-btn"
             >
               <UploadCloud className="size-4 text-teal-600 dark:text-teal-400" />
               <span>استيراد ملف CSV</span>
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
               onClick={handleOpenCreate}
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-teal-600 text-xs font-semibold text-white hover:bg-teal-700 transition-colors shadow-xs"
+              className="h-10 px-4 rounded-xl bg-teal-600 text-xs font-semibold text-white hover:bg-teal-700 shadow-xs"
               data-testid="ip-create-open-btn"
             >
               <Plus className="size-4" />
               <span>تسجيل عنوان IP جديد</span>
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -389,7 +383,9 @@ function IpPreviewContent() {
             <CheckCircle2 className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.freeActive}</p>
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">في الصفحة المعروضة ({rows.length})</p>
+          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
+            في الصفحة المعروضة ({rows.length})
+          </p>
         </div>
 
         {/* Reserved */}
@@ -399,7 +395,9 @@ function IpPreviewContent() {
             <Lock className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.reserved}</p>
-          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">في الصفحة المعروضة ({rows.length})</p>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+            في الصفحة المعروضة ({rows.length})
+          </p>
         </div>
 
         {/* Archived */}
@@ -409,7 +407,9 @@ function IpPreviewContent() {
             <Archive className="size-4" />
           </div>
           <p className="text-2xl font-bold text-foreground mt-2">{stats.archived}</p>
-          <p className="text-[11px] text-muted-foreground mt-1">في الصفحة المعروضة ({rows.length})</p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            في الصفحة المعروضة ({rows.length})
+          </p>
         </div>
       </div>
 
@@ -458,11 +458,11 @@ function IpPreviewContent() {
               <button
                 type="button"
                 onClick={() => {
-                  setStatusFilter("FREE");
+                  setStatusFilter(IpStatus.FREE);
                   setPage(1);
                 }}
                 className={`px-3 py-1 rounded-lg font-medium transition-colors ${
-                  statusFilter === "FREE"
+                  statusFilter === IpStatus.FREE
                     ? "bg-background text-emerald-700 dark:text-emerald-300 shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -473,11 +473,11 @@ function IpPreviewContent() {
               <button
                 type="button"
                 onClick={() => {
-                  setStatusFilter("RESERVED");
+                  setStatusFilter(IpStatus.RESERVED);
                   setPage(1);
                 }}
                 className={`px-3 py-1 rounded-lg font-medium transition-colors ${
-                  statusFilter === "RESERVED"
+                  statusFilter === IpStatus.RESERVED
                     ? "bg-background text-amber-700 dark:text-amber-300 shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -544,10 +544,10 @@ function IpPreviewContent() {
         items={rows}
         isLoading={isLoading}
         canManage={canManage}
-        onReserve={handleReserve}
-        onRelease={handleRelease}
-        onArchive={handleArchive}
-        onUnarchive={handleUnarchive}
+        onReserve={(row) => openActionDialog("reserve", row)}
+        onRelease={(row) => openActionDialog("release", row)}
+        onArchive={(row) => openActionDialog("archive", row)}
+        onUnarchive={(row) => openActionDialog("unarchive", row)}
         onEditNotes={handleOpenEditNotes}
         onViewHistory={handleViewHistory}
       />
@@ -556,51 +556,59 @@ function IpPreviewContent() {
       {totalCount > pageSize && (
         <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
           <span>
-            عرض الصفحة <strong>{page}</strong> من <strong>{liveTotalPages || 1}</strong> (إجمالي {totalCount} عنوان)
+            عرض الصفحة <strong>{page}</strong> من <strong>{liveTotalPages || 1}</strong> (إجمالي{" "}
+            {totalCount} عنوان)
           </span>
 
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="inline-flex items-center gap-1 h-8 px-3 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-40 transition-colors"
+              className="h-8 px-3 text-xs"
             >
               <ChevronRight className="size-3.5" />
               <span>السابق</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={page >= (liveTotalPages || 1)}
               onClick={() => setPage((p) => p + 1)}
-              className="inline-flex items-center gap-1 h-8 px-3 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-40 transition-colors"
+              className="h-8 px-3 text-xs"
             >
               <span>التالي</span>
               <ChevronLeft className="size-3.5" />
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       {/* Create / Edit Notes Dialog */}
-      <IpForm
-        key={`${formMode}-${selectedIp?.id ?? "new"}-${isFormOpen ? "open" : "closed"}`}
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        onSubmit={handleFormSubmit}
-        mode={formMode}
-        initialValues={
-          selectedIp
-            ? { address: selectedIp.address, notes: selectedIp.notes ?? "" }
-            : undefined
-        }
-        isSubmitting={createMutation.isPending || updateMutation.isPending}
-        errorMessage={formError}
-      />
+      {canManage && (
+        <IpForm
+          key={`${formMode}-${selectedIp?.id ?? "new"}-${isFormOpen ? "open" : "closed"}`}
+          isOpen={isFormOpen}
+          onClose={() => setIsFormOpen(false)}
+          onSubmit={handleFormSubmit}
+          mode={formMode}
+          initialValues={
+            selectedIp
+              ? { address: selectedIp.address, notes: selectedIp.notes ?? "" }
+              : undefined
+          }
+          isSubmitting={createMutation.isPending || updateMutation.isPending}
+          errorMessage={formError}
+        />
+      )}
 
       {/* Action Confirmation Dialog (Reserve / Release / Archive / Unarchive) */}
       {canManage && (
         <IpActionDialog
+          key={`${actionDialog.action ?? "none"}-${actionDialog.ip?.id ?? "none"}-${actionDialog.isOpen ? "open" : "closed"}`}
           isOpen={actionDialog.isOpen}
           onClose={() =>
             setActionDialog({ isOpen: false, action: null, ip: null, errorMessage: null })
@@ -636,13 +644,16 @@ function IpPreviewContent() {
         <IpImportDialog
           isOpen={isImportOpen}
           onClose={() => setIsImportOpen(false)}
-          onSuccess={() => {
-            refetch();
-            setNotification({
-              type: "success",
-              message: "تم تحديث قائمة العناوين بعد استيراد ملف CSV بنجاح.",
-            });
+          onImport={async (file) => {
+            await ipImport.importFile(file);
           }}
+          jobStatus={ipImport.status}
+          isSubmitting={isImportSubmitting}
+          isTimedOut={ipImport.isTimedOut}
+          errorMessage={ipImport.error}
+          result={importResult}
+          onRetryPolling={ipImport.retryPolling}
+          onReset={ipImport.reset}
         />
       )}
     </div>
